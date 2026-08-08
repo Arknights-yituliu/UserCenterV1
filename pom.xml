@@ -11,7 +11,7 @@
         <relativePath/>
     </parent>
 
-    <groupId>com.lhs</groupId>
+    <groupId>com.orange</groupId>
     <artifactId>user-center</artifactId>
     <version>1.0.0</version>
     <name>user-center</name>

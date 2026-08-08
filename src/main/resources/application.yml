@@ -37,7 +37,7 @@ spring:
 
 mybatis-plus:
   # 实体类扫描路径
-  type-aliases-package: com.lhs.uc.entity.po
+  type-aliases-package: com.orange.entity.po
   configuration:
     map-underscore-to-camel-case: true
     log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
@@ -69,4 +69,4 @@ springdoc:
 
 logging:
   level:
-    com.lhs.uc: debug
+    com.orange: debug
