@@ -1,4 +1,4 @@
-package com.orange.controller.app;
+package com.orange.controller;
 
 import com.orange.common.util.Result;
 import com.orange.entity.dto.app.UserInfoRequest;

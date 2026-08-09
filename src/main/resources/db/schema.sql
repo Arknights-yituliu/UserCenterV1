@@ -127,6 +127,7 @@ CREATE TABLE `oauth_client` (
     `scopes`            VARCHAR(256) NOT NULL COMMENT '可授权范围（逗号分隔）：user.read',
     `require_pkce`      TINYINT      NOT NULL DEFAULT 1 COMMENT '是否强制 PKCE：1=强制 0=不强制',
     `require_auth_consent` TINYINT    NOT NULL DEFAULT 1 COMMENT '授权时是否展示确认页（自研实现暂未启用确认页）',
+    `website_origin`    VARCHAR(255) DEFAULT NULL COMMENT '网站域名 origin（CORS 白名单来源）',
     `access_token_ttl`  BIGINT       DEFAULT NULL COMMENT 'access_token 有效期（秒），NULL 用全局默认',
     `refresh_token_ttl` BIGINT       DEFAULT NULL COMMENT 'refresh_token 有效期（秒）',
     `status`            TINYINT      NOT NULL DEFAULT 1 COMMENT '状态：1=启用 0=停用',

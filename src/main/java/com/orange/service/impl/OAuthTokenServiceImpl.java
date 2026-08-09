@@ -67,6 +67,10 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     @Value("${uc.oauth.authorization-code-ttl-seconds:300}")
     private long authorizationCodeTtlSeconds;
 
+    /** 登录页地址：未登录时 302 跳转（纯前端接入场景，为空则保持抛 80001） */
+    @Value("${uc.oauth.login-page-url:}")
+    private String loginPageUrl;
+
     /**
      * 构造器注入依赖
      *
@@ -83,28 +87,30 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     }
 
     /**
-     * 解析当前登录用户：从请求头取出本系统会话 token，校验并返回 uid
+     * 解析当前登录用户：从请求头/Cookie 取出本系统会话 token
+     *
+     * <p>静默解析：未登录或会话无效时返回 null（不抛异常），由调用方决定跳登录页或报错。</p>
      *
      * @param request HTTP 请求
-     * @return 用户 uid
+     * @return 用户 uid，未登录返回 null
      */
     private Long resolveLoginUid(HttpServletRequest request) {
         String token = RequestUtil.resolveToken(request);
         if (token == null || token.isBlank()) {
-            throw new BusinessException(ResultCode.NOT_LOGIN, "请在授权前先登录用户中心");
+            return null;
         }
         String sessionJson = stringRedisTemplate.opsForValue().get(RedisKeyUtil.token(token));
         if (sessionJson == null) {
-            throw new BusinessException(ResultCode.NOT_LOGIN);
+            return null;
         }
         try {
             SessionInfo session = objectMapper.readValue(sessionJson, SessionInfo.class);
             if (session == null || session.getUid() == null) {
-                throw new BusinessException(ResultCode.NOT_LOGIN);
+                return null;
             }
             return session.getUid();
         } catch (IOException e) {
-            throw new BusinessException(ResultCode.NOT_LOGIN);
+            return null;
         }
     }
 
@@ -116,8 +122,18 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         if (!"code".equals(responseType)) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "response_type 仅支持 code");
         }
-        // 2. 解析当前登录用户（复用本系统会话 token）
+        // 2. 解析当前登录用户（复用本系统会话 token，未登录走登录页）
         Long uid = resolveLoginUid(request);
+        if (uid == null) {
+            if (!StringUtils.hasText(loginPageUrl)) {
+                throw new BusinessException(ResultCode.NOT_LOGIN, "请在授权前先登录用户中心");
+            }
+            // 未登录：302 到 UC 登录页，登录成功后回跳当前 authorize 地址（此时 Cookie 已携带）
+            String back = request.getRequestURL().toString()
+                    + (request.getQueryString() == null ? "" : "?" + request.getQueryString());
+            return loginPageUrl + (loginPageUrl.contains("?") ? "&" : "?")
+                    + "redirect=" + URLEncoder.encode(back, StandardCharsets.UTF_8);
+        }
         // 3. 签发一次性授权码（内部完成 client/redirect_uri/scope/PKCE 校验）
         String code = createAuthorizationCode(clientId, redirectUri, scope, codeChallenge, codeChallengeMethod, uid);
         // 4. 拼装 302 跳转地址，附带 code 与 state
@@ -139,13 +155,13 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         checkRedirectUri(client, redirectUri);
         // 3. 归一化并校验 scope（空则按客户端全部范围）
         String finalScope = normalizeScope(client, scope);
-        // 4. PKCE 预校验：携带 challenge 时必须为 S256；客户端强制 PKCE 时必须有 challenge
+        // 4. PKCE 预校验：携带 challenge 时必须为 S256；客户端强制 PKCE 或公共客户端（无 secret）必须带 challenge
         if (StringUtils.hasText(codeChallenge)) {
             if (!CODE_CHALLENGE_METHOD_S256.equalsIgnoreCase(codeChallengeMethod)) {
                 throw new BusinessException(ResultCode.OAUTH_PKCE_INVALID, "code_challenge_method 仅支持 S256");
             }
-        } else if (isPkceRequired(client)) {
-            throw new BusinessException(ResultCode.OAUTH_PKCE_INVALID, "该客户端强制要求 PKCE");
+        } else if (isPkceRequired(client) || !StringUtils.hasText(client.getClientSecret())) {
+            throw new BusinessException(ResultCode.OAUTH_PKCE_INVALID, "该客户端必须使用 PKCE");
         }
         // 5. 生成一次性授权码并存储
         String code = OAuthUtil.generateToken();

@@ -2,9 +2,12 @@ package com.orange.controller;
 
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
+import com.orange.common.util.RequestUtil;
 import com.orange.common.util.Result;
 import com.orange.entity.vo.oauth.OAuthTokenVO;
+import com.orange.entity.vo.oauth.UserInfoVO;
 import com.orange.service.OAuthTokenService;
+import com.orange.service.OAuthTokenService.OAuthTokenPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
@@ -105,5 +108,18 @@ public class OAuthController {
             throw new BusinessException(ResultCode.OAUTH_GRANT_INVALID);
         }
         return Result.success(vo);
+    }
+
+    /**
+     * 获取当前授权用户信息：携带 access_token 调用
+     *
+     * @param request HTTP 请求（Authorization: Bearer access_token）
+     * @return 用户信息（uid、clientId、scope）
+     */
+    @Operation(summary = "OAuth 用户信息")
+    @GetMapping("/userinfo")
+    public Result<UserInfoVO> userinfo(HttpServletRequest request) {
+        OAuthTokenPrincipal principal = oauthTokenService.resolveAccessToken(RequestUtil.resolveToken(request));
+        return Result.success(UserInfoVO.of(principal));
     }
 }

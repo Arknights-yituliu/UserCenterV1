@@ -46,6 +46,9 @@ public class OAuthClient {
     /** 授权时是否展示确认页 */
     private Integer requireAuthConsent;
 
+    /** 网站域名 origin（CORS 白名单来源） */
+    private String websiteOrigin;
+
     /** access_token 有效期（秒），NULL 用全局默认 */
     private Long accessTokenTtl;
 
@@ -129,6 +132,14 @@ public class OAuthClient {
 
     public void setRequireAuthConsent(Integer requireAuthConsent) {
         this.requireAuthConsent = requireAuthConsent;
+    }
+
+    public String getWebsiteOrigin() {
+        return websiteOrigin;
+    }
+
+    public void setWebsiteOrigin(String websiteOrigin) {
+        this.websiteOrigin = websiteOrigin;
     }
 
     public Long getAccessTokenTtl() {
