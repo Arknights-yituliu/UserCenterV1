@@ -56,7 +56,7 @@ CREATE TABLE `user_profile` (
     `app_id`      VARCHAR(64)  NOT NULL COMMENT '接入方 AppId',
     `nickname`    VARCHAR(64)  DEFAULT NULL COMMENT '站点内昵称',
     `avatar`      VARCHAR(512) DEFAULT NULL COMMENT '站点内头像',
-    `ext`         JSON         DEFAULT NULL COMMENT '扩展字段（JSON）',
+    `extension`   JSON         DEFAULT NULL COMMENT '扩展字段（JSON）',
     `update_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_uid_app` (`uid`, `app_id`)
@@ -112,6 +112,28 @@ CREATE TABLE `audit_log` (
     KEY `idx_operator` (`operator_type`, `operator_id`),
     KEY `idx_create_time` (`create_time`)
 ) ENGINE = InnoDB COMMENT = '操作审计日志表';
+
+-- -------------------------------------------------------------
+-- 7. OAuth2 客户端注册表（第三方 Web 网站接入登记）
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `oauth_client`;
+CREATE TABLE `oauth_client` (
+    `id`                VARCHAR(128) NOT NULL COMMENT '客户端ID（client_id）',
+    `client_secret`     VARCHAR(256) DEFAULT NULL COMMENT '客户端密钥（BCrypt 哈希，公共客户端为空）',
+    `client_name`       VARCHAR(128) NOT NULL COMMENT '客户端名称（第三方网站名）',
+    `auth_methods`      VARCHAR(256) NOT NULL COMMENT '认证方式：client_secret_basic/client_secret_post',
+    `grant_types`       VARCHAR(256) NOT NULL COMMENT '授权类型：authorization_code,refresh_token',
+    `redirect_uris`     VARCHAR(2048) NOT NULL COMMENT '回调地址白名单（逗号分隔，精确匹配）',
+    `scopes`            VARCHAR(256) NOT NULL COMMENT '可授权范围（逗号分隔）：user.read',
+    `require_pkce`      TINYINT      NOT NULL DEFAULT 1 COMMENT '是否强制 PKCE：1=强制 0=不强制',
+    `require_auth_consent` TINYINT    NOT NULL DEFAULT 1 COMMENT '授权时是否展示确认页（自研实现暂未启用确认页）',
+    `access_token_ttl`  BIGINT       DEFAULT NULL COMMENT 'access_token 有效期（秒），NULL 用全局默认',
+    `refresh_token_ttl` BIGINT       DEFAULT NULL COMMENT 'refresh_token 有效期（秒）',
+    `status`            TINYINT      NOT NULL DEFAULT 1 COMMENT '状态：1=启用 0=停用',
+    `create_time`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_status` (`status`)
+) ENGINE = InnoDB COMMENT = 'OAuth2 客户端注册表';
 
 -- -------------------------------------------------------------
 -- 初始数据：内置一个测试接入方应用（AppSecret 生产环境务必重置）

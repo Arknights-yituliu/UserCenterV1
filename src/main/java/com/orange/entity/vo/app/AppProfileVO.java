@@ -14,7 +14,7 @@ public class AppProfileVO {
     private String avatar;
 
     /** 扩展字段（JSON） */
-    private String ext;
+    private String extension;
 
     public String getNickname() {
         return nickname;
@@ -32,11 +32,11 @@ public class AppProfileVO {
         this.avatar = avatar;
     }
 
-    public String getExt() {
-        return ext;
+    public String getExtension() {
+        return extension;
     }
 
-    public void setExt(String ext) {
-        this.ext = ext;
+    public void setExtension(String extension) {
+        this.extension = extension;
     }
 }

@@ -33,7 +33,7 @@ public class UserProfile {
     private String avatar;
 
     /** 扩展字段（JSON） */
-    private String ext;
+    private String extension;
 
     /** 更新时间 */
     @TableField(fill = FieldFill.INSERT_UPDATE)
@@ -79,12 +79,12 @@ public class UserProfile {
         this.avatar = avatar;
     }
 
-    public String getExt() {
-        return ext;
+    public String getExtension() {
+        return extension;
     }
 
-    public void setExt(String ext) {
-        this.ext = ext;
+    public void setExtension(String extension) {
+        this.extension = extension;
     }
 
     public LocalDateTime getUpdateTime() {

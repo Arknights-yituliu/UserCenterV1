@@ -150,7 +150,7 @@ public class AppServiceImpl implements AppService {
             AppProfileVO profileVO = new AppProfileVO();
             profileVO.setNickname(profile.getNickname());
             profileVO.setAvatar(profile.getAvatar());
-            profileVO.setExt(profile.getExt());
+            profileVO.setExtension(profile.getExtension());
             vo.setProfile(profileVO);
         }
         return vo;

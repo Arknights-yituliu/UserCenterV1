@@ -9,6 +9,7 @@ import com.orange.entity.po.AppInfo;
 import com.orange.mapper.AppInfoMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
@@ -31,14 +32,12 @@ import java.util.concurrent.TimeUnit;
 @Component
 public class AppSignInterceptor implements HandlerInterceptor {
 
-    /** 签名窗口（秒），与 application.yml 中 uc.sign-window-seconds 对应 */
-    private static final long SIGN_WINDOW_SECONDS = 300;
-
-    /** Nonce 存储 TTL（秒），与签名窗口一致 */
-    private static final long NONCE_TTL_SECONDS = 300;
-
     private final AppInfoMapper appMapper;
     private final StringRedisTemplate stringRedisTemplate;
+
+    /** 签名窗口（秒），与 application.yml 中 uc.sign-window-seconds 对应 */
+    @Value("${uc.sign-window-seconds:300}")
+    private long signWindowSeconds;
 
     /**
      * 构造器注入依赖
@@ -89,7 +88,7 @@ public class AppSignInterceptor implements HandlerInterceptor {
         } catch (NumberFormatException e) {
             throw new BusinessException(ResultCode.SIGN_ERROR, "时间戳格式错误");
         }
-        if (Math.abs(now - requestTime) > SIGN_WINDOW_SECONDS * 1000) {
+        if (Math.abs(now - requestTime) > signWindowSeconds * 1000) {
             throw new BusinessException(ResultCode.SIGN_TIMESTAMP_EXPIRED);
         }
 
@@ -102,7 +101,8 @@ public class AppSignInterceptor implements HandlerInterceptor {
 
         // 5. 校验 Nonce 唯一性（防时间窗内重复请求），签名合法后才写入 Redis
         String nonceKey = RedisKeyUtil.nonce(nonce);
-        Boolean firstUse = stringRedisTemplate.opsForValue().setIfAbsent(nonceKey, "1", NONCE_TTL_SECONDS, TimeUnit.SECONDS);
+        // Nonce 存储 TTL 与签名窗口一致，防止窗口内重放
+        Boolean firstUse = stringRedisTemplate.opsForValue().setIfAbsent(nonceKey, "1", signWindowSeconds, TimeUnit.SECONDS);
         if (Boolean.FALSE.equals(firstUse)) {
             throw new BusinessException(ResultCode.REPLAY_ATTACK);
         }

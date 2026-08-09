@@ -24,18 +24,20 @@ public class EmailCodeServiceImpl implements EmailCodeService {
     /** 验证码位数 */
     private static final int CODE_LENGTH = 6;
 
-    /** 同 IP 发送最小间隔（秒） */
-    private static final long IP_INTERVAL_SECONDS = 60;
-
-    /** 同邮箱发送最小间隔（秒）：5 分钟 */
-    private static final long EMAIL_INTERVAL_SECONDS = 300;
-
     private final StringRedisTemplate stringRedisTemplate;
     private final MailService mailService;
 
     /** 验证码有效期（秒） */
     @Value("${uc.code-ttl-seconds:300}")
     private long codeTtlSeconds;
+
+    /** 同 IP 发送最小间隔（秒） */
+    @Value("${uc.code-send-interval-seconds:60}")
+    private long ipIntervalSeconds;
+
+    /** 同邮箱发送最小间隔（秒）：默认 5 分钟 */
+    @Value("${uc.email-send-interval-seconds:300}")
+    private long emailIntervalSeconds;
 
     /**
      * 构造器注入依赖
@@ -57,15 +59,17 @@ public class EmailCodeServiceImpl implements EmailCodeService {
      */
     @Override
     public void sendCode(String email, String usage, String ip) {
-        // 同 IP 限流：60 秒内只能发送一次
+        // 同 IP 限流：间隔内只能发送一次
         if (!RedisRateLimiter.tryAcquire(stringRedisTemplate,
-                RedisKeyUtil.rate("send-code", ip), 1, IP_INTERVAL_SECONDS)) {
-            throw new BusinessException(ResultCode.CODE_SEND_TOO_FREQUENT, "同 IP 发送过于频繁，请 60 秒后再试");
+                RedisKeyUtil.rate("send-code", ip), 1, ipIntervalSeconds)) {
+            throw new BusinessException(ResultCode.CODE_SEND_TOO_FREQUENT,
+                    "同 IP 发送过于频繁，请 " + ipIntervalSeconds + " 秒后再试");
         }
-        // 同邮箱限流：5 分钟内只能发送一次
+        // 同邮箱限流：间隔内只能发送一次
         if (!RedisRateLimiter.tryAcquire(stringRedisTemplate,
-                RedisKeyUtil.rate("send-code-email", email), 1, EMAIL_INTERVAL_SECONDS)) {
-            throw new BusinessException(ResultCode.CODE_SEND_TOO_FREQUENT, "发送过于频繁，请 5 分钟后再试");
+                RedisKeyUtil.rate("send-code-email", email), 1, emailIntervalSeconds)) {
+            throw new BusinessException(ResultCode.CODE_SEND_TOO_FREQUENT,
+                    "发送过于频繁，请 " + (emailIntervalSeconds / 60) + " 分钟后再试");
         }
 
         String code = generateCode();

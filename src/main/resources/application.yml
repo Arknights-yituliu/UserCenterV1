@@ -49,8 +49,8 @@ mybatis-plus:
 
 # ============ 业务自定义配置 ============
 uc:
-  # 会话有效期（秒）：默认 30 天
-  session-ttl-seconds: 2592000
+  # 会话有效期（秒）：默认 180 天
+  session-ttl-seconds: 15552000
   # 验证码有效期（秒）：默认 5 分钟
   code-ttl-seconds: 300
   # 验证码发送限流（秒）：同一邮箱/IP 的最小发送间隔
@@ -60,6 +60,16 @@ uc:
   login-lock-seconds: 900
   # 签名时间窗（秒）：允许的时间戳偏差
   sign-window-seconds: 300
+  # 同邮箱发送最小间隔（秒）：默认 5 分钟
+  email-send-interval-seconds: 300
+  # ===== OAuth2 授权服务器配置（第三方 Web 网站接入） =====
+  oauth:
+    # access_token 有效期（秒）：默认 2 小时
+    access-token-ttl-seconds: 7200
+    # refresh_token 有效期（秒）：默认 30 天
+    refresh-token-ttl-seconds: 2592000
+    # 授权码有效期（秒）：默认 5 分钟
+    authorization-code-ttl-seconds: 300
 
 springdoc:
   api-docs:

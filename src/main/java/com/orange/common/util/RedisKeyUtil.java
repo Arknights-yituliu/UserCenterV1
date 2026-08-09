@@ -27,6 +27,18 @@ public final class RedisKeyUtil {
     /** 通用限流 key 前缀：uc:rate:{biz}:{target} */
     private static final String PREFIX_RATE = "uc:rate:";
 
+    /** OAuth 授权码 key 前缀：uc:oauth:code:{code} */
+    private static final String PREFIX_OAUTH_CODE = "uc:oauth:code:";
+
+    /** OAuth 授权码已使用标记 key 前缀：uc:oauth:code:used:{code} */
+    private static final String PREFIX_OAUTH_CODE_USED = "uc:oauth:code:used:";
+
+    /** OAuth access_token key 前缀：uc:oauth:access:{token} */
+    private static final String PREFIX_OAUTH_ACCESS = "uc:oauth:access:";
+
+    /** OAuth refresh_token key 前缀：uc:oauth:refresh:{token} */
+    private static final String PREFIX_OAUTH_REFRESH = "uc:oauth:refresh:";
+
     private RedisKeyUtil() {
     }
 
@@ -89,5 +101,45 @@ public final class RedisKeyUtil {
      */
     public static String rate(String biz, String target) {
         return PREFIX_RATE + biz + ":" + target;
+    }
+
+    /**
+     * OAuth 一次性授权码 key
+     *
+     * @param code 授权码
+     * @return Redis key
+     */
+    public static String oauthCode(String code) {
+        return PREFIX_OAUTH_CODE + code;
+    }
+
+    /**
+     * OAuth 授权码已使用标记 key（用于并发下防重复兑换）
+     *
+     * @param code 授权码
+     * @return Redis key
+     */
+    public static String oauthCodeUsed(String code) {
+        return PREFIX_OAUTH_CODE_USED + code;
+    }
+
+    /**
+     * OAuth access_token key
+     *
+     * @param token 访问令牌
+     * @return Redis key
+     */
+    public static String oauthAccess(String token) {
+        return PREFIX_OAUTH_ACCESS + token;
+    }
+
+    /**
+     * OAuth refresh_token key
+     *
+     * @param token 刷新令牌
+     * @return Redis key
+     */
+    public static String oauthRefresh(String token) {
+        return PREFIX_OAUTH_REFRESH + token;
     }
 }

@@ -67,7 +67,27 @@ public enum ResultCode {
     /** 应用已停用 */
     APP_DISABLED(80007, "应用已停用"),
     /** 无权限操作 */
-    FORBIDDEN(80008, "无权限操作");
+    FORBIDDEN(80008, "无权限操作"),
+
+    // ---------- 9xxxx OAuth2 授权错误 ----------
+    /** OAuth 客户端不存在或已停用 */
+    OAUTH_CLIENT_INVALID(90001, "OAuth 客户端不存在或已停用"),
+    /** 回调地址不在白名单内 */
+    OAUTH_REDIRECT_URI_INVALID(90002, "回调地址不在白名单内"),
+    /** 请求的权限范围未授权 */
+    OAUTH_SCOPE_INVALID(90003, "请求的权限范围未授权"),
+    /** 授权码无效或已过期 */
+    OAUTH_CODE_INVALID(90004, "授权码无效或已过期"),
+    /** 授权码已被使用 */
+    OAUTH_CODE_REUSED(90005, "授权码已被使用"),
+    /** 授权类型不支持 */
+    OAUTH_GRANT_INVALID(90006, "授权类型不支持"),
+    /** 客户端密钥校验失败 */
+    OAUTH_SECRET_INVALID(90007, "客户端密钥校验失败"),
+    /** PKCE 校验失败 */
+    OAUTH_PKCE_INVALID(90008, "PKCE 校验失败"),
+    /** 访问令牌无效或已过期 */
+    OAUTH_TOKEN_INVALID(90009, "访问令牌无效或已过期");
 
     /** 状态码 */
     private final int code;

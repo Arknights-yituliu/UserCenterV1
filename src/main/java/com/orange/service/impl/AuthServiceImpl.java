@@ -49,8 +49,8 @@ public class AuthServiceImpl implements AuthService {
     private final ObjectMapper objectMapper;
     private final PasswordEncoder passwordEncoder;
 
-    /** 会话有效期（秒） */
-    @Value("${uc.session-ttl-seconds:2592000}")
+    /** 会话有效期（秒）：默认 180 天 */
+    @Value("${uc.session-ttl-seconds:15552000}")
     private long sessionTtlSeconds;
 
     /** 登录失败次数上限 */
