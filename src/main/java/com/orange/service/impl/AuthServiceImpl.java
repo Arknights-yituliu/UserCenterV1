@@ -141,7 +141,10 @@ public class AuthServiceImpl implements AuthService {
         String loginType;
 
         if (TYPE_PASSWORD.equals(request.getAccountType())) {
-            user = passwordLogin(request.getEmail(), request.getPassword());
+            // 账号优先取用户名（兼容旧系统迁移用户），未传时回退邮箱（历史前端只传 email）
+            String username = request.getUsername();
+            String account = (username != null && !username.isBlank()) ? username : request.getEmail();
+            user = passwordLogin(account, request.getPassword());
             loginType = TYPE_PASSWORD;
         } else if (TYPE_EMAIL_CODE.equals(request.getAccountType())) {
             user = emailCodeLogin(request.getEmail(), request.getVerificationCode());
@@ -198,31 +201,33 @@ public class AuthServiceImpl implements AuthService {
     /**
      * 密码登录：校验登录锁定、BCrypt 密码、失败计数
      *
-     * @param email    邮箱
+     * @param account  登录账号（邮箱或用户名）
      * @param password 明文密码
      * @return 用户实体
      */
-    private UserInfo passwordLogin(String email, String password) {
-        if (email == null || email.isBlank() || password == null || password.isBlank()) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "邮箱和密码不能为空");
+    private UserInfo passwordLogin(String account, String password) {
+        if (account == null || account.isBlank() || password == null || password.isBlank()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "用户名/邮箱和密码不能为空");
         }
-        UserInfo user = userMapper.selectOne(Wrappers.<UserInfo>lambdaQuery().eq(UserInfo::getEmail, email));
+        // 账号可能是邮箱或用户名，两者均尝试匹配（兼容旧系统迁移用户）
+        UserInfo user = userMapper.selectOne(Wrappers.<UserInfo>lambdaQuery()
+                .and(w -> w.eq(UserInfo::getEmail, account).or().eq(UserInfo::getUserName, account)));
         if (user == null) {
             // 用户不存在也累计失败次数，防止撞库探测
-            recordLoginFail(email);
+            recordLoginFail(account);
             throw new BusinessException(ResultCode.USER_NOT_FOUND);
         }
 
         // 登录锁定校验
-        if (Boolean.TRUE.equals(stringRedisTemplate.hasKey(RedisKeyUtil.loginLock(email)))) {
+        if (Boolean.TRUE.equals(stringRedisTemplate.hasKey(RedisKeyUtil.loginLock(account)))) {
             throw new BusinessException(ResultCode.LOGIN_LOCKED);
         }
 
         if (!passwordEncoder.matches(password, user.getPassword())) {
-            recordLoginFail(email);
+            recordLoginFail(account);
             throw new BusinessException(ResultCode.PASSWORD_ERROR);
         }
-        clearLoginFail(email);
+        clearLoginFail(account);
         return user;
     }
 

@@ -26,6 +26,9 @@ public class UserInfo {
     /** 邮箱（登录账号） */
     private String email;
 
+    /** 用户名（登录账号，兼容旧系统迁移用户，可空） */
+    private String userName;
+
     /** 密码（BCrypt 哈希） */
     private String password;
 
@@ -70,6 +73,14 @@ public class UserInfo {
 
     public void setEmail(String email) {
         this.email = email;
+    }
+
+    public String getUserName() {
+        return userName;
+    }
+
+    public void setUserName(String userName) {
+        this.userName = userName;
     }
 
     public String getPassword() {
