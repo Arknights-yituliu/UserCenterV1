@@ -56,19 +56,19 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     private final PasswordEncoder passwordEncoder;
 
     /** access_token 默认有效期（秒） */
-    @Value("${uc.oauth.access-token-ttl-seconds:7200}")
+    @Value("${user-center.oauth.access-token-ttl-seconds:7200}")
     private long accessTokenTtlSeconds;
 
     /** refresh_token 默认有效期（秒） */
-    @Value("${uc.oauth.refresh-token-ttl-seconds:2592000}")
+    @Value("${user-center.oauth.refresh-token-ttl-seconds:2592000}")
     private long refreshTokenTtlSeconds;
 
     /** 授权码默认有效期（秒） */
-    @Value("${uc.oauth.authorization-code-ttl-seconds:300}")
+    @Value("${user-center.oauth.authorization-code-ttl-seconds:300}")
     private long authorizationCodeTtlSeconds;
 
     /** 登录页地址：未登录时 302 跳转（纯前端接入场景，为空则保持抛 80001） */
-    @Value("${uc.oauth.login-page-url:}")
+    @Value("${user-center.oauth.login-page-url:}")
     private String loginPageUrl;
 
     /**

@@ -143,3 +143,25 @@ CREATE TABLE `oauth_client` (
 -- -------------------------------------------------------------
 INSERT INTO `app_info` (`app_id`, `app_secret`, `app_name`, `callback_domain`, `status`)
 VALUES ('100001', 'test-secret-please-reset', '测试站点', NULL, 1);
+
+-- -------------------------------------------------------------
+-- 8. SMTP 邮件渠道配置表（多渠道降级发送，配置存数据库可动态调整）
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `smtp_config`;
+CREATE TABLE `smtp_config` (
+    `id`               BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `account_key`      VARCHAR(64)  NOT NULL COMMENT '渠道标识，如 mail-163-1 / mail-163-2',
+    `host`             VARCHAR(128) NOT NULL COMMENT 'SMTP 服务器地址',
+    `port`             INT          NOT NULL COMMENT 'SMTP 端口',
+    `username`         VARCHAR(128) NOT NULL COMMENT '登录账号（发件人邮箱）',
+    `password`         VARCHAR(256) NOT NULL COMMENT 'SMTP 授权码',
+    `protocol`         VARCHAR(16)  NOT NULL DEFAULT 'smtp' COMMENT '协议，默认 smtp',
+    `default_encoding` VARCHAR(16)  NOT NULL DEFAULT 'UTF-8' COMMENT '默认编码',
+    `ssl_enable`       TINYINT      NOT NULL DEFAULT 1 COMMENT '是否启用 SSL：1=启用 0=关闭',
+    `enabled`          TINYINT      NOT NULL DEFAULT 1 COMMENT '是否启用该渠道：1=启用 0=停用',
+    `create_time`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_account_key` (`account_key`)
+) ENGINE = InnoDB COMMENT = 'SMTP 邮件渠道配置表';
+

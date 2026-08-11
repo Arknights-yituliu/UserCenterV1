@@ -39,15 +39,15 @@ public class AuthController {
     private final EmailCodeService emailCodeService;
 
     /** 会话有效期（秒）：Cookie 存活时间与会话一致 */
-    @Value("${uc.session-ttl-seconds:15552000}")
+    @Value("${user-center.session-ttl-seconds:15552000}")
     private long sessionTtlSeconds;
 
     /** Cookie 所属域名（可空：不设置则绑定当前主机） */
-    @Value("${uc.oauth.cookie-domain:}")
+    @Value("${user-center.oauth.cookie-domain:}")
     private String cookieDomain;
 
     /** Cookie 是否仅 HTTPS 传输（本地 HTTP 开发可设为 false） */
-    @Value("${uc.oauth.cookie-secure:true}")
+    @Value("${user-center.oauth.cookie-secure:true}")
     private boolean cookieSecure;
 
     /**

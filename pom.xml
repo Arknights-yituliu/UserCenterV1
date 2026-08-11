@@ -55,6 +55,20 @@
             <artifactId>spring-boot-starter-mail</artifactId>
         </dependency>
 
+        <!-- 腾讯云邮件推送 SES SDK：邮件多渠道主渠道（每日限额外自动降级 SMTP） -->
+        <dependency>
+            <groupId>com.tencentcloudapi</groupId>
+            <artifactId>tencentcloud-sdk-java-ses</artifactId>
+            <version>3.1.1498</version>
+            <!-- 排除 commons-logging，避免与 spring-jcl 冲突 -->
+            <exclusions>
+                <exclusion>
+                    <groupId>commons-logging</groupId>
+                    <artifactId>commons-logging</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
         <!-- MyBatis-Plus（Spring Boot 3） -->
         <dependency>
             <groupId>com.baomidou</groupId>

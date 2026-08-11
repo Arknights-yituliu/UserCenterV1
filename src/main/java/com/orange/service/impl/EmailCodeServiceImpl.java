@@ -28,15 +28,15 @@ public class EmailCodeServiceImpl implements EmailCodeService {
     private final MailService mailService;
 
     /** 验证码有效期（秒） */
-    @Value("${uc.code-ttl-seconds:300}")
+    @Value("${user-center.code-ttl-seconds:300}")
     private long codeTtlSeconds;
 
     /** 同 IP 发送最小间隔（秒） */
-    @Value("${uc.code-send-interval-seconds:60}")
+    @Value("${user-center.code-send-interval-seconds:60}")
     private long ipIntervalSeconds;
 
     /** 同邮箱发送最小间隔（秒）：默认 5 分钟 */
-    @Value("${uc.email-send-interval-seconds:300}")
+    @Value("${user-center.email-send-interval-seconds:300}")
     private long emailIntervalSeconds;
 
     /**

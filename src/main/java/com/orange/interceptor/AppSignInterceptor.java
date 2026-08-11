@@ -36,7 +36,7 @@ public class AppSignInterceptor implements HandlerInterceptor {
     private final StringRedisTemplate stringRedisTemplate;
 
     /** 签名窗口（秒），与 application.yml 中 uc.sign-window-seconds 对应 */
-    @Value("${uc.sign-window-seconds:300}")
+    @Value("${user-center.sign-window-seconds:300}")
     private long signWindowSeconds;
 
     /**

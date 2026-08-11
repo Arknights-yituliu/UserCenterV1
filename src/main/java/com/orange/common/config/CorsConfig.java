@@ -18,7 +18,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class CorsConfig implements WebMvcConfigurer {
 
     /** 允许跨域访问的站点 origin 白名单（逗号分隔，来自 oauth_client 登记的网站域名） */
-    @Value("${uc.oauth.allowed-origins:}")
+    @Value("${user-center.oauth.allowed-origins:}")
     private String allowedOrigins;
 
     /**

@@ -50,15 +50,15 @@ public class AuthServiceImpl implements AuthService {
     private final PasswordEncoder passwordEncoder;
 
     /** 会话有效期（秒）：默认 180 天 */
-    @Value("${uc.session-ttl-seconds:15552000}")
+    @Value("${user-center.session-ttl-seconds:15552000}")
     private long sessionTtlSeconds;
 
     /** 登录失败次数上限 */
-    @Value("${uc.login-fail-limit:5}")
+    @Value("${user-center.login-fail-limit:5}")
     private long loginFailLimit;
 
     /** 登录锁定时间（秒） */
-    @Value("${uc.login-lock-seconds:900}")
+    @Value("${user-center.login-lock-seconds:900}")
     private long loginLockSeconds;
 
     /**
