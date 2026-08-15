@@ -32,6 +32,8 @@ public enum ResultCode {
     USER_BANNED(20004, "账号已被封禁"),
     /** 账号名称为空 */
     USERNAME_EMPTY(20005, "账号不能为空"),
+    /** 账号未绑定邮箱 */
+    EMAIL_NOT_BOUND(20006, "该账号未绑定邮箱"),
 
     // ---------- 3xxxx 验证码/限流 ----------
     /** 验证码错误 */

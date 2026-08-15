@@ -11,6 +11,7 @@ import com.orange.common.util.SignUtil;
 import com.orange.entity.dto.SessionInfo;
 import com.orange.entity.dto.auth.LoginRequest;
 import com.orange.entity.dto.auth.RegisterRequest;
+import com.orange.entity.dto.auth.ResetPasswordRequest;
 import com.orange.entity.po.LoginLog;
 import com.orange.entity.po.UserInfo;
 import com.orange.entity.vo.auth.LoginVO;
@@ -18,6 +19,7 @@ import com.orange.mapper.LoginLogMapper;
 import com.orange.mapper.UserInfoMapper;
 import com.orange.service.AuthService;
 import com.orange.service.EmailCodeService;
+import com.orange.service.UserService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -45,6 +47,7 @@ public class AuthServiceImpl implements AuthService {
     private final UserInfoMapper userMapper;
     private final LoginLogMapper loginLogMapper;
     private final EmailCodeService emailCodeService;
+    private final UserService userService;
     private final StringRedisTemplate stringRedisTemplate;
     private final ObjectMapper objectMapper;
     private final PasswordEncoder passwordEncoder;
@@ -67,15 +70,17 @@ public class AuthServiceImpl implements AuthService {
      * @param userMapper          用户 Mapper
      * @param loginLogMapper      登录日志 Mapper
      * @param emailCodeService    验证码服务
+     * @param userService         用户服务（重设密码后踢全部会话）
      * @param stringRedisTemplate Redis 客户端
      * @param objectMapper        JSON 序列化器
      */
     public AuthServiceImpl(UserInfoMapper userMapper, LoginLogMapper loginLogMapper,
-                           EmailCodeService emailCodeService, StringRedisTemplate stringRedisTemplate,
-                           ObjectMapper objectMapper) {
+                           EmailCodeService emailCodeService, UserService userService,
+                           StringRedisTemplate stringRedisTemplate, ObjectMapper objectMapper) {
         this.userMapper = userMapper;
         this.loginLogMapper = loginLogMapper;
         this.emailCodeService = emailCodeService;
+        this.userService = userService;
         this.stringRedisTemplate = stringRedisTemplate;
         this.objectMapper = objectMapper;
         this.passwordEncoder = new BCryptPasswordEncoder();
@@ -162,6 +167,59 @@ public class AuthServiceImpl implements AuthService {
         String token = createSession(user.getUid(), appId);
         writeLoginLog(user.getUid(), appId, loginType, ip, ua, 1);
         return buildLoginVO(user, token);
+    }
+
+    /**
+     * 发送重设密码验证码到账号绑定的邮箱
+     *
+     * <p>账号为邮箱或用户名；账号不存在抛用户不存在，未绑定邮箱抛 EMAIL_NOT_BOUND</p>
+     *
+     * @param account 账号（邮箱或用户名）
+     * @param ip      请求 IP（限流维度）
+     */
+    @Override
+    public void sendResetCode(String account, String ip) {
+        UserInfo user = findUserByAccount(account);
+        if (user.getEmail() == null || user.getEmail().isBlank()) {
+            throw new BusinessException(ResultCode.EMAIL_NOT_BOUND);
+        }
+        emailCodeService.sendCode(user.getEmail(), "reset", ip);
+    }
+
+    /**
+     * 通过邮箱验证码重置密码（校验验证码后更新密码并踢出全部会话）
+     *
+     * @param request 重设参数（账号 + 验证码 + 新密码）
+     */
+    @Override
+    public void resetPassword(ResetPasswordRequest request) {
+        UserInfo user = findUserByAccount(request.getAccount());
+        if (user.getEmail() == null || user.getEmail().isBlank()) {
+            throw new BusinessException(ResultCode.EMAIL_NOT_BOUND);
+        }
+        emailCodeService.verifyCode(user.getEmail(), request.getCode());
+        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        userMapper.updateById(user);
+        // 安全考虑：重置密码后踢出该用户全部会话，需重新登录
+        userService.kickAllSessions(user.getUid());
+    }
+
+    /**
+     * 按账号（邮箱或用户名）定位用户
+     *
+     * @param account 账号
+     * @return 用户实体
+     */
+    private UserInfo findUserByAccount(String account) {
+        if (account == null || account.isBlank()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "账号不能为空");
+        }
+        UserInfo user = userMapper.selectOne(Wrappers.<UserInfo>lambdaQuery()
+                .and(w -> w.eq(UserInfo::getEmail, account).or().eq(UserInfo::getUserName, account)));
+        if (user == null) {
+            throw new BusinessException(ResultCode.USER_NOT_FOUND);
+        }
+        return user;
     }
 
     /**

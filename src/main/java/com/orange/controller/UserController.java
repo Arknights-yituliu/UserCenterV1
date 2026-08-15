@@ -2,6 +2,8 @@ package com.orange.controller;
 
 import com.orange.common.context.UserContext;
 import com.orange.common.util.Result;
+import com.orange.entity.dto.user.BindEmailRequest;
+import com.orange.entity.dto.user.ChangeEmailRequest;
 import com.orange.entity.dto.user.UpdatePasswordRequest;
 import com.orange.entity.dto.user.UpdateProfileRequest;
 import com.orange.entity.vo.SessionVO;
@@ -74,6 +76,32 @@ public class UserController {
     @PostMapping("/password")
     public Result<Void> updatePassword(@Valid @RequestBody UpdatePasswordRequest request) {
         userService.updatePassword(UserContext.requireUid(), request);
+        return Result.success();
+    }
+
+    /**
+     * 绑定邮箱（面向无邮箱用户，验证新邮箱所有权）
+     *
+     * @param request 绑定参数
+     * @return 统一返回结果
+     */
+    @Operation(summary = "绑定邮箱")
+    @PostMapping("/email/bind")
+    public Result<Void> bindEmail(@Valid @RequestBody BindEmailRequest request) {
+        userService.bindEmail(UserContext.requireUid(), request);
+        return Result.success();
+    }
+
+    /**
+     * 换绑邮箱（需同时验证旧邮箱与新邮箱）
+     *
+     * @param request 换绑参数
+     * @return 统一返回结果
+     */
+    @Operation(summary = "换绑邮箱")
+    @PostMapping("/email/change")
+    public Result<Void> changeEmail(@Valid @RequestBody ChangeEmailRequest request) {
+        userService.changeEmail(UserContext.requireUid(), request);
         return Result.success();
     }
 

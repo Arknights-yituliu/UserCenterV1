@@ -1,5 +1,7 @@
 package com.orange.service;
 
+import com.orange.entity.dto.user.BindEmailRequest;
+import com.orange.entity.dto.user.ChangeEmailRequest;
 import com.orange.entity.dto.user.UpdatePasswordRequest;
 import com.orange.entity.dto.user.UpdateProfileRequest;
 import com.orange.entity.vo.SessionVO;
@@ -8,7 +10,7 @@ import com.orange.entity.vo.UserInfoVO;
 import java.util.List;
 
 /**
- * 用户服务接口：个人资料、修改密码、会话管理
+ * 用户服务接口：个人资料、修改密码、邮箱绑定、会话管理
  *
  * @author UserCenter
  */
@@ -45,6 +47,29 @@ public interface UserService {
      * @return 会话列表
      */
     List<SessionVO> listSessions(Long uid);
+
+    /**
+     * 绑定邮箱（面向无邮箱用户，需验证新邮箱所有权）
+     *
+     * @param uid     用户 uid
+     * @param request 绑定参数（新邮箱 + 验证码）
+     */
+    void bindEmail(Long uid, BindEmailRequest request);
+
+    /**
+     * 换绑邮箱（需同时验证旧邮箱与新邮箱）
+     *
+     * @param uid     用户 uid
+     * @param request 换绑参数（旧邮箱 + 旧验证码 + 新邮箱 + 新验证码）
+     */
+    void changeEmail(Long uid, ChangeEmailRequest request);
+
+    /**
+     * 踢出用户全部会话（修改密码/重设密码后调用）
+     *
+     * @param uid 用户 uid
+     */
+    void kickAllSessions(Long uid);
 
     /**
      * 踢指定设备下线（校验会话归属当前用户）

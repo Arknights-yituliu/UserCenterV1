@@ -4,6 +4,8 @@ import com.orange.common.util.RequestUtil;
 import com.orange.common.util.Result;
 import com.orange.entity.dto.auth.LoginRequest;
 import com.orange.entity.dto.auth.RegisterRequest;
+import com.orange.entity.dto.auth.ResetCodeRequest;
+import com.orange.entity.dto.auth.ResetPasswordRequest;
 import com.orange.entity.dto.auth.SendCodeRequest;
 import com.orange.entity.vo.auth.LoginVO;
 import com.orange.service.AuthService;
@@ -106,6 +108,33 @@ public class AuthController {
                 httpRequest.getHeader("User-Agent"), appId);
         writeSessionCookie(vo.getToken(), response);
         return Result.success(vo);
+    }
+
+    /**
+     * 发送重设密码验证码（发到账号绑定的邮箱，无需登录）
+     *
+     * @param request     发送参数（账号 = 邮箱或用户名）
+     * @param httpRequest HTTP 请求（取 IP）
+     * @return 统一返回结果
+     */
+    @Operation(summary = "发送重设密码验证码")
+    @PostMapping("/reset-code")
+    public Result<Void> resetCode(@Valid @RequestBody ResetCodeRequest request, HttpServletRequest httpRequest) {
+        authService.sendResetCode(request.getAccount(), RequestUtil.getIp(httpRequest));
+        return Result.success();
+    }
+
+    /**
+     * 通过邮箱验证码重设密码（无需登录），成功后踢出全部会话
+     *
+     * @param request 重设参数
+     * @return 统一返回结果
+     */
+    @Operation(summary = "重设密码")
+    @PostMapping("/reset-password")
+    public Result<Void> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        authService.resetPassword(request);
+        return Result.success();
     }
 
     /**
