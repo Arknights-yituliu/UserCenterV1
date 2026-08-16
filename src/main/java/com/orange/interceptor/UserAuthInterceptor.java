@@ -10,6 +10,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.web.cors.CorsUtils;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 import java.io.IOException;
@@ -17,7 +18,7 @@ import java.io.IOException;
 /**
  * 用户认证拦截器
  *
- * <p>校验请求携带的用户 token（Authorization: Bearer {token} 或 X-Token），
+ * <p>校验请求携带的用户 token（Authorization: Bearer {token} 或 UC-Token），
  * 实时查询 Redis 会话，保证"踢下线"立即生效；通过后将 uid 写入 {@link UserContext}</p>
  *
  * @author UserCenter
@@ -52,6 +53,11 @@ public class UserAuthInterceptor implements HandlerInterceptor {
      */
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+        // CORS 预检请求（OPTIONS）直接放行：由 Spring CORS 处理器响应，不参与登录校验
+        if (CorsUtils.isPreFlightRequest(request)) {
+            return true;
+        }
+
         String token = resolveToken(request);
         if (token == null) {
             throw new BusinessException(ResultCode.NOT_LOGIN, "缺少登录凭证");
@@ -88,7 +94,7 @@ public class UserAuthInterceptor implements HandlerInterceptor {
     }
 
     /**
-     * 从请求头解析 token：优先 Authorization: Bearer xxx，其次 X-Token
+     * 从请求头解析 token：优先 Authorization: Bearer xxx，其次 UC-Token
      *
      * @param request 请求
      * @return token，未携带时返回 null
@@ -98,7 +104,7 @@ public class UserAuthInterceptor implements HandlerInterceptor {
         if (authorization != null && authorization.startsWith(BEARER_PREFIX)) {
             return authorization.substring(BEARER_PREFIX.length()).trim();
         }
-        String xToken = request.getHeader("X-Token");
-        return (xToken == null || xToken.isBlank()) ? null : xToken.trim();
+        String ucToken = request.getHeader("UC-Token");
+        return (ucToken == null || ucToken.isBlank()) ? null : ucToken.trim();
     }
 }

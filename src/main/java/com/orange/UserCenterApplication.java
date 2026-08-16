@@ -9,7 +9,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * @author UserCenter
  */
 @SpringBootApplication
-public class UcApplication {
+public class UserCenterApplication {
 
     /**
      * 程序入口
@@ -17,6 +17,6 @@ public class UcApplication {
      * @param args 启动参数
      */
     public static void main(String[] args) {
-        SpringApplication.run(UcApplication.class, args);
+        SpringApplication.run(UserCenterApplication.class, args);
     }
 }

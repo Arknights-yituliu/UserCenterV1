@@ -1,5 +1,6 @@
 package com.orange.service;
 
+import com.orange.entity.vo.oauth.LoginTicketVO;
 import com.orange.entity.vo.oauth.OAuthTokenVO;
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -26,6 +27,15 @@ public interface OAuthTokenService {
     String buildAuthorizeRedirectUrl(String responseType, String clientId, String redirectUri, String scope,
                                      String state, String codeChallenge, String codeChallengeMethod,
                                      HttpServletRequest request);
+
+    /**
+     * 签发跨站登录票据：供登录页（与授权服务器跨站）登录成功后换取短时一次性凭证，
+     * 随 authorize 请求携带，替代跨站不可用的会话 Cookie
+     *
+     * @param request HTTP 请求（须携带本系统会话 token：Authorization / UC-Token）
+     * @return 一次性登录票据
+     */
+    LoginTicketVO createLoginTicket(HttpServletRequest request);
 
     /**
      * 授权码签发：校验客户端/回调白名单/scope，生成一次性授权码并存储

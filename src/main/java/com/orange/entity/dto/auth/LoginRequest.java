@@ -5,7 +5,7 @@ import jakarta.validation.constraints.NotBlank;
 /**
  * 登录请求参数
  *
- * <p>accountType=password 时用 email+password 或 username+password；accountType=email 时用 email+verificationCode</p>
+ * <p>accountType=password 时用 email+password 或 userName+password；accountType=email 时用 email+verificationCode</p>
  *
  * @author UserCenter
  */
@@ -19,7 +19,7 @@ public class LoginRequest {
     private String email;
 
     /** 用户名（accountType=password 时与 email 二选一，兼容旧系统迁移用户） */
-    private String username;
+    private String userName;
 
     /** 密码（accountType=password 时必填） */
     private String password;
@@ -43,12 +43,12 @@ public class LoginRequest {
         this.email = email;
     }
 
-    public String getUsername() {
-        return username;
+    public String getUserName() {
+        return userName;
     }
 
-    public void setUsername(String username) {
-        this.username = username;
+    public void setUserName(String userName) {
+        this.userName = userName;
     }
 
     public String getPassword() {

@@ -39,6 +39,12 @@ public final class RedisKeyUtil {
     /** OAuth refresh_token key 前缀：uc:oauth:refresh:{token} */
     private static final String PREFIX_OAUTH_REFRESH = "uc:oauth:refresh:";
 
+    /** OAuth 跨站登录票据 key 前缀：uc:oauth:ticket:{ticket} */
+    private static final String PREFIX_OAUTH_TICKET = "uc:oauth:ticket:";
+
+    /** OAuth 跨站登录票据已使用标记 key 前缀：uc:oauth:ticket:used:{ticket} */
+    private static final String PREFIX_OAUTH_TICKET_USED = "uc:oauth:ticket:used:";
+
     private RedisKeyUtil() {
     }
 
@@ -141,5 +147,25 @@ public final class RedisKeyUtil {
      */
     public static String oauthRefresh(String token) {
         return PREFIX_OAUTH_REFRESH + token;
+    }
+
+    /**
+     * OAuth 跨站登录票据 key
+     *
+     * @param ticket 一次性登录票据
+     * @return Redis key
+     */
+    public static String oauthTicket(String ticket) {
+        return PREFIX_OAUTH_TICKET + ticket;
+    }
+
+    /**
+     * OAuth 跨站登录票据已使用标记 key（并发/重放下仅一次成功）
+     *
+     * @param ticket 一次性登录票据
+     * @return Redis key
+     */
+    public static String oauthTicketUsed(String ticket) {
+        return PREFIX_OAUTH_TICKET_USED + ticket;
     }
 }

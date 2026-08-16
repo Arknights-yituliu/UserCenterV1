@@ -9,6 +9,7 @@ import com.orange.common.util.RedisKeyUtil;
 import com.orange.common.util.RequestUtil;
 import com.orange.entity.dto.SessionInfo;
 import com.orange.entity.po.OAuthClient;
+import com.orange.entity.vo.oauth.LoginTicketVO;
 import com.orange.entity.vo.oauth.OAuthTokenVO;
 import com.orange.mapper.OAuthClientMapper;
 import com.orange.service.OAuthTokenService;
@@ -28,6 +29,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -60,7 +62,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     private long accessTokenTtlSeconds;
 
     /** refresh_token 默认有效期（秒） */
-    @Value("${user-center.oauth.refresh-token-ttl-seconds:2592000}")
+    @Value("${user-center.oauth.refresh-token-ttl-seconds:7776000}")
     private long refreshTokenTtlSeconds;
 
     /** 授权码默认有效期（秒） */
@@ -70,6 +72,10 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     /** 登录页地址：未登录时 302 跳转（纯前端接入场景，为空则保持抛 80001） */
     @Value("${user-center.oauth.login-page-url:}")
     private String loginPageUrl;
+
+    /** 跨站登录票据有效期（秒）：默认 5 分钟，一次性使用 */
+    @Value("${user-center.oauth.login-ticket-ttl-seconds:300}")
+    private long loginTicketTtlSeconds;
 
     /**
      * 构造器注入依赖
@@ -87,7 +93,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     }
 
     /**
-     * 解析当前登录用户：从请求头/Cookie 取出本系统会话 token
+     * 解析当前登录用户：优先跨站登录票据（uc_ticket），其次请求头携带的本系统会话 token
      *
      * <p>静默解析：未登录或会话无效时返回 null（不抛异常），由调用方决定跳登录页或报错。</p>
      *
@@ -95,6 +101,12 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      * @return 用户 uid，未登录返回 null
      */
     private Long resolveLoginUid(HttpServletRequest request) {
+        // 1. 优先解析跨站登录票据（短时一次性，随 authorize 的 query/form 参数携带）
+        Long uid = resolveUidByTicket(request.getParameter("uc_ticket"));
+        if (uid != null) {
+            return uid;
+        }
+        // 2. 其次解析请求头携带的本系统会话 token（Authorization: Bearer / UC-Token）
         String token = RequestUtil.resolveToken(request);
         if (token == null || token.isBlank()) {
             return null;
@@ -114,6 +126,57 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         }
     }
 
+    /**
+     * 解析一次性跨站登录票据对应的用户 uid（消费即失效，防重放）
+     *
+     * <p>校验顺序：先用 setIfAbsent 抢占"已使用"标记（并发/重放仅一次成功），
+     * 再读取票据内 uid，读取后删除票据数据。</p>
+     *
+     * @param ticket 登录票据（可为空）
+     * @return 用户 uid，票据无效/已使用/为空时返回 null
+     */
+    private Long resolveUidByTicket(String ticket) {
+        if (!StringUtils.hasText(ticket)) {
+            return null;
+        }
+        // 一次性占用标记：只有第一个请求能拿到 true，后续重放直接拒绝
+        Boolean first = stringRedisTemplate.opsForValue().setIfAbsent(
+                RedisKeyUtil.oauthTicketUsed(ticket), "1", loginTicketTtlSeconds, TimeUnit.SECONDS);
+        if (!Boolean.TRUE.equals(first)) {
+            return null;
+        }
+        Map<String, Object> record = readJsonMap(RedisKeyUtil.oauthTicket(ticket));
+        if (record == null) {
+            return null;
+        }
+        // 消费后删除票据数据，配合 used 标记实现双保险
+        stringRedisTemplate.delete(RedisKeyUtil.oauthTicket(ticket));
+        Object uid = record.get("uid");
+        return (uid instanceof Number) ? ((Number) uid).longValue() : null;
+    }
+
+    /**
+     * 签发跨站登录票据：登录页登录成功后携带本系统会话 token 调用，换取短时一次性凭证
+     *
+     * @param request HTTP 请求（Authorization / UC-Token 携带会话 token）
+     * @return 一次性登录票据
+     */
+    @Override
+    public LoginTicketVO createLoginTicket(HttpServletRequest request) {
+        Long uid = resolveLoginUid(request);
+        if (uid == null) {
+            throw new BusinessException(ResultCode.NOT_LOGIN);
+        }
+        String ticket = OAuthUtil.generateToken();
+        Map<String, Object> record = new HashMap<>();
+        record.put("uid", uid);
+        writeJson(RedisKeyUtil.oauthTicket(ticket), record, loginTicketTtlSeconds);
+        LoginTicketVO vo = new LoginTicketVO();
+        vo.setTicket(ticket);
+        vo.setExpiresIn(loginTicketTtlSeconds);
+        return vo;
+    }
+
     @Override
     public String buildAuthorizeRedirectUrl(String responseType, String clientId, String redirectUri, String scope,
                                             String state, String codeChallenge, String codeChallengeMethod,
@@ -128,11 +191,19 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
             if (!StringUtils.hasText(loginPageUrl)) {
                 throw new BusinessException(ResultCode.NOT_LOGIN, "请在授权前先登录用户中心");
             }
-            // 未登录：302 到 UC 登录页，登录成功后回跳当前 authorize 地址（此时 Cookie 已携带）
-            String back = request.getRequestURL().toString()
-                    + (request.getQueryString() == null ? "" : "?" + request.getQueryString());
+            // 未登录：302 到 UC 登录页，登录成功后携带 uc_ticket 回跳当前 authorize 地址（走跨站登录票据）
+            // 回跳地址拼入请求全部参数（GET query 与 POST form 统一处理），避免登录后丢失参数
+            Map<String, String[]> params = new TreeMap<>(request.getParameterMap());
+            StringBuilder back = new StringBuilder(request.getRequestURL().toString()).append('?');
+            for (Map.Entry<String, String[]> entry : params.entrySet()) {
+                for (String value : entry.getValue()) {
+                    back.append(URLEncoder.encode(entry.getKey(), StandardCharsets.UTF_8))
+                            .append('=').append(URLEncoder.encode(value, StandardCharsets.UTF_8)).append('&');
+                }
+            }
+            back.setLength(back.length() - 1);
             return loginPageUrl + (loginPageUrl.contains("?") ? "&" : "?")
-                    + "redirect=" + URLEncoder.encode(back, StandardCharsets.UTF_8);
+                    + "redirect=" + URLEncoder.encode(back.toString(), StandardCharsets.UTF_8);
         }
         // 3. 签发一次性授权码（内部完成 client/redirect_uri/scope/PKCE 校验）
         String code = createAuthorizationCode(clientId, redirectUri, scope, codeChallenge, codeChallengeMethod, uid);

@@ -31,8 +31,7 @@ CREATE TABLE `app_info` (
 -- -------------------------------------------------------------
 DROP TABLE IF EXISTS `user_info`;
 CREATE TABLE `user_info` (
-    `id`              BIGINT       NOT NULL AUTO_INCREMENT COMMENT '内部主键（不对外暴露）',
-    `uid`             BIGINT       NOT NULL COMMENT '对外业务编号（雪花ID，全局唯一）',
+    `uid`             BIGINT       NOT NULL COMMENT '对外业务编号（雪花ID，全局唯一，主键）',
     `email`           VARCHAR(128) DEFAULT NULL COMMENT '邮箱（登录账号）',
     `user_name`       VARCHAR(64)  DEFAULT NULL COMMENT '用户名（登录账号，兼容旧系统迁移用户）',
     `password`        VARCHAR(128) DEFAULT NULL COMMENT '密码（BCrypt 哈希）',
@@ -42,8 +41,7 @@ CREATE TABLE `user_info` (
     `ip`              VARCHAR(64)  DEFAULT NULL COMMENT '注册 IP',
     `register_time`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '注册时间',
     `last_login_time` DATETIME     DEFAULT NULL COMMENT '最后登录时间',
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_uid` (`uid`),
+    PRIMARY KEY (`uid`),
     UNIQUE KEY `uk_email` (`email`),
     UNIQUE KEY `uk_user_name` (`user_name`)
 ) ENGINE = InnoDB COMMENT = '全局用户主表';

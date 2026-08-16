@@ -1,6 +1,6 @@
 package com.orange.service.impl;
 
-import com.baomidou.mybatisplus.core.toolkit.IdWorker;
+import com.orange.common.util.IdGenerator;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -89,6 +89,9 @@ public class AuthServiceImpl implements AuthService {
     /**
      * 注册（密码注册 / 邮箱验证码注册），注册成功后直接签发会话登录
      *
+     * <p>注册需设置密码（password / email_code 两种方式均要求密码）；邮箱与用户名至少填一个，
+     * email_code 方式必须填邮箱。只要填了邮箱，都必须先通过邮箱验证码验证邮箱可用。</p>
+     *
      * @param request 注册参数
      * @param ip      注册 IP
      * @param appId   来源应用 AppId
@@ -97,32 +100,56 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public LoginVO register(RegisterRequest request, String ip, String appId) {
-        if (request.getEmail() == null || request.getEmail().isBlank()) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "邮箱不能为空");
+        String email = request.getEmail();
+        String userName = request.getUserName();
+        boolean hasEmail = email != null && !email.isBlank();
+        boolean hasUserName = userName != null && !userName.isBlank();
+        // 邮箱与用户名至少提供一个作为登录凭证
+        if (!hasEmail && !hasUserName) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "邮箱和用户名至少填写一个");
         }
-        // 校验邮箱唯一
-        if (userMapper.selectCount(Wrappers.<UserInfo>lambdaQuery()
-                .eq(UserInfo::getEmail, request.getEmail())) > 0) {
+        // 邮箱唯一性校验（填了才校验）
+        if (hasEmail && userMapper.selectCount(Wrappers.<UserInfo>lambdaQuery()
+                .eq(UserInfo::getEmail, email)) > 0) {
             throw new BusinessException(ResultCode.EMAIL_ALREADY_EXISTS);
+        }
+        // 用户名唯一性校验（填了才校验）
+        if (hasUserName && userMapper.selectCount(Wrappers.<UserInfo>lambdaQuery()
+                .eq(UserInfo::getUserName, userName)) > 0) {
+            throw new BusinessException(ResultCode.USERNAME_ALREADY_EXISTS);
         }
 
         UserInfo user = new UserInfo();
-        user.setUid(IdWorker.getId());
-        user.setEmail(request.getEmail());
+        user.setUid(IdGenerator.getInstance().nextId());
+        user.setEmail(hasEmail ? email : null);
+        user.setUserName(hasUserName ? userName : null);
+        // 昵称缺省时优先用用户名，其次邮箱
         user.setNickname(request.getNickname() == null || request.getNickname().isBlank()
-                ? request.getEmail() : request.getNickname());
+                ? (hasUserName ? userName : email)
+                : request.getNickname());
         user.setIp(ip);
         user.setStatus(1);
         user.setRegisterTime(LocalDateTime.now());
 
-        if ("password".equals(request.getRegisterType())) {
+        // 填了邮箱则必须先通过邮箱验证码验证：确保邮箱真实可用且属于注册者本人
+        // （密码注册带邮箱、邮箱验证码注册两种形态均适用；仅用户名注册不涉及）
+        if (hasEmail) {
+            if (request.getVerificationCode() == null || request.getVerificationCode().isBlank()) {
+                throw new BusinessException(ResultCode.PARAM_ERROR, "填写邮箱时需提供邮箱验证码");
+            }
+            emailCodeService.verifyCode(email, request.getVerificationCode());
+        }
+
+        if ("password".equals(request.getRegisterType()) || "email_code".equals(request.getRegisterType())) {
+            // 统一要求设置密码（password / email_code 两种注册方式均要求）
             if (request.getPassword() == null || request.getPassword().isBlank()) {
                 throw new BusinessException(ResultCode.PARAM_ERROR, "密码不能为空");
             }
             user.setPassword(passwordEncoder.encode(request.getPassword()));
-        } else if ("email_code".equals(request.getRegisterType())) {
-            // 校验邮箱验证码
-            emailCodeService.verifyCode(request.getEmail(), request.getVerificationCode());
+            // 邮箱验证码注册必须有邮箱（密码注册可仅用户名；验证码已在上方统一校验）
+            if ("email_code".equals(request.getRegisterType()) && !hasEmail) {
+                throw new BusinessException(ResultCode.PARAM_ERROR, "邮箱验证码注册需填写邮箱");
+            }
         } else {
             throw new BusinessException(ResultCode.PARAM_ERROR, "不支持的注册方式");
         }
@@ -147,8 +174,8 @@ public class AuthServiceImpl implements AuthService {
 
         if (TYPE_PASSWORD.equals(request.getAccountType())) {
             // 账号优先取用户名（兼容旧系统迁移用户），未传时回退邮箱（历史前端只传 email）
-            String username = request.getUsername();
-            String account = (username != null && !username.isBlank()) ? username : request.getEmail();
+            String userName = request.getUserName();
+            String account = (userName != null && !userName.isBlank()) ? userName : request.getEmail();
             user = passwordLogin(account, request.getPassword());
             loginType = TYPE_PASSWORD;
         } else if (TYPE_EMAIL_CODE.equals(request.getAccountType())) {
@@ -306,7 +333,7 @@ public class AuthServiceImpl implements AuthService {
         if (user == null) {
             // 未注册则自动注册
             user = new UserInfo();
-            user.setUid(IdWorker.getId());
+            user.setUid(IdGenerator.getInstance().nextId());
             user.setEmail(email);
             user.setNickname(email);
             user.setStatus(1);

@@ -16,11 +16,8 @@ import java.time.LocalDateTime;
 @TableName("user_info")
 public class UserInfo {
 
-    /** 内部主键（不对外暴露） */
-    @TableId(type = IdType.AUTO)
-    private Long id;
-
-    /** 对外业务编号（雪花 ID，全局唯一） */
+    /** 对外业务编号（雪花 ID，全局唯一，主键） */
+    @TableId(type = IdType.INPUT)
     private Long uid;
 
     /** 邮箱（登录账号） */
@@ -50,14 +47,6 @@ public class UserInfo {
 
     /** 最后登录时间 */
     private LocalDateTime lastLoginTime;
-
-    public Long getId() {
-        return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
-    }
 
     public Long getUid() {
         return uid;

@@ -34,6 +34,8 @@ public enum ResultCode {
     USERNAME_EMPTY(20005, "账号不能为空"),
     /** 账号未绑定邮箱 */
     EMAIL_NOT_BOUND(20006, "该账号未绑定邮箱"),
+    /** 用户名已被注册 */
+    USERNAME_ALREADY_EXISTS(20007, "该用户名已被注册"),
 
     // ---------- 3xxxx 验证码/限流 ----------
     /** 验证码错误 */
@@ -89,7 +91,9 @@ public enum ResultCode {
     /** PKCE 校验失败 */
     OAUTH_PKCE_INVALID(90008, "PKCE 校验失败"),
     /** 访问令牌无效或已过期 */
-    OAUTH_TOKEN_INVALID(90009, "访问令牌无效或已过期");
+    OAUTH_TOKEN_INVALID(90009, "访问令牌无效或已过期"),
+    /** 跨站登录票据无效或已过期 */
+    OAUTH_TICKET_INVALID(90010, "登录票据无效或已过期");
 
     /** 状态码 */
     private final int code;

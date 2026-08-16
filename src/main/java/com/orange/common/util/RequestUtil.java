@@ -1,6 +1,5 @@
 package com.orange.common.util;
 
-import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 
 /**
@@ -12,9 +11,6 @@ public final class RequestUtil {
 
     /** Authorization 请求头前缀 */
     private static final String BEARER_PREFIX = "Bearer ";
-
-    /** 会话 Cookie 名（纯前端 OAuth 场景，浏览器跳转自动携带） */
-    private static final String SESSION_COOKIE = "uc_token";
 
     private RequestUtil() {
     }
@@ -41,7 +37,7 @@ public final class RequestUtil {
     }
 
     /**
-     * 从请求解析用户 token：优先 Authorization: Bearer xxx，其次 X-Token，最后 Cookie: uc_token
+     * 从请求解析用户 token：优先 Authorization: Bearer xxx，其次 UC-Token
      *
      * @param request 请求
      * @return token，未携带时返回 null
@@ -51,18 +47,9 @@ public final class RequestUtil {
         if (authorization != null && authorization.startsWith(BEARER_PREFIX)) {
             return authorization.substring(BEARER_PREFIX.length()).trim();
         }
-        String xToken = request.getHeader("X-Token");
-        if (xToken != null && !xToken.isBlank()) {
-            return xToken.trim();
-        }
-        Cookie[] cookies = request.getCookies();
-        if (cookies != null) {
-            for (Cookie cookie : cookies) {
-                if (SESSION_COOKIE.equals(cookie.getName())) {
-                    String value = cookie.getValue();
-                    return (value == null || value.isBlank()) ? null : value.trim();
-                }
-            }
+        String ucToken = request.getHeader("UC-Token");
+        if (ucToken != null && !ucToken.isBlank()) {
+            return ucToken.trim();
         }
         return null;
     }

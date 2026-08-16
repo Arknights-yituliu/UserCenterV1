@@ -12,6 +12,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.web.cors.CorsUtils;
 import org.springframework.web.servlet.HandlerInterceptor;
 import org.springframework.web.util.ContentCachingRequestWrapper;
 
@@ -60,6 +61,11 @@ public class AppSignInterceptor implements HandlerInterceptor {
      */
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+        // CORS 预检请求（OPTIONS）直接放行：签名接口不面向浏览器，但避免预检被拦导致 500
+        if (CorsUtils.isPreFlightRequest(request)) {
+            return true;
+        }
+
         // 1. 提取签名头
         String appId = request.getHeader("AppId");
         String timestamp = request.getHeader("Timestamp");

@@ -59,17 +59,15 @@ user-center:
   oauth:
     # access_token 有效期（秒）：默认 2 小时
     access-token-ttl-seconds: 7200
-    # refresh_token 有效期（秒）：默认 30 天
-    refresh-token-ttl-seconds: 2592000
+    # refresh_token 有效期（秒）：默认 90 天
+    refresh-token-ttl-seconds: 7776000
     # 授权码有效期（秒）：默认 5 分钟
     authorization-code-ttl-seconds: 300
     # 登录页地址：authorize 未登录时 302 跳转（纯前端接入；为空则保持抛 80001）
     login-page-url: http://localhost:8080/login.html
-    # 会话 Cookie 所属域名（可空：不设置则绑定当前主机）
-    cookie-domain:
-    # 会话 Cookie 是否仅 HTTPS 传输（本地 HTTP 开发设为 false）
-    cookie-secure: false
-    # CORS 跨域白名单（逗号分隔，来自 oauth_client 登记的网站 origin，仅对 /oauth2/** 生效）
+    # 跨站登录票据有效期（秒）：默认 5 分钟，一次性使用（登录页换取后随 authorize 携带）
+    login-ticket-ttl-seconds: 300
+    # CORS 跨域白名单（逗号分隔，来自 oauth_client 登记的网站 origin，仅对 /oauth2/** /auth/** /user/** 生效）
     allowed-origins: http://localhost:3000
 
 springdoc:
@@ -81,3 +79,5 @@ springdoc:
 logging:
   level:
     com.orange: debug
+    # Mapper 层不打印 SQL（如需调试 SQL，改为 debug）
+    com.orange.mapper: off
