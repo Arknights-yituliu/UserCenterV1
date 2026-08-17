@@ -2,6 +2,7 @@ package com.orange.entity.dto.auth;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 
 /**
  * 注册请求参数
@@ -25,7 +26,8 @@ public class RegisterRequest {
     @Pattern(regexp = "^[A-Za-z0-9_]{3,20}$", message = "用户名仅支持字母、数字、下划线，长度 3-20 位")
     private String userName;
 
-    /** 密码（registerType=password 时必填，仅允许数字、字母、@、下划线） */
+    /** 密码（注册必填，6-32 位，仅允许数字、字母、@、下划线） */
+    @Size(min = 6, max = 32, message = "密码长度需在 6-32 位之间")
     @Pattern(regexp = "^[A-Za-z0-9@_]+$", message = "密码仅支持数字、字母、@、下划线")
     private String password;
 
