@@ -1,5 +1,6 @@
 package com.orange.entity.vo.oauth;
 
+import com.orange.common.util.DesensitizeUtil;
 import com.orange.entity.po.UserInfo;
 import com.orange.service.OAuthTokenService.OAuthTokenPrincipal;
 
@@ -39,7 +40,7 @@ public class UserInfoVO {
         UserInfoVO vo = new UserInfoVO();
         vo.setUid(principal.getUid());
         if (user != null) {
-            vo.setEmail(user.getEmail());
+            vo.setEmail(DesensitizeUtil.maskEmail(user.getEmail()));
             vo.setUserName(user.getUserName());
             vo.setNickname(user.getNickname());
             vo.setAvatar(user.getAvatar());

@@ -6,6 +6,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
+import com.orange.common.util.DesensitizeUtil;
 import com.orange.common.util.RedisKeyUtil;
 import com.orange.common.util.SignUtil;
 import com.orange.entity.dto.SessionInfo;
@@ -419,7 +420,7 @@ public class AuthServiceImpl implements AuthService {
         vo.setUid(user.getUid());
         vo.setNickname(user.getNickname());
         vo.setAvatar(user.getAvatar());
-        vo.setEmail(user.getEmail());
+        vo.setEmail(DesensitizeUtil.maskEmail(user.getEmail()));
         return vo;
     }
 }

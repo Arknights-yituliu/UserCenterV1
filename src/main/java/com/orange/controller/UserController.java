@@ -1,6 +1,7 @@
 package com.orange.controller;
 
 import com.orange.common.context.UserContext;
+import com.orange.common.util.RequestUtil;
 import com.orange.common.util.Result;
 import com.orange.entity.dto.user.BindEmailRequest;
 import com.orange.entity.dto.user.ChangeEmailRequest;
@@ -11,6 +12,7 @@ import com.orange.entity.vo.UserInfoVO;
 import com.orange.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -60,7 +62,7 @@ public class UserController {
      * @return 统一返回结果
      */
     @Operation(summary = "修改个人资料")
-    @PostMapping("/profile")
+    @PostMapping("/profile/update")
     public Result<Void> updateProfile(@Valid @RequestBody UpdateProfileRequest request) {
         userService.updateProfile(UserContext.requireUid(), request);
         return Result.success();
@@ -89,6 +91,19 @@ public class UserController {
     @PostMapping("/email/bind")
     public Result<Void> bindEmail(@Valid @RequestBody BindEmailRequest request) {
         userService.bindEmail(UserContext.requireUid(), request);
+        return Result.success();
+    }
+
+    /**
+     * 发送换绑邮箱验证码（登录态，发到当前绑定邮箱，前端无需传邮箱）
+     *
+     * @param httpRequest HTTP 请求（取 IP 限流）
+     * @return 统一返回结果
+     */
+    @Operation(summary = "发送换绑邮箱验证码")
+    @PostMapping("/email/send-change-code")
+    public Result<Void> sendChangeEmailCode(HttpServletRequest httpRequest) {
+        userService.sendChangeEmailCode(UserContext.requireUid(), RequestUtil.getIp(httpRequest));
         return Result.success();
     }
 

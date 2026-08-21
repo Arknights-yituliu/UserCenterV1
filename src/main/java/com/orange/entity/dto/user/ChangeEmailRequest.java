@@ -6,18 +6,13 @@ import jakarta.validation.constraints.NotBlank;
 /**
  * 换绑邮箱请求参数
  *
- * <p>需同时验证旧邮箱与新邮箱的所有权（验证码均一次性）</p>
+ * <p>旧邮箱取自服务端当前登录用户，前端无需（也不应）回传，避免脱敏值被回传导致校验失败</p>
  *
  * @author UserCenter
  */
 public class ChangeEmailRequest {
 
-    /** 当前已绑定的旧邮箱 */
-    @NotBlank(message = "旧邮箱不能为空")
-    @Email(message = "旧邮箱格式不正确")
-    private String oldEmail;
-
-    /** 旧邮箱验证码 */
+    /** 旧邮箱验证码（发到当前绑定邮箱） */
     @NotBlank(message = "旧邮箱验证码不能为空")
     private String oldCode;
 
@@ -29,14 +24,6 @@ public class ChangeEmailRequest {
     /** 新邮箱验证码 */
     @NotBlank(message = "新邮箱验证码不能为空")
     private String newCode;
-
-    public String getOldEmail() {
-        return oldEmail;
-    }
-
-    public void setOldEmail(String oldEmail) {
-        this.oldEmail = oldEmail;
-    }
 
     public String getOldCode() {
         return oldCode;

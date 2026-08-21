@@ -120,7 +120,7 @@ public class OAuthController {
     @PostMapping("/ticket")
     public Result<LoginTicketVO> ticket(HttpServletRequest request) {
         LoginTicketVO vo = oauthTokenService.createLoginTicket(request);
-        log.info("[OAuth] 签发跨站登录票据成功: ticket={}, expiresIn={}s", mask(vo.getTicket()), vo.getExpiresIn());
+        log.debug("[OAuth] 签发跨站登录票据成功: ticket={}, expiresIn={}s", mask(vo.getTicket()), vo.getExpiresIn());
         return Result.success(vo);
     }
 
@@ -142,15 +142,15 @@ public class OAuthController {
                                        String state, String codeChallenge, String codeChallengeMethod,
                                        HttpServletRequest request, HttpServletResponse response) throws IOException {
         String ucTicket = request.getParameter("uc_ticket");
-        log.info("[OAuth] authorize 请求: clientId={}, redirectUri={}, scope={}, state={}, pkce={}({})",
+        log.debug("[OAuth] authorize 请求: clientId={}, redirectUri={}, scope={}, state={}, pkce={}({})",
                 clientId, redirectUri, scope, state,
                 StringUtils.hasText(codeChallenge) ? "yes" : "no", codeChallengeMethod);
         if (StringUtils.hasText(ucTicket)) {
-            log.info("[OAuth] authorize 携带跨站登录票据: uc_ticket={}", mask(ucTicket));
+            log.debug("[OAuth] authorize 携带跨站登录票据: uc_ticket={}", mask(ucTicket));
         }
         String redirectUrl = oauthTokenService.buildAuthorizeRedirectUrl(
                 responseType, clientId, redirectUri, scope, state, codeChallenge, codeChallengeMethod, request);
-        log.info("[OAuth] authorize 302 跳转: {}", redirectUrl);
+        log.debug("[OAuth] authorize 302 跳转: {}", redirectUrl);
         response.sendRedirect(redirectUrl);
     }
 
@@ -177,15 +177,15 @@ public class OAuthController {
                                       @RequestParam(value = "refresh_token", required = false) String refreshToken) {
         OAuthTokenVO vo;
         if ("authorization_code".equals(grantType)) {
-            log.info("[OAuth] 授权码换令牌: clientId={}, redirectUri={}, code={}, codeVerifier={}",
+            log.debug("[OAuth] 授权码换令牌: clientId={}, redirectUri={}, code={}, codeVerifier={}",
                     clientId, redirectUri, mask(code), StringUtils.hasText(codeVerifier) ? "yes" : "no");
             vo = oauthTokenService.exchangeToken(clientId, clientSecret, code, redirectUri, codeVerifier);
-            log.info("[OAuth] 授权码换令牌成功: clientId={}, accessToken={}, expiresIn={}s",
+            log.debug("[OAuth] 授权码换令牌成功: clientId={}, accessToken={}, expiresIn={}s",
                     clientId, mask(vo.getAccessToken()), vo.getExpiresIn());
         } else if ("refresh_token".equals(grantType)) {
-            log.info("[OAuth] 刷新令牌: clientId={}, refreshToken={}", clientId, mask(refreshToken));
+            log.debug("[OAuth] 刷新令牌: clientId={}, refreshToken={}", clientId, mask(refreshToken));
             vo = oauthTokenService.refreshToken(clientId, clientSecret, refreshToken);
-            log.info("[OAuth] 刷新令牌成功: clientId={}, accessToken={}, refreshToken={}",
+            log.debug("[OAuth] 刷新令牌成功: clientId={}, accessToken={}, refreshToken={}",
                     clientId, mask(vo.getAccessToken()), mask(vo.getRefreshToken()));
         } else {
             log.warn("[OAuth] 不支持的 grant_type: {}", grantType);
@@ -208,7 +208,7 @@ public class OAuthController {
     public Result<UserInfoVO> userinfo(HttpServletRequest request) {
         OAuthTokenPrincipal principal = oauthTokenService.resolveAccessToken(RequestUtil.resolveToken(request));
         UserInfo user = userInfoMapper.selectById(principal.getUid());
-        log.info("[OAuth] 用户信息: uid={}, clientId={}, scope={}",
+        log.debug("[OAuth] 用户信息: uid={}, clientId={}, scope={}",
                 principal.getUid(), principal.getClientId(), principal.getScope());
         return Result.success(UserInfoVO.of(principal, user));
     }

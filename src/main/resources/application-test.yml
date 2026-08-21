@@ -38,12 +38,15 @@ tencent:
   email:
     region: ap-guangzhou
     from-address: xxx@example.com
-    template-id: 53553      
+    # 验证码邮件模板：注册 57132，登录 57133，重置/换绑等其他沿用 53553
+    template-id: 53553
+    register-template-id: 57132
+    login-template-id: 57133
 
 # ============ 业务自定义配置 ============
 user-center:
   # 会话有效期（秒）：默认 180 天
-  session-ttl-seconds: 15552000
+  session-ttl-seconds: 7776000
   # 验证码有效期（秒）：默认 5 分钟
   code-ttl-seconds: 300
   # 验证码发送限流（秒）：同一邮箱/IP 的最小发送间隔
@@ -51,8 +54,8 @@ user-center:
   # 登录失败锁定：连续失败次数上限与锁定时间（秒）
   login-fail-limit: 5
   login-lock-seconds: 900
-  # 同邮箱发送最小间隔（秒）：默认 5 分钟
-  email-send-interval-seconds: 300
+  # 同邮箱发送最小间隔（秒）：默认 1分钟
+  email-send-interval-seconds: 60
   # ===== OAuth2 授权服务器配置（第三方 Web 网站接入） =====
   oauth:
     # access_token 有效期（秒）：默认 2 小时
@@ -70,8 +73,10 @@ user-center:
 
 springdoc:
   api-docs:
+    enabled: false
     path: /v3/api-docs
   swagger-ui:
+    enabled: false
     path: /swagger-ui.html
 
 logging:

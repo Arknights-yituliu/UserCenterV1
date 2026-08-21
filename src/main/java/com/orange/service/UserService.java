@@ -57,10 +57,18 @@ public interface UserService {
     void bindEmail(Long uid, BindEmailRequest request);
 
     /**
-     * 换绑邮箱（需同时验证旧邮箱与新邮箱）
+     * 发送换绑邮箱验证码（发到当前绑定邮箱，前端无需回传邮箱）
+     *
+     * @param uid 用户 uid
+     * @param ip  请求 IP（发送限流维度）
+     */
+    void sendChangeEmailCode(Long uid, String ip);
+
+    /**
+     * 换绑邮箱（旧邮箱以服务端当前绑定为准，仅校验旧/新邮箱验证码）
      *
      * @param uid     用户 uid
-     * @param request 换绑参数（旧邮箱 + 旧验证码 + 新邮箱 + 新验证码）
+     * @param request 换绑参数（旧邮箱验证码 + 新邮箱 + 新邮箱验证码）
      */
     void changeEmail(Long uid, ChangeEmailRequest request);
 

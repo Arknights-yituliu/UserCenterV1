@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
+import com.orange.common.util.DesensitizeUtil;
 import com.orange.common.util.RedisKeyUtil;
 import com.orange.entity.dto.SessionInfo;
 import com.orange.entity.dto.user.BindEmailRequest;
@@ -135,22 +136,43 @@ public class UserServiceImpl implements UserService {
     }
 
     /**
+     * 发送换绑邮箱验证码：直接发到当前账号绑定的邮箱
+     *
+     * <p>前端只持有脱敏邮箱，无法走公开发码接口，故提供登录态发码入口，
+     * 由服务端从会话取当前邮箱发送，全程不暴露完整邮箱</p>
+     *
+     * @param uid 用户 uid
+     * @param ip  请求 IP（发送限流维度）
+     */
+    @Override
+    public void sendChangeEmailCode(Long uid, String ip) {
+        UserInfo user = getByUid(uid);
+        String currentEmail = user.getEmail();
+        if (currentEmail == null || currentEmail.isBlank()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "该账号未绑定邮箱，请先绑定邮箱");
+        }
+        emailCodeService.sendCode(currentEmail, "change_email", ip);
+    }
+
+    /**
      * 换绑邮箱（需同时验证旧邮箱与新邮箱的所有权）
      *
      * @param uid     用户 uid
-     * @param request 换绑参数（旧邮箱 + 旧验证码 + 新邮箱 + 新验证码）
+     * @param request 换绑参数（旧邮箱验证码 + 新邮箱 + 新邮箱验证码）
      */
     @Override
     public void changeEmail(Long uid, ChangeEmailRequest request) {
         UserInfo user = getByUid(uid);
-        if (user.getEmail() == null || !user.getEmail().equals(request.getOldEmail())) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "旧邮箱与当前绑定邮箱不一致");
+        // 旧邮箱以服务端当前绑定为准（前端只回传脱敏值无法比对），仅校验旧邮箱验证码
+        String currentEmail = user.getEmail();
+        if (currentEmail == null || currentEmail.isBlank()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "该账号未绑定邮箱，请先绑定邮箱");
         }
-        if (user.getEmail().equals(request.getNewEmail())) {
+        if (currentEmail.equals(request.getNewEmail())) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "新邮箱与当前邮箱相同");
         }
         // 先验证旧邮箱所有权，再校验新邮箱未被占用，最后验证新邮箱所有权
-        emailCodeService.verifyCode(request.getOldEmail(), request.getOldCode());
+        emailCodeService.verifyCode(currentEmail, request.getOldCode());
         checkEmailAvailable(request.getNewEmail());
         emailCodeService.verifyCode(request.getNewEmail(), request.getNewCode());
         user.setEmail(request.getNewEmail());
@@ -285,7 +307,7 @@ public class UserServiceImpl implements UserService {
     private UserInfoVO toUserInfoVO(UserInfo user) {
         UserInfoVO vo = new UserInfoVO();
         vo.setUid(user.getUid());
-        vo.setEmail(user.getEmail());
+        vo.setEmail(DesensitizeUtil.maskEmail(user.getEmail()));
         vo.setNickname(user.getNickname());
         vo.setAvatar(user.getAvatar());
         vo.setStatus(user.getStatus());

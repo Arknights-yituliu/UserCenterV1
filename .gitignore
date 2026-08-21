@@ -41,6 +41,7 @@ build/
 
 DeepSeek/
 /src/main/resources/application-dev.yml
+/src/main/resources/application-pro.yml
 
 ### 本地脚本（不提交远程） ###
 /src/test/java/com/orange/local/

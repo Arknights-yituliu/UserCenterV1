@@ -105,6 +105,8 @@
     </dependencies>
 
     <build>
+        <!-- 打包产物固定为 user-center.jar（不带版本号），便于部署脚本引用 -->
+        <finalName>user-center-backend</finalName>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
