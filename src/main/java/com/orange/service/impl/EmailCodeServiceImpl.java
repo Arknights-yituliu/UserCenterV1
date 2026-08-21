@@ -39,6 +39,18 @@ public class EmailCodeServiceImpl implements EmailCodeService {
     @Value("${user-center.email-send-interval-seconds:300}")
     private long emailIntervalSeconds;
 
+    /** 注册验证码邮件模板 ID（腾讯云 SES） */
+    @Value("${tencent.email.register-template-id:57132}")
+    private Long registerTemplateId;
+
+    /** 登录验证码邮件模板 ID（腾讯云 SES） */
+    @Value("${tencent.email.login-template-id:57133}")
+    private Long loginTemplateId;
+
+    /** 其他场景（重置密码/换绑邮箱等）邮件模板 ID（沿用原 53553） */
+    @Value("${tencent.email.template-id:53553}")
+    private Long defaultTemplateId;
+
     /**
      * 构造器注入依赖
      *
@@ -76,10 +88,17 @@ public class EmailCodeServiceImpl implements EmailCodeService {
         // 验证码存 Redis，5 分钟过期
         stringRedisTemplate.opsForValue().set(RedisKeyUtil.code(email), code, codeTtlSeconds, TimeUnit.SECONDS);
 
+        // 按业务场景选择邮件模板：注册 57132、登录 57133、重置/换绑等其他沿用默认
+        Long templateId = switch (usage) {
+            case "register" -> registerTemplateId;
+            case "login" -> loginTemplateId;
+            default -> defaultTemplateId;
+        };
+
         String subject = "【User Center】邮箱验证码";
         String content = "您的验证码为 " + code + "，"
                 + (codeTtlSeconds / 60) + " 分钟内有效，请勿泄露给他人。";
-        mailService.sendText(email, subject, content);
+        mailService.sendText(email, subject, content, templateId);
     }
 
     /**

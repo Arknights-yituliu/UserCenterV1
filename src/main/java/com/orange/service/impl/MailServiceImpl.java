@@ -93,7 +93,7 @@ public class MailServiceImpl implements MailService {
     }
 
     /**
-     * 发送纯文本邮件（多渠道降级路由）
+     * 发送纯文本邮件（使用配置的默认模板）
      *
      * @param to      收件人邮箱
      * @param subject 主题
@@ -101,12 +101,25 @@ public class MailServiceImpl implements MailService {
      */
     @Override
     public void sendText(String to, String subject, String content) {
+        sendText(to, subject, content, templateId);
+    }
+
+    /**
+     * 发送纯文本邮件（指定 SES 模板 ID，多渠道降级路由）
+     *
+     * @param to         收件人邮箱
+     * @param subject    主题
+     * @param content    正文
+     * @param templateId 腾讯云 SES 模板 ID（163 降级渠道不受影响）
+     */
+    @Override
+    public void sendText(String to, String subject, String content, Long templateId) {
         int dailyCount = getDailyCount();
 
         try {
             if (dailyCount < TENCENT_DAILY_LIMIT) {
                 // 每日 500 封以内：腾讯云 SES 发送
-                if (sendTencentCloudEmail(to, subject, content)) {
+                if (sendTencentCloudEmail(to, subject, content, templateId)) {
                     // 发送成功，递增当日累计计数
                     incrementDailyCount();
                     return;
@@ -238,12 +251,13 @@ public class MailServiceImpl implements MailService {
     /**
      * 通过腾讯云 SES 发送邮件
      *
-     * @param to      收件人邮箱
-     * @param subject 主题
-     * @param content 正文（模板变量 {{code}}）
+     * @param to         收件人邮箱
+     * @param subject    主题
+     * @param content    正文（模板变量 {{code}}）
+     * @param templateId 腾讯云 SES 模板 ID（按业务场景区分）
      * @return true=发送成功；false=未配置或发送失败（供调用方降级）
      */
-    private boolean sendTencentCloudEmail(String to, String subject, String content) {
+    private boolean sendTencentCloudEmail(String to, String subject, String content, Long templateId) {
         // 未配置腾讯云凭据时跳过 SES 渠道
         if (secretId == null || secretId.isBlank() || secretKey == null || secretKey.isBlank()) {
             return false;
