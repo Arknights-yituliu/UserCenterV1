@@ -60,16 +60,6 @@ public enum ResultCode {
     NOT_LOGIN(80001, "未登录或登录已失效"),
     /** token 已过期 */
     TOKEN_EXPIRED(80002, "登录已过期，请重新登录"),
-    /** 签名错误 */
-    SIGN_ERROR(80003, "签名校验失败"),
-    /** 签名时间戳超窗 */
-    SIGN_TIMESTAMP_EXPIRED(80004, "请求已过期，请校准时间"),
-    /** 请求重放 */
-    REPLAY_ATTACK(80005, "重复请求已被拦截"),
-    /** AppId 不存在 */
-    APP_NOT_FOUND(80006, "AppId 不存在"),
-    /** 应用已停用 */
-    APP_DISABLED(80007, "应用已停用"),
     /** 无权限操作 */
     FORBIDDEN(80008, "无权限操作"),
 

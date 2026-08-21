@@ -15,9 +15,6 @@ public final class RedisKeyUtil {
     /** 邮箱验证码 key 前缀：uc:code:{email} */
     private static final String PREFIX_CODE = "uc:code:";
 
-    /** 防重放 nonce key 前缀：uc:nonce:{nonce} */
-    private static final String PREFIX_NONCE = "uc:nonce:";
-
     /** 登录失败计数 key 前缀：uc:login:fail:{account} */
     private static final String PREFIX_LOGIN_FAIL = "uc:login:fail:";
 
@@ -66,16 +63,6 @@ public final class RedisKeyUtil {
      */
     public static String code(String email) {
         return PREFIX_CODE + email;
-    }
-
-    /**
-     * 防重放 nonce key
-     *
-     * @param nonce 一次性随机数
-     * @return Redis key
-     */
-    public static String nonce(String nonce) {
-        return PREFIX_NONCE + nonce;
     }
 
     /**

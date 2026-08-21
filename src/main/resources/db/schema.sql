@@ -10,24 +10,7 @@ CREATE DATABASE IF NOT EXISTS `user_center`
 USE `user_center`;
 
 -- -------------------------------------------------------------
--- 1. 接入方应用表
--- -------------------------------------------------------------
-DROP TABLE IF EXISTS `app_info`;
-CREATE TABLE `app_info` (
-    `id`             BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
-    `app_id`         VARCHAR(64)  NOT NULL COMMENT '接入方 AppId（全局唯一）',
-    `app_secret`     VARCHAR(128) NOT NULL COMMENT '接入方 AppSecret（HMAC-SHA256 签名密钥）',
-    `app_name`       VARCHAR(128) NOT NULL COMMENT '应用名称',
-    `callback_domain` VARCHAR(255) DEFAULT NULL COMMENT '回调域名白名单，多个用逗号分隔',
-    `status`         TINYINT      NOT NULL DEFAULT 1 COMMENT '状态：1=启用 0=停用',
-    `create_time`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    `update_time`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_app_id` (`app_id`)
-) ENGINE = InnoDB COMMENT = '接入方应用表';
-
--- -------------------------------------------------------------
--- 2. 全局用户主表
+-- 1. 全局用户主表
 -- -------------------------------------------------------------
 DROP TABLE IF EXISTS `user_info`;
 CREATE TABLE `user_info` (
@@ -47,39 +30,7 @@ CREATE TABLE `user_info` (
 ) ENGINE = InnoDB COMMENT = '全局用户主表';
 
 -- -------------------------------------------------------------
--- 3. 站点扩展资料表
--- -------------------------------------------------------------
-DROP TABLE IF EXISTS `user_profile`;
-CREATE TABLE `user_profile` (
-    `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
-    `uid`         BIGINT       NOT NULL COMMENT '用户 uid',
-    `app_id`      VARCHAR(64)  NOT NULL COMMENT '接入方 AppId',
-    `nickname`    VARCHAR(64)  DEFAULT NULL COMMENT '站点内昵称',
-    `avatar`      VARCHAR(512) DEFAULT NULL COMMENT '站点内头像',
-    `extension`   JSON         DEFAULT NULL COMMENT '扩展字段（JSON）',
-    `update_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_uid_app` (`uid`, `app_id`)
-) ENGINE = InnoDB COMMENT = '站点扩展资料表';
-
--- -------------------------------------------------------------
--- 4. 第三方绑定表
--- -------------------------------------------------------------
-DROP TABLE IF EXISTS `user_external_binding`;
-CREATE TABLE `user_external_binding` (
-    `id`        BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键',
-    `uid`       BIGINT      NOT NULL COMMENT '用户 uid',
-    `provider`  VARCHAR(32) NOT NULL COMMENT '第三方类型：wechat/qq',
-    `open_id`   VARCHAR(128) NOT NULL COMMENT '第三方 open_id',
-    `union_id`  VARCHAR(128) DEFAULT NULL COMMENT '第三方 union_id',
-    `bind_time` DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '绑定时间',
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_provider_openid` (`provider`, `open_id`),
-    KEY `idx_uid` (`uid`)
-) ENGINE = InnoDB COMMENT = '第三方绑定表';
-
--- -------------------------------------------------------------
--- 5. 登录日志表
+-- 2. 登录日志表
 -- -------------------------------------------------------------
 DROP TABLE IF EXISTS `login_log`;
 CREATE TABLE `login_log` (
@@ -97,7 +48,7 @@ CREATE TABLE `login_log` (
 ) ENGINE = InnoDB COMMENT = '登录日志表';
 
 -- -------------------------------------------------------------
--- 6. 操作审计日志表
+-- 3. 操作审计日志表
 -- -------------------------------------------------------------
 DROP TABLE IF EXISTS `audit_log`;
 CREATE TABLE `audit_log` (
@@ -114,7 +65,7 @@ CREATE TABLE `audit_log` (
 ) ENGINE = InnoDB COMMENT = '操作审计日志表';
 
 -- -------------------------------------------------------------
--- 7. OAuth2 客户端注册表（第三方 Web 网站接入登记）
+-- 4. OAuth2 客户端注册表（第三方 Web 网站接入登记）
 -- -------------------------------------------------------------
 DROP TABLE IF EXISTS `oauth_client`;
 CREATE TABLE `oauth_client` (
@@ -137,13 +88,7 @@ CREATE TABLE `oauth_client` (
 ) ENGINE = InnoDB COMMENT = 'OAuth2 客户端注册表';
 
 -- -------------------------------------------------------------
--- 初始数据：内置一个测试接入方应用（AppSecret 生产环境务必重置）
--- -------------------------------------------------------------
-INSERT INTO `app_info` (`app_id`, `app_secret`, `app_name`, `callback_domain`, `status`)
-VALUES ('100001', 'test-secret-please-reset', '测试站点', NULL, 1);
-
--- -------------------------------------------------------------
--- 8. SMTP 邮件渠道配置表（多渠道降级发送，配置存数据库可动态调整）
+-- 5. SMTP 邮件渠道配置表（多渠道降级发送，配置存数据库可动态调整）
 -- -------------------------------------------------------------
 DROP TABLE IF EXISTS `smtp_config`;
 CREATE TABLE `smtp_config` (
