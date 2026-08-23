@@ -1,5 +1,6 @@
 package com.orange.service;
 
+import com.orange.entity.vo.oauth.ConsentInfoVO;
 import com.orange.entity.vo.oauth.LoginTicketVO;
 import com.orange.entity.vo.oauth.OAuthTokenVO;
 import jakarta.servlet.http.HttpServletRequest;
@@ -38,6 +39,42 @@ public interface OAuthTokenService {
     LoginTicketVO createLoginTicket(HttpServletRequest request);
 
     /**
+     * 生成授权确认单并返回确认页跳转地址：requireAuthConsent=1 的客户端授权时，
+     * 暂不签发授权码，先把待确认参数存入 Redis 一次性确认单，由确认页同意后再签发
+     *
+     * @param clientId            客户端 ID
+     * @param redirectUri         回调地址（须在白名单内）
+     * @param scope               申请的权限范围（可空）
+     * @param state               防 CSRF 随机串（原样回传）
+     * @param codeChallenge       PKCE code_challenge（可空）
+     * @param codeChallengeMethod PKCE 算法（S256）
+     * @param uid                 授权用户 uid
+     * @return 确认页跳转地址（含一次性 pending_id）
+     */
+    String buildConsentRedirectUrl(String clientId, String redirectUri, String scope,
+                                   String state, String codeChallenge, String codeChallengeMethod, Long uid);
+
+    /**
+     * 查询授权确认信息：确认页加载时调用，校验登录态与确认单归属后返回客户端与权限信息
+     *
+     * @param pendingId 确认单 ID
+     * @param request   HTTP 请求（解析登录会话）
+     * @return 确认页展示信息
+     */
+    ConsentInfoVO getConsentInfo(String pendingId, HttpServletRequest request);
+
+    /**
+     * 确认/拒绝授权：同意则签发一次性授权码并返回回跳地址，
+     * 拒绝则返回 redirect_uri?error=access_denied（确认单一次性消费）
+     *
+     * @param pendingId 确认单 ID
+     * @param approve   是否同意授权
+     * @param request   HTTP 请求（解析登录会话）
+     * @return 302 回跳地址（含 code 或 error）
+     */
+    String confirmAuthorization(String pendingId, boolean approve, HttpServletRequest request);
+
+    /**
      * 授权码签发：校验客户端/回调白名单/scope，生成一次性授权码并存储
      *
      * @param clientId            客户端 ID
@@ -73,6 +110,17 @@ public interface OAuthTokenService {
      * @return 新的令牌响应
      */
     OAuthTokenVO refreshToken(String clientId, String clientSecret, String refreshToken);
+
+    /**
+     * 吊销令牌（RFC 7009）：客户端携带自己名下的 access_token / refresh_token 调用，
+     * 使其立即失效。refresh_token 被吊销时，其派生出的 access_token 一并吊销；
+     * 令牌不存在或已失效同样视为成功（幂等，不泄露令牌是否有效）
+     *
+     * @param clientId     客户端 ID
+     * @param clientSecret 客户端密钥（公共客户端传空）
+     * @param token        要吊销的令牌（access_token / refresh_token 均可，自动识别）
+     */
+    void revokeToken(String clientId, String clientSecret, String token);
 
     /**
      * 解析访问令牌，供用户信息等资源端点使用

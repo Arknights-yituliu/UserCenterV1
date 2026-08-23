@@ -83,7 +83,9 @@ public enum ResultCode {
     /** 访问令牌无效或已过期 */
     OAUTH_TOKEN_INVALID(90009, "访问令牌无效或已过期"),
     /** 跨站登录票据无效或已过期 */
-    OAUTH_TICKET_INVALID(90010, "登录票据无效或已过期");
+    OAUTH_TICKET_INVALID(90010, "登录票据无效或已过期"),
+    /** 授权确认单无效或已过期 */
+    OAUTH_CONSENT_INVALID(90011, "授权确认单无效或已过期，请重新发起授权");
 
     /** 状态码 */
     private final int code;

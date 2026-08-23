@@ -4,6 +4,7 @@ import com.orange.entity.dto.auth.LoginRequest;
 import com.orange.entity.dto.auth.RegisterRequest;
 import com.orange.entity.dto.auth.ResetPasswordRequest;
 import com.orange.entity.vo.auth.LoginVO;
+import com.orange.entity.vo.auth.ServerLoginVO;
 
 /**
  * 认证服务接口：注册、登录、登出、会话签发
@@ -56,6 +57,18 @@ public interface AuthService {
      * @param token 会话 token
      */
     void logout(String token);
+
+    /**
+     * 服务端登录（供旧系统服务端调用）：以 client_id + client_secret 认证后，
+     * 校验账号密码并返回用户信息（不签发 UC 会话，邮箱脱敏）
+     *
+     * @param clientId     OAuth 客户端 ID
+     * @param clientSecret 客户端密钥
+     * @param account      登录账号（邮箱或用户名）
+     * @param password     明文密码
+     * @return 用户信息（uid/昵称/头像/脱敏邮箱/状态）
+     */
+    ServerLoginVO serverLogin(String clientId, String clientSecret, String account, String password);
 
     /**
      * 签发会话：生成 token 并写入 Redis（设备数不限，删除 key 即踢下线）

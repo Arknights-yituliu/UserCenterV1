@@ -42,6 +42,18 @@ public final class RedisKeyUtil {
     /** OAuth 跨站登录票据已使用标记 key 前缀：uc:oauth:ticket:used:{ticket} */
     private static final String PREFIX_OAUTH_TICKET_USED = "uc:oauth:ticket:used:";
 
+    /** OAuth 授权确认单 key 前缀：uc:oauth:consent:{pendingId} */
+    private static final String PREFIX_OAUTH_CONSENT = "uc:oauth:consent:";
+
+    /** OAuth 授权确认单已使用标记 key 前缀：uc:oauth:consent:used:{pendingId} */
+    private static final String PREFIX_OAUTH_CONSENT_USED = "uc:oauth:consent:used:";
+
+    /** 用户会话反向索引 key 前缀：uc:uid:session:{uid}（Set，成员为会话 token） */
+    private static final String PREFIX_UID_SESSION = "uc:uid:session:";
+
+    /** 用户 OAuth 令牌反向索引 key 前缀：uc:uid:oauth:{uid}（Set，成员为带类型前缀的令牌） */
+    private static final String PREFIX_UID_OAUTH = "uc:uid:oauth:";
+
     private RedisKeyUtil() {
     }
 
@@ -154,5 +166,45 @@ public final class RedisKeyUtil {
      */
     public static String oauthTicketUsed(String ticket) {
         return PREFIX_OAUTH_TICKET_USED + ticket;
+    }
+
+    /**
+     * OAuth 授权确认单 key（存放待确认的授权参数）
+     *
+     * @param pendingId 确认单 ID（随机不可猜）
+     * @return Redis key
+     */
+    public static String oauthConsent(String pendingId) {
+        return PREFIX_OAUTH_CONSENT + pendingId;
+    }
+
+    /**
+     * OAuth 授权确认单已使用标记 key（并发/重复提交下仅一次生效）
+     *
+     * @param pendingId 确认单 ID
+     * @return Redis key
+     */
+    public static String oauthConsentUsed(String pendingId) {
+        return PREFIX_OAUTH_CONSENT_USED + pendingId;
+    }
+
+    /**
+     * 用户会话反向索引 key（Set，成员为该 uid 名下的会话 token）
+     *
+     * @param uid 用户 uid
+     * @return Redis key
+     */
+    public static String uidSession(Long uid) {
+        return PREFIX_UID_SESSION + uid;
+    }
+
+    /**
+     * 用户 OAuth 令牌反向索引 key（Set，成员为带类型前缀的令牌）
+     *
+     * @param uid 用户 uid
+     * @return Redis key
+     */
+    public static String uidOauth(Long uid) {
+        return PREFIX_UID_OAUTH + uid;
     }
 }

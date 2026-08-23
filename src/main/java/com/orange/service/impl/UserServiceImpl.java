@@ -16,6 +16,7 @@ import com.orange.entity.vo.SessionVO;
 import com.orange.entity.vo.UserInfoVO;
 import com.orange.mapper.UserInfoMapper;
 import com.orange.service.EmailCodeService;
+import com.orange.service.RevokeService;
 import com.orange.service.UserService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,6 +46,7 @@ public class UserServiceImpl implements UserService {
 
     private final UserInfoMapper userMapper;
     private final EmailCodeService emailCodeService;
+    private final RevokeService revokeService;
     private final StringRedisTemplate stringRedisTemplate;
     private final ObjectMapper objectMapper;
     private final PasswordEncoder passwordEncoder;
@@ -54,13 +56,15 @@ public class UserServiceImpl implements UserService {
      *
      * @param userMapper          用户 Mapper
      * @param emailCodeService    验证码服务（绑定/换绑邮箱）
+     * @param revokeService       吊销服务（按 uid 踢出全部会话）
      * @param stringRedisTemplate Redis 客户端
      * @param objectMapper        JSON 序列化器
      */
-    public UserServiceImpl(UserInfoMapper userMapper, EmailCodeService emailCodeService,
+    public UserServiceImpl(UserInfoMapper userMapper, EmailCodeService emailCodeService, RevokeService revokeService,
                            StringRedisTemplate stringRedisTemplate, ObjectMapper objectMapper) {
         this.userMapper = userMapper;
         this.emailCodeService = emailCodeService;
+        this.revokeService = revokeService;
         this.stringRedisTemplate = stringRedisTemplate;
         this.objectMapper = objectMapper;
         this.passwordEncoder = new BCryptPasswordEncoder();
@@ -114,7 +118,7 @@ public class UserServiceImpl implements UserService {
         user.setPassword(passwordEncoder.encode(request.getNewPassword()));
         userMapper.updateById(user);
         // 安全考虑：修改密码后踢出该用户所有其他会话（当前会话由前端重新登录）
-        kickAllSessions(uid);
+        revokeService.kickAllSessions(uid);
     }
 
     /**
@@ -239,6 +243,7 @@ public class UserServiceImpl implements UserService {
                 throw new BusinessException(ResultCode.FORBIDDEN, "无权操作该会话");
             }
             stringRedisTemplate.delete(RedisKeyUtil.token(token));
+            stringRedisTemplate.opsForSet().remove(RedisKeyUtil.uidSession(uid), token);
         } catch (IOException e) {
             throw new BusinessException(ResultCode.SYSTEM_ERROR, "会话解析失败");
         }
@@ -256,29 +261,6 @@ public class UserServiceImpl implements UserService {
             throw new BusinessException(ResultCode.USER_NOT_FOUND);
         }
         return user;
-    }
-
-    /**
-     * 踢出用户全部会话
-     *
-     * @param uid 用户 uid
-     */
-    @Override
-    public void kickAllSessions(Long uid) {
-        for (String key : scanKeys(TOKEN_PATTERN)) {
-            String sessionJson = stringRedisTemplate.opsForValue().get(key);
-            if (sessionJson == null) {
-                continue;
-            }
-            try {
-                SessionInfo session = objectMapper.readValue(sessionJson, SessionInfo.class);
-                if (session != null && uid.equals(session.getUid())) {
-                    stringRedisTemplate.delete(key);
-                }
-            } catch (IOException e) {
-                log.warn("会话解析失败，跳过 key：{}", key);
-            }
-        }
     }
 
     /**

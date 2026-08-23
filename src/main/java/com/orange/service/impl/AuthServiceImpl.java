@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.util.DesensitizeUtil;
+import com.orange.common.util.LogUtil;
 import com.orange.common.util.RedisKeyUtil;
 import com.orange.common.util.SignUtil;
 import com.orange.entity.dto.SessionInfo;
@@ -14,19 +15,23 @@ import com.orange.entity.dto.auth.LoginRequest;
 import com.orange.entity.dto.auth.RegisterRequest;
 import com.orange.entity.dto.auth.ResetPasswordRequest;
 import com.orange.entity.po.LoginLog;
+import com.orange.entity.po.OAuthClient;
 import com.orange.entity.po.UserInfo;
 import com.orange.entity.vo.auth.LoginVO;
+import com.orange.entity.vo.auth.ServerLoginVO;
 import com.orange.mapper.LoginLogMapper;
+import com.orange.mapper.OAuthClientMapper;
 import com.orange.mapper.UserInfoMapper;
 import com.orange.service.AuthService;
 import com.orange.service.EmailCodeService;
-import com.orange.service.UserService;
+import com.orange.service.RevokeService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.concurrent.TimeUnit;
@@ -47,8 +52,9 @@ public class AuthServiceImpl implements AuthService {
 
     private final UserInfoMapper userMapper;
     private final LoginLogMapper loginLogMapper;
+    private final OAuthClientMapper oauthClientMapper;
     private final EmailCodeService emailCodeService;
-    private final UserService userService;
+    private final RevokeService revokeService;
     private final StringRedisTemplate stringRedisTemplate;
     private final ObjectMapper objectMapper;
     private final PasswordEncoder passwordEncoder;
@@ -70,18 +76,20 @@ public class AuthServiceImpl implements AuthService {
      *
      * @param userMapper          用户 Mapper
      * @param loginLogMapper      登录日志 Mapper
+     * @param oauthClientMapper   OAuth 客户端 Mapper（服务端登录的 client 认证）
      * @param emailCodeService    验证码服务
-     * @param userService         用户服务（重设密码后踢全部会话）
+     * @param revokeService       吊销服务（重设密码后踢全部会话）
      * @param stringRedisTemplate Redis 客户端
      * @param objectMapper        JSON 序列化器
      */
-    public AuthServiceImpl(UserInfoMapper userMapper, LoginLogMapper loginLogMapper,
-                           EmailCodeService emailCodeService, UserService userService,
+    public AuthServiceImpl(UserInfoMapper userMapper, LoginLogMapper loginLogMapper, OAuthClientMapper oauthClientMapper,
+                           EmailCodeService emailCodeService, RevokeService revokeService,
                            StringRedisTemplate stringRedisTemplate, ObjectMapper objectMapper) {
         this.userMapper = userMapper;
         this.loginLogMapper = loginLogMapper;
+        this.oauthClientMapper = oauthClientMapper;
         this.emailCodeService = emailCodeService;
-        this.userService = userService;
+        this.revokeService = revokeService;
         this.stringRedisTemplate = stringRedisTemplate;
         this.objectMapper = objectMapper;
         this.passwordEncoder = new BCryptPasswordEncoder();
@@ -229,7 +237,7 @@ public class AuthServiceImpl implements AuthService {
         user.setPassword(passwordEncoder.encode(request.getNewPassword()));
         userMapper.updateById(user);
         // 安全考虑：重置密码后踢出该用户全部会话，需重新登录
-        userService.kickAllSessions(user.getUid());
+        revokeService.kickAllSessions(user.getUid());
     }
 
     /**
@@ -258,7 +266,78 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public void logout(String token) {
         if (token != null && !token.isBlank()) {
+            String sessionJson = stringRedisTemplate.opsForValue().get(RedisKeyUtil.token(token));
             stringRedisTemplate.delete(RedisKeyUtil.token(token));
+            if (sessionJson != null) {
+                try {
+                    SessionInfo session = objectMapper.readValue(sessionJson, SessionInfo.class);
+                    if (session != null && session.getUid() != null) {
+                        stringRedisTemplate.opsForSet().remove(RedisKeyUtil.uidSession(session.getUid()), token);
+                    }
+                } catch (JsonProcessingException ignored) {
+                    LogUtil.warn(AuthServiceImpl.class, "会话反序列化失败，跳过反向索引清理：token={}", token);
+                }
+            }
+        }
+    }
+
+    /**
+     * 服务端登录：旧系统服务端以 client_id + client_secret 认证后，用账号密码换取用户信息。
+     * 不签发 UC 会话，仅返回公开资料（邮箱脱敏），供旧系统本地缓存
+     *
+     * @param clientId     OAuth 客户端 ID
+     * @param clientSecret 客户端密钥
+     * @param account      登录账号（邮箱或用户名）
+     * @param password     明文密码
+     * @return 用户信息（uid/昵称/头像/脱敏邮箱/状态）
+     */
+    @Override
+    public ServerLoginVO serverLogin(String clientId, String clientSecret, String account, String password) {
+        // 1. 客户端认证：仅登记且启用的 client 可调用，防止撞库试探账号密码
+        OAuthClient client = requireEnabledOAuthClient(clientId);
+        authenticateOAuthClient(client, clientSecret);
+        // 2. 账号密码校验（复用密码登录逻辑：含登录锁定与失败计数）
+        UserInfo user = passwordLogin(account, password);
+        // 3. 校验账号状态（封禁账号拒绝登录）
+        checkUserStatus(user);
+        // 4. 组装响应：不签发 UC 会话，邮箱脱敏
+        ServerLoginVO vo = new ServerLoginVO();
+        vo.setUid(user.getUid());
+        vo.setNickname(user.getNickname());
+        vo.setAvatar(user.getAvatar());
+        vo.setEmail(DesensitizeUtil.maskEmail(user.getEmail()));
+        vo.setStatus(user.getStatus());
+        return vo;
+    }
+
+    /**
+     * 加载 OAuth 客户端并校验启用状态（与服务端登录的 client 认证配合使用）
+     *
+     * @param clientId 客户端 ID
+     * @return 客户端实体
+     */
+    private OAuthClient requireEnabledOAuthClient(String clientId) {
+        if (!StringUtils.hasText(clientId)) {
+            throw new BusinessException(ResultCode.OAUTH_CLIENT_INVALID);
+        }
+        OAuthClient client = oauthClientMapper.selectById(clientId);
+        if (client == null || client.getStatus() == null || client.getStatus() != 1) {
+            throw new BusinessException(ResultCode.OAUTH_CLIENT_INVALID);
+        }
+        return client;
+    }
+
+    /**
+     * 客户端认证：需要密钥的客户端必须提供正确密钥（BCrypt 比对，与 OAuth 令牌流程一致）
+     *
+     * @param client       客户端实体
+     * @param clientSecret 请求携带的密钥
+     */
+    private void authenticateOAuthClient(OAuthClient client, String clientSecret) {
+        boolean needsSecret = StringUtils.hasText(client.getClientSecret());
+        if (needsSecret && (!StringUtils.hasText(clientSecret)
+                || !passwordEncoder.matches(clientSecret, client.getClientSecret()))) {
+            throw new BusinessException(ResultCode.OAUTH_SECRET_INVALID);
         }
     }
 
@@ -278,6 +357,7 @@ public class AuthServiceImpl implements AuthService {
                     RedisKeyUtil.token(token),
                     objectMapper.writeValueAsString(session),
                     sessionTtlSeconds, TimeUnit.SECONDS);
+            stringRedisTemplate.opsForSet().add(RedisKeyUtil.uidSession(uid), token);
         } catch (JsonProcessingException e) {
             throw new BusinessException(ResultCode.SYSTEM_ERROR, "会话创建失败");
         }

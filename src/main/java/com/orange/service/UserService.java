@@ -73,13 +73,6 @@ public interface UserService {
     void changeEmail(Long uid, ChangeEmailRequest request);
 
     /**
-     * 踢出用户全部会话（修改密码/重设密码后调用）
-     *
-     * @param uid 用户 uid
-     */
-    void kickAllSessions(Long uid);
-
-    /**
      * 踢指定设备下线（校验会话归属当前用户）
      *
      * @param uid   用户 uid
