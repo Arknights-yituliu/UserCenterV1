@@ -54,6 +54,15 @@ public final class RedisKeyUtil {
     /** 用户 OAuth 令牌反向索引 key 前缀：uc:uid:oauth:{uid}（Set，成员为带类型前缀的令牌） */
     private static final String PREFIX_UID_OAUTH = "uc:uid:oauth:";
 
+    /** 直连登录发起会话 key 前缀：uc:oauth:direct:channel:{channel}（前端登录的前置凭证） */
+    private static final String PREFIX_DIRECT_CHANNEL = "uc:oauth:direct:channel:";
+
+    /** 直连登录一次性票据 key 前缀：uc:oauth:direct:ticket:{ticket}（前端登录成功后的凭证） */
+    private static final String PREFIX_DIRECT_TICKET = "uc:oauth:direct:ticket:";
+
+    /** 直连登录票据已使用标记 key 前缀：uc:oauth:direct:used:{ticket} */
+    private static final String PREFIX_DIRECT_USED = "uc:oauth:direct:used:";
+
     private RedisKeyUtil() {
     }
 
@@ -206,5 +215,35 @@ public final class RedisKeyUtil {
      */
     public static String uidOauth(Long uid) {
         return PREFIX_UID_OAUTH + uid;
+    }
+
+    /**
+     * 直连登录发起会话 key（旧系统后端换取的前置凭证，前端需携带才能调直连登录）
+     *
+     * @param channel 发起会话凭证
+     * @return Redis key
+     */
+    public static String directChannel(String channel) {
+        return PREFIX_DIRECT_CHANNEL + channel;
+    }
+
+    /**
+     * 直连登录一次性票据 key（前端登录成功后换取，旧系统后端凭它兑换用户信息）
+     *
+     * @param ticket 一次性登录票据
+     * @return Redis key
+     */
+    public static String directTicket(String ticket) {
+        return PREFIX_DIRECT_TICKET + ticket;
+    }
+
+    /**
+     * 直连登录票据已使用标记 key（并发/重放下仅一次成功）
+     *
+     * @param ticket 一次性登录票据
+     * @return Redis key
+     */
+    public static String directUsed(String ticket) {
+        return PREFIX_DIRECT_USED + ticket;
     }
 }
