@@ -34,7 +34,8 @@ public class RegisterRequest {
     /** 邮箱验证码（填了邮箱时必须提供：密码注册带邮箱、邮箱验证码注册均需校验） */
     private String verificationCode;
 
-    /** 昵称（可选） */
+    /** 昵称（可选，业务上限 24 字符；表字段 VARCHAR(64) 富余，无需同步改表） */
+    @Size(max = 24, message = "昵称长度不能超过 24 位")
     private String nickname;
 
     public String getRegisterType() {

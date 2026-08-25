@@ -29,6 +29,8 @@ import com.orange.mapper.UserInfoMapper;
 import com.orange.service.AuthService;
 import com.orange.service.EmailCodeService;
 import com.orange.service.RevokeService;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.Validator;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -41,6 +43,7 @@ import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -65,6 +68,7 @@ public class AuthServiceImpl implements AuthService {
     private final StringRedisTemplate stringRedisTemplate;
     private final ObjectMapper objectMapper;
     private final PasswordEncoder passwordEncoder;
+    private final Validator validator;
 
     /** 会话有效期（秒）：默认 180 天 */
     @Value("${user-center.session-ttl-seconds:15552000}")
@@ -96,10 +100,12 @@ public class AuthServiceImpl implements AuthService {
      * @param revokeService       吊销服务（重设密码后踢全部会话）
      * @param stringRedisTemplate Redis 客户端
      * @param objectMapper        JSON 序列化器
+     * @param validator           Bean Validation 校验器（直连注册散参手动校验）
      */
     public AuthServiceImpl(UserInfoMapper userMapper, LoginLogMapper loginLogMapper, OAuthClientMapper oauthClientMapper,
                            EmailCodeService emailCodeService, RevokeService revokeService,
-                           StringRedisTemplate stringRedisTemplate, ObjectMapper objectMapper) {
+                           StringRedisTemplate stringRedisTemplate, ObjectMapper objectMapper,
+                           Validator validator) {
         this.userMapper = userMapper;
         this.loginLogMapper = loginLogMapper;
         this.oauthClientMapper = oauthClientMapper;
@@ -108,6 +114,7 @@ public class AuthServiceImpl implements AuthService {
         this.stringRedisTemplate = stringRedisTemplate;
         this.objectMapper = objectMapper;
         this.passwordEncoder = new BCryptPasswordEncoder();
+        this.validator = validator;
     }
 
     /**
@@ -442,13 +449,30 @@ public class AuthServiceImpl implements AuthService {
     public DirectLoginTicketVO directRegister(String channel, RegisterRequest request, String ip) {
         // 1. 校验发起会话凭证有效（防滥用：前端必须持旧系统后端换取的 channel）
         String clientId = readDirectChannel(channel);
-        // 2. 复用注册校验与创建用户逻辑（含邮箱验证码校验、唯一性校验、密码加密）
+        // 2. 手动 Bean Validation：直连注册为散参入参未走 @Valid，此处补齐与主站注册一致的格式/长度校验
+        validateRegisterRequest(request);
+        // 3. 复用注册校验与创建用户逻辑（含邮箱验证码校验、唯一性校验、密码加密）
         UserInfo user = createRegisteredUser(request, ip);
-        // 3. 消费发起会话（一次性，防止重复使用）
+        // 4. 消费发起会话（一次性，防止重复使用）
         stringRedisTemplate.delete(RedisKeyUtil.directChannel(channel));
-        // 4. 签发一次性登录票据（绑定 clientId + uid），旧系统后端凭票兑换用户信息
+        // 5. 签发一次性登录票据（绑定 clientId + uid），旧系统后端凭票兑换用户信息
         LogUtil.debug(AuthServiceImpl.class, "[Auth] 直连注册成功: clientId={}, uid={}", clientId, user.getUid());
         return issueDirectTicket(clientId, user.getUid());
+    }
+
+    /**
+     * 手动触发注册参数校验：直连注册为散参入参、未走 @Valid 注解，需手动校验，
+     * 使格式/长度规则与主站注册（@RequestBody @Valid RegisterRequest）完全一致
+     *
+     * @param request 注册参数
+     */
+    private void validateRegisterRequest(RegisterRequest request) {
+        Set<ConstraintViolation<RegisterRequest>> violations = validator.validate(request);
+        if (!violations.isEmpty()) {
+            // 仅返回第一条违规信息，避免向调用方暴露全部校验细节
+            String message = violations.iterator().next().getMessage();
+            throw new BusinessException(ResultCode.PARAM_ERROR, message);
+        }
     }
 
     /**
