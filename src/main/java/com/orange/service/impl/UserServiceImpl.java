@@ -214,7 +214,7 @@ public class UserServiceImpl implements UserService {
                 if (session != null && uid.equals(session.getUid())) {
                     SessionVO vo = new SessionVO();
                     vo.setToken(key.substring(RedisKeyUtil.token("").length()));
-                    vo.setAppId(session.getAppId());
+                    vo.setClientId(session.getClientId());
                     vo.setLoginTime(session.getCreateTime());
                     sessions.add(vo);
                 }

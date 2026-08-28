@@ -36,7 +36,7 @@ DROP TABLE IF EXISTS `login_log`;
 CREATE TABLE `login_log` (
     `id`         BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
     `uid`        BIGINT       DEFAULT NULL COMMENT '用户 uid（失败时可能为空）',
-    `app_id`     VARCHAR(64)  DEFAULT NULL COMMENT '来源应用',
+    `client_id`  VARCHAR(64)  DEFAULT NULL COMMENT '来源客户端 id（对应 oauth_client.client_id）',
     `login_type` VARCHAR(32)  NOT NULL COMMENT '登录方式：password/email_code/wechat/qq',
     `ip`         VARCHAR(64)  DEFAULT NULL COMMENT '登录 IP',
     `user_agent` VARCHAR(512) DEFAULT NULL COMMENT 'UA',
@@ -107,4 +107,24 @@ CREATE TABLE `smtp_config` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_account_key` (`account_key`)
 ) ENGINE = InnoDB COMMENT = 'SMTP 邮件渠道配置表';
+
+-- -------------------------------------------------------------
+-- 6. 用户配置表
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `user_config`;
+CREATE TABLE `user_config` (
+    `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `uid`         BIGINT       NOT NULL COMMENT '用户 uid',
+    `client_id`   VARCHAR(64)  NOT NULL COMMENT '客户端标识（对应 oauth_client.client_id）',
+    `category`    VARCHAR(64)  NOT NULL COMMENT '配置分类',
+    `version`     VARCHAR(32)  DEFAULT NULL COMMENT '配置版本（同用户+客户端+分类下区分不同配置）',
+    `source`      VARCHAR(32)  DEFAULT NULL COMMENT '来源：web/mini_app 等',
+    `note`        VARCHAR(255) DEFAULT NULL COMMENT '备注',
+    `config`      LONGTEXT     NOT NULL COMMENT '配置内容（JSON 字符串）',
+    `create_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    `delete_flag` TINYINT      NOT NULL DEFAULT 0 COMMENT '删除标记：0=未删除 1=已删除',
+    PRIMARY KEY (`id`),
+    KEY `idx_uid_client_category` (`uid`, `client_id`, `category`)
+) ENGINE = InnoDB COMMENT = '用户配置表';
 

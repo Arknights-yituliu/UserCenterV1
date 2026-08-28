@@ -8,8 +8,12 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  * Web MVC 配置：注册拦截器
  *
  * <ul>
- *   <li>UserAuthInterceptor：校验用户登录态</li>
+ *   <li>UserAuthInterceptor：仅校验用户会话（/user/** 用户侧接口）</li>
+ *   <li>OAuthAuthInterceptor：仅校验 OAuth access_token（/oauth/** 中需要令牌的接口）</li>
  * </ul>
+ *
+ * <p>两条鉴权链路完全分离，互不纠缠：用户侧接口只认用户会话，
+ * OAuth 资源接口只认 access_token，client_id 均由各自登录上下文提供。</p>
  *
  * @author UserCenter
  */
@@ -17,14 +21,17 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class WebConfig implements WebMvcConfigurer {
 
     private final UserAuthInterceptor userAuthInterceptor;
+    private final OAuthAuthInterceptor oauthAuthInterceptor;
 
     /**
      * 构造器注入拦截器
      *
      * @param userAuthInterceptor 用户认证拦截器
+     * @param oauthAuthInterceptor OAuth 认证拦截器
      */
-    public WebConfig(UserAuthInterceptor userAuthInterceptor) {
+    public WebConfig(UserAuthInterceptor userAuthInterceptor, OAuthAuthInterceptor oauthAuthInterceptor) {
         this.userAuthInterceptor = userAuthInterceptor;
+        this.oauthAuthInterceptor = oauthAuthInterceptor;
     }
 
     /**
@@ -34,8 +41,11 @@ public class WebConfig implements WebMvcConfigurer {
      */
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        // 用户登录态校验：用户侧接口
+        // 用户侧接口：仅校验用户会话
         registry.addInterceptor(userAuthInterceptor)
                 .addPathPatterns("/user/**", "/auth/logout");
+        // OAuth 资源接口：需要 access_token 的接口统一走此拦截器
+        registry.addInterceptor(oauthAuthInterceptor)
+                .addPathPatterns("/oauth/userinfo", "/oauth/config/**");
     }
 }

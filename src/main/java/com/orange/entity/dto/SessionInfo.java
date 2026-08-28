@@ -14,8 +14,8 @@ public class SessionInfo {
     /** 用户 uid */
     private Long uid;
 
-    /** 来源应用 AppId */
-    private String appId;
+    /** 来源客户端 id */
+    private String clientId;
 
     /** 会话创建时间（登录时间） */
     private LocalDateTime createTime;
@@ -23,9 +23,9 @@ public class SessionInfo {
     public SessionInfo() {
     }
 
-    public SessionInfo(Long uid, String appId, LocalDateTime createTime) {
+    public SessionInfo(Long uid, String clientId, LocalDateTime createTime) {
         this.uid = uid;
-        this.appId = appId;
+        this.clientId = clientId;
         this.createTime = createTime;
     }
 
@@ -37,12 +37,12 @@ public class SessionInfo {
         this.uid = uid;
     }
 
-    public String getAppId() {
-        return appId;
+    public String getClientId() {
+        return clientId;
     }
 
-    public void setAppId(String appId) {
-        this.appId = appId;
+    public void setClientId(String clientId) {
+        this.clientId = clientId;
     }
 
     public LocalDateTime getCreateTime() {

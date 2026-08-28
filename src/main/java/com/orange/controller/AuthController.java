@@ -61,29 +61,29 @@ public class AuthController {
      * 注册（密码注册 / 邮箱验证码注册），成功后自动登录
      *
      * @param request      注册参数
-     * @param httpRequest  HTTP 请求（取 IP / 来源应用）
+     * @param httpRequest  HTTP 请求（取 IP / 来源客户端）
      * @return 登录响应（含 token）
      */
     @Operation(summary = "注册")
     @PostMapping("/register")
     public Result<LoginVO> register(@Valid @RequestBody RegisterRequest request, HttpServletRequest httpRequest) {
-        String appId = httpRequest.getHeader("UC-App-Id");
-        return Result.success(authService.register(request, RequestUtil.getIp(httpRequest), appId));
+        String clientId = httpRequest.getHeader("UC-Client-Id");
+        return Result.success(authService.register(request, RequestUtil.getIp(httpRequest), clientId));
     }
 
     /**
      * 登录（密码 / 邮箱验证码），成功后返回会话 token（由前端自行携带：Authorization / UC-Token）
      *
      * @param request      登录参数
-     * @param httpRequest  HTTP 请求（取 IP / UA / 来源应用）
+     * @param httpRequest  HTTP 请求（取 IP / UA / 来源客户端）
      * @return 登录响应（含 token）
      */
     @Operation(summary = "登录")
     @PostMapping("/login")
     public Result<LoginVO> login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
-        String appId = httpRequest.getHeader("UC-App-Id");
+        String clientId = httpRequest.getHeader("UC-Client-Id");
         LoginVO vo = authService.login(request, RequestUtil.getIp(httpRequest),
-                httpRequest.getHeader("User-Agent"), appId);
+                httpRequest.getHeader("User-Agent"), clientId);
         return Result.success(vo);
     }
 

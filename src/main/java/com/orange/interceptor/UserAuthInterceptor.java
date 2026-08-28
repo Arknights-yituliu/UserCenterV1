@@ -16,10 +16,11 @@ import org.springframework.web.servlet.HandlerInterceptor;
 import java.io.IOException;
 
 /**
- * 用户认证拦截器
+ * 用户认证拦截器（仅处理用户会话，OAuth 令牌由 {@link OAuthAuthInterceptor} 单独负责）
  *
- * <p>校验请求携带的用户 token（Authorization: Bearer {token} 或 UC-Token），
- * 实时查询 Redis 会话，保证"踢下线"立即生效；通过后将 uid 写入 {@link UserContext}</p>
+ * <p>校验请求携带的用户会话凭证（Authorization: Bearer {token} 或 UC-Token），
+ * 实时查询 Redis 会话（uc:token:*），保证"踢下线"立即生效；
+ * 通过后将 uid 与来源 client_id 写入 {@link UserContext}。</p>
  *
  * @author UserCenter
  */
@@ -44,7 +45,7 @@ public class UserAuthInterceptor implements HandlerInterceptor {
     }
 
     /**
-     * 请求处理前校验登录态
+     * 请求处理前校验登录态并注入用户上下文
      *
      * @param request  请求
      * @param response 响应
@@ -74,6 +75,7 @@ public class UserAuthInterceptor implements HandlerInterceptor {
                 throw new BusinessException(ResultCode.NOT_LOGIN);
             }
             UserContext.setUid(session.getUid());
+            UserContext.setClientId(session.getClientId());
             return true;
         } catch (IOException e) {
             throw new BusinessException(ResultCode.NOT_LOGIN);

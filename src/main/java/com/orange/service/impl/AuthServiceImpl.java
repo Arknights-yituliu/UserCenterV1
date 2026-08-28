@@ -125,15 +125,15 @@ public class AuthServiceImpl implements AuthService {
      *
      * @param request 注册参数
      * @param ip      注册 IP
-     * @param appId   来源应用 AppId
+     * @param clientId   来源客户端 id
      * @return 登录响应（含 token）
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public LoginVO register(RegisterRequest request, String ip, String appId) {
+    public LoginVO register(RegisterRequest request, String ip, String clientId) {
         // 校验 + 创建用户（含邮箱验证码校验、唯一性校验、密码加密）
         UserInfo user = createRegisteredUser(request, ip);
-        return buildLoginVO(user, createSession(user.getUid(), appId));
+        return buildLoginVO(user, createSession(user.getUid(), clientId));
     }
 
     /**
@@ -209,11 +209,11 @@ public class AuthServiceImpl implements AuthService {
      * @param request 登录参数
      * @param ip      登录 IP
      * @param ua      浏览器 UA
-     * @param appId   来源应用 AppId
+     * @param clientId   来源客户端 id
      * @return 登录响应（含 token）
      */
     @Override
-    public LoginVO login(LoginRequest request, String ip, String ua, String appId) {
+    public LoginVO login(LoginRequest request, String ip, String ua, String clientId) {
         UserInfo user;
         String loginType;
 
@@ -236,8 +236,8 @@ public class AuthServiceImpl implements AuthService {
         user.setLastLoginTime(LocalDateTime.now());
         userMapper.updateById(user);
 
-        String token = createSession(user.getUid(), appId);
-        writeLoginLog(user.getUid(), appId, loginType, ip, ua, 1);
+        String token = createSession(user.getUid(), clientId);
+        writeLoginLog(user.getUid(), clientId, loginType, ip, ua, 1);
         return buildLoginVO(user, token);
     }
 
@@ -604,13 +604,13 @@ public class AuthServiceImpl implements AuthService {
      * 签发会话：生成 token 并写入 Redis（设备数不限，删除 key 即踢下线）
      *
      * @param uid   用户 uid
-     * @param appId 来源应用 AppId（可为空）
+     * @param clientId 来源客户端 id（可为空）
      * @return 会话 token
      */
     @Override
-    public String createSession(Long uid, String appId) {
+    public String createSession(Long uid, String clientId) {
         String token = SignUtil.generateToken();
-        SessionInfo session = new SessionInfo(uid, appId == null ? "" : appId, LocalDateTime.now());
+        SessionInfo session = new SessionInfo(uid, clientId == null ? "" : clientId, LocalDateTime.now());
         try {
             stringRedisTemplate.opsForValue().set(
                     RedisKeyUtil.token(token),
@@ -728,16 +728,16 @@ public class AuthServiceImpl implements AuthService {
      * 写登录日志
      *
      * @param uid       用户 uid
-     * @param appId     来源应用
+     * @param clientId   来源客户端 id
      * @param loginType 登录方式
      * @param ip        登录 IP
      * @param ua        UA
      * @param status    1=成功 0=失败
      */
-    private void writeLoginLog(Long uid, String appId, String loginType, String ip, String ua, int status) {
+    private void writeLoginLog(Long uid, String clientId, String loginType, String ip, String ua, int status) {
         LoginLog log = new LoginLog();
         log.setUid(uid);
-        log.setAppId(appId);
+        log.setClientId(clientId);
         log.setLoginType(loginType);
         log.setIp(ip);
         log.setUserAgent(ua);

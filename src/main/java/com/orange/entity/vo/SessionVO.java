@@ -12,8 +12,8 @@ public class SessionVO {
     /** 会话 token（用户本人设备的会话，用于踢下线操作） */
     private String token;
 
-    /** 来源应用 AppId */
-    private String appId;
+    /** 来源客户端 id */
+    private String clientId;
 
     /** 登录时间 */
     private LocalDateTime loginTime;
@@ -26,12 +26,12 @@ public class SessionVO {
         this.token = token;
     }
 
-    public String getAppId() {
-        return appId;
+    public String getClientId() {
+        return clientId;
     }
 
-    public void setAppId(String appId) {
-        this.appId = appId;
+    public void setClientId(String clientId) {
+        this.clientId = clientId;
     }
 
     public LocalDateTime getLoginTime() {

@@ -1,5 +1,6 @@
 package com.orange.controller;
 
+import com.orange.common.context.UserContext;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.util.LogUtil;
@@ -386,18 +387,18 @@ public class OAuthController {
     }
 
     /**
-     * 获取当前授权用户信息：携带 access_token 调用
+     * 获取当前授权用户信息：access_token 由 OAuthAuthInterceptor 统一校验并注入上下文
      *
      * <p>令牌解析出 uid 后查库补齐用户基础资料（邮箱/用户名/昵称/头像），
      * 便于无自有账户体系的接入方直接以 UC 用户作为登录账号。</p>
      *
-     * @param request HTTP 请求（Authorization: Bearer access_token）
      * @return 用户信息（uid、邮箱、用户名、昵称、头像）
      */
     @Operation(summary = "OAuth 用户信息")
     @GetMapping("/userinfo")
-    public Result<UserInfoVO> userinfo(HttpServletRequest request) {
-        OAuthTokenPrincipal principal = oauthTokenService.resolveAccessToken(RequestUtil.resolveToken(request));
+    public Result<UserInfoVO> userinfo() {
+        OAuthTokenPrincipal principal = new OAuthTokenPrincipal(
+                UserContext.requireUid(), UserContext.getClientId(), UserContext.getScope());
         UserInfo user = userInfoMapper.selectById(principal.getUid());
         LogUtil.debug(OAuthController.class, "[OAuth] 用户信息: uid={}, clientId={}, scope={}",
                 principal.getUid(), principal.getClientId(), principal.getScope());

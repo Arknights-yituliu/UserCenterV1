@@ -21,8 +21,8 @@ public class LoginLog {
     /** 用户 uid（失败时可能为空） */
     private Long uid;
 
-    /** 来源应用 */
-    private String appId;
+    /** 来源客户端 id */
+    private String clientId;
 
     /** 登录方式：password/email_code/wechat/qq */
     private String loginType;
@@ -55,12 +55,12 @@ public class LoginLog {
         this.uid = uid;
     }
 
-    public String getAppId() {
-        return appId;
+    public String getClientId() {
+        return clientId;
     }
 
-    public void setAppId(String appId) {
-        this.appId = appId;
+    public void setClientId(String clientId) {
+        this.clientId = clientId;
     }
 
     public String getLoginType() {
