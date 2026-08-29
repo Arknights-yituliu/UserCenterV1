@@ -28,9 +28,10 @@ public interface UserConfigService {
      * @param clientId 来源客户端标识（取自登录上下文）
      * @param category 配置分类
      * @param version  配置版本（可空，空则返回该分类下全部版本）
+     * @param name     配置名称（可空，空则返回该版本下全部命名配置）
      * @return 配置列表
      */
-    List<UserConfigVO> listConfigs(Long uid, String clientId, String category, String version);
+    List<UserConfigVO> listConfigs(Long uid, String clientId, String category, String version, String name);
 
     /**
      * 删除用户配置（逻辑删除）
