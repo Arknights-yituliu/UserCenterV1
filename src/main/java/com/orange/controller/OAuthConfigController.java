@@ -59,14 +59,16 @@ public class OAuthConfigController {
      *
      * @param category 配置分类
      * @param version  配置版本（可空）
+     * @param name     配置名称（可空）
      * @return 配置列表
      */
     @Operation(summary = "查询用户配置（OAuth）")
     @GetMapping("/list")
     public Result<List<UserConfigVO>> listConfigs(@RequestParam("category") String category,
-                                                  @RequestParam(value = "version", required = false) String version) {
+                                                  @RequestParam(value = "version", required = false) String version,
+                                                  @RequestParam(value = "name", required = false) String name) {
         return Result.success(userConfigService.listConfigs(
-                UserContext.requireUid(), UserContext.getClientId(), category, version));
+                UserContext.requireUid(), UserContext.getClientId(), category, version, name));
     }
 
     /**

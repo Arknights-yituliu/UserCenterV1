@@ -318,36 +318,7 @@ public class AuthServiceImpl implements AuthService {
     }
 
     /**
-     * 服务端登录：旧系统服务端以 client_id + client_secret 认证后，用账号密码换取用户信息。
-     * 不签发 UC 会话，仅返回公开资料（邮箱脱敏），供旧系统本地缓存
-     *
-     * @param clientId     OAuth 客户端 ID
-     * @param clientSecret 客户端密钥
-     * @param account      登录账号（邮箱或用户名）
-     * @param password     明文密码
-     * @return 用户信息（uid/昵称/头像/脱敏邮箱/状态）
-     */
-    @Override
-    public ServerLoginVO serverLogin(String clientId, String clientSecret, String account, String password) {
-        // 1. 客户端认证：仅登记且启用的 client 可调用，防止撞库试探账号密码
-        OAuthClient client = requireEnabledOAuthClient(clientId);
-        authenticateOAuthClient(client, clientSecret);
-        // 2. 账号密码校验（复用密码登录逻辑：含登录锁定与失败计数）
-        UserInfo user = passwordLogin(account, password);
-        // 3. 校验账号状态（封禁账号拒绝登录）
-        checkUserStatus(user);
-        // 4. 组装响应：不签发 UC 会话，邮箱脱敏
-        ServerLoginVO vo = new ServerLoginVO();
-        vo.setUid(user.getUid());
-        vo.setNickname(user.getNickname());
-        vo.setAvatar(user.getAvatar());
-        vo.setEmail(DesensitizeUtil.maskEmail(user.getEmail()));
-        vo.setStatus(user.getStatus());
-        return vo;
-    }
-
-    /**
-     * 加载 OAuth 客户端并校验启用状态（与服务端登录的 client 认证配合使用）
+     * 加载 OAuth 客户端并校验启用状态（与直连登录的 client 认证配合使用）
      *
      * @param clientId 客户端 ID
      * @return 客户端实体

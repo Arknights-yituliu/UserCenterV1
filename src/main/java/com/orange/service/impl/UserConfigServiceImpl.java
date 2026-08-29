@@ -46,7 +46,7 @@ public class UserConfigServiceImpl implements UserConfigService {
 
     /**
      * 保存用户配置：client_id 取自登录上下文（前端不可指定）；传 id 走编辑（校验归属），
-     * 不传 id 按（uid+客户端+分类+版本）幂等覆盖，保证同键不重复
+     * 不传 id 按（uid+客户端+分类+版本+名称）幂等覆盖，保证同键不重复
      *
      * @param uid     用户 uid
      * @param request 保存参数
@@ -62,20 +62,22 @@ public class UserConfigServiceImpl implements UserConfigService {
             config.setClientId(clientId);
             config.setCategory(request.getCategory());
             config.setVersion(request.getVersion());
+            config.setName(request.getName());
         } else {
-            // 新增：同（uid+客户端+分类+版本）已存在则复用该记录，保证幂等（version 为空时按 IS NULL 精确匹配）
+            // 新增：同（uid+客户端+分类+版本+名称）已存在则复用该记录，保证幂等（version/name 必填，无空值匹配问题）
             config = userConfigMapper.selectOne(Wrappers.<UserConfig>lambdaQuery()
                     .eq(UserConfig::getUid, uid)
                     .eq(UserConfig::getClientId, clientId)
                     .eq(UserConfig::getCategory, request.getCategory())
-                    .eq(request.getVersion() != null, UserConfig::getVersion, request.getVersion())
-                    .isNull(request.getVersion() == null, UserConfig::getVersion));
+                    .eq(UserConfig::getVersion, request.getVersion())
+                    .eq(UserConfig::getName, request.getName()));
             if (config == null) {
                 config = new UserConfig();
                 config.setUid(uid);
                 config.setClientId(clientId);
                 config.setCategory(request.getCategory());
                 config.setVersion(request.getVersion());
+                config.setName(request.getName());
                 config.setDeleteFlag(0);
             }
         }
@@ -110,10 +112,11 @@ public class UserConfigServiceImpl implements UserConfigService {
      * @param clientId 来源客户端标识
      * @param category 配置分类
      * @param version  配置版本（可空，空则返回该分类下全部版本）
+     * @param name     配置名称（可空，空则返回该版本下全部命名配置）
      * @return 配置列表（按更新时间倒序）
      */
     @Override
-    public List<UserConfigVO> listConfigs(Long uid, String clientId, String category, String version) {
+    public List<UserConfigVO> listConfigs(Long uid, String clientId, String category, String version, String name) {
         // client_id 必须来自登录上下文，前端不可指定
         if (!StringUtils.hasText(clientId)) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "缺少来源客户端标识，请重新登录");
@@ -123,6 +126,7 @@ public class UserConfigServiceImpl implements UserConfigService {
                 .eq(UserConfig::getClientId, clientId)
                 .eq(UserConfig::getCategory, category)
                 .eq(StringUtils.hasText(version), UserConfig::getVersion, version)
+                .eq(StringUtils.hasText(name), UserConfig::getName, name)
                 .orderByDesc(UserConfig::getUpdateTime));
         return list.stream().map(this::toVO).collect(Collectors.toList());
     }
@@ -202,6 +206,7 @@ public class UserConfigServiceImpl implements UserConfigService {
         vo.setClientId(config.getClientId());
         vo.setCategory(config.getCategory());
         vo.setVersion(config.getVersion());
+        vo.setName(config.getName());
         vo.setSource(config.getSource());
         vo.setNote(config.getNote());
         vo.setConfig(parseConfig(config.getConfig()));

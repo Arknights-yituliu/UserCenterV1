@@ -61,18 +61,6 @@ public interface AuthService {
     void logout(String token);
 
     /**
-     * 服务端登录（供旧系统服务端调用）：以 client_id + client_secret 认证后，
-     * 校验账号密码并返回用户信息（不签发 UC 会话，邮箱脱敏）
-     *
-     * @param clientId     OAuth 客户端 ID
-     * @param clientSecret 客户端密钥
-     * @param account      登录账号（邮箱或用户名）
-     * @param password     明文密码
-     * @return 用户信息（uid/昵称/头像/脱敏邮箱/状态）
-     */
-    ServerLoginVO serverLogin(String clientId, String clientSecret, String account, String password);
-
-    /**
      * 直连登录-发起会话（旧系统后端调用）：client 认证通过后签发短时发起会话凭证，
      * 前端持凭证才能调直连登录，避免 client_secret 暴露给浏览器
      *

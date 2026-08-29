@@ -1,9 +1,9 @@
 package com.orange.entity.vo.auth;
 
 /**
- * 服务端登录响应（POST /oauth2/server-login，供旧系统服务端调用）
+ * 直连登录兑换用户信息响应（POST /oauth2/direct-user，供旧系统服务端调用）
  *
- * <p>旧系统以 client_id + client_secret 认证后，用账号密码换取用户信息做本地缓存。
+ * <p>旧系统凭一次性登录票据兑换用户信息做本地缓存。
  * 仅返回公开资料（不签发 UC 会话 token），邮箱为脱敏值，供展示不做账号关联。</p>
  *
  * @author UserCenter

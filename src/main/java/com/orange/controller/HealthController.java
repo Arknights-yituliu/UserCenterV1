@@ -1,5 +1,6 @@
 package com.orange.controller;
 
+import com.orange.common.util.Result;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,11 +18,11 @@ public class HealthController {
     /**
      * 根路径健康检查
      *
-     * @return 后端启动成功提示文本
+     * @return 统一响应，data 为后端启动成功提示文本
      */
     @Operation(summary = "根路径健康检查")
     @GetMapping("/")
-    public String health() {
-        return "用户中心后端启动成功";
+    public Result<String> health() {
+        return Result.success("用户中心后端启动成功");
     }
 }

@@ -20,7 +20,6 @@ import org.springframework.web.bind.annotation.RestController;
  * 旧系统登录对接端点（基于 OAuth client 认证体系）
  *
  * <ul>
- *   <li>POST /oauth2/server-login：服务端登录，旧系统服务端以 client 认证 + 账号密码换用户信息</li>
  *   <li>POST /oauth2/direct-*：直连登录四接口（发起会话/提交凭证/注册/兑换用户信息），
  *       登录/注册凭证由浏览器直接提交 UC，不经过旧系统后端</li>
  * </ul>
@@ -41,28 +40,6 @@ public class OAuthLegacyLoginController {
      */
     public OAuthLegacyLoginController(AuthService authService) {
         this.authService = authService;
-    }
-
-    /**
-     * 服务端登录（旧系统对接）：旧系统服务端以 client_id + client_secret 认证后，
-     * 用账号密码换取用户信息（uid/昵称/头像/脱敏邮箱/状态），供旧系统本地缓存做账号打通。
-     * 不签发 UC 会话 token
-     *
-     * @param clientId     OAuth 客户端 ID
-     * @param clientSecret 客户端密钥
-     * @param account      登录账号（邮箱或用户名）
-     * @param password     明文密码
-     * @return 用户信息（uid/昵称/头像/脱敏邮箱/状态）
-     */
-    @Operation(summary = "服务端登录（旧系统对接，client 认证 + 账号密码换用户信息）")
-    @PostMapping("/server-login")
-    public Result<ServerLoginVO> serverLogin(@RequestParam("client_id") String clientId,
-                                             @RequestParam("client_secret") String clientSecret,
-                                             @RequestParam("account") String account,
-                                             @RequestParam("password") String password) {
-        ServerLoginVO vo = authService.serverLogin(clientId, clientSecret, account, password);
-        LogUtil.debug(OAuthLegacyLoginController.class, "[OAuth] 服务端登录成功: clientId={}, uid={}", clientId, vo.getUid());
-        return Result.success(vo);
     }
 
     /**
