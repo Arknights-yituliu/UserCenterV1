@@ -33,6 +33,9 @@ public class UserConfig {
     /** 配置版本 */
     private String version;
 
+    /** 配置名称（同版本下的命名快照，可空：空表示该版本默认配置） */
+    private String name;
+
     /** 来源：web/mini_app 等 */
     private String source;
 
@@ -92,6 +95,14 @@ public class UserConfig {
 
     public void setVersion(String version) {
         this.version = version;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
     }
 
     public String getSource() {

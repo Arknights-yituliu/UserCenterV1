@@ -56,14 +56,16 @@ public class UserConfigController {
      *
      * @param category 配置分类
      * @param version  配置版本（可空，空则返回该分类下全部版本）
+     * @param name     配置名称（可空，空则返回该版本下全部命名配置）
      * @return 配置列表
      */
     @Operation(summary = "查询用户配置")
     @GetMapping("/list")
     public Result<List<UserConfigVO>> listConfigs(@RequestParam("category") String category,
-                                                  @RequestParam(value = "version", required = false) String version) {
+                                                  @RequestParam(value = "version", required = false) String version,
+                                                  @RequestParam(value = "name", required = false) String name) {
         return Result.success(userConfigService.listConfigs(
-                UserContext.requireUid(), UserContext.getClientId(), category, version));
+                UserContext.requireUid(), UserContext.getClientId(), category, version, name));
     }
 
     /**

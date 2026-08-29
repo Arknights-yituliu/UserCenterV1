@@ -16,19 +16,25 @@ public class UserConfigSaveRequest {
 
     /** 配置分类 */
     @NotBlank(message = "配置分类不能为空")
-    @Size(max = 64, message = "配置分类长度不能超过 64")
+    @Size(max = 32, message = "配置分类长度不能超过 32")
     private String category;
 
     /** 配置版本 */
+    @NotBlank(message = "配置版本不能为空")
     @Size(max = 32, message = "配置版本长度不能超过 32")
     private String version;
+
+    /** 配置名称（同版本下的命名快照，必填） */
+    @NotBlank(message = "配置名称不能为空")
+    @Size(max = 32, message = "配置名称长度不能超过 32")
+    private String name;
 
     /** 来源：web/mini_app 等 */
     @Size(max = 32, message = "来源长度不能超过 32")
     private String source;
 
     /** 备注 */
-    @Size(max = 255, message = "备注长度不能超过 255")
+    @Size(max = 32, message = "备注长度不能超过 32")
     private String note;
 
     /** 配置内容（JSON 对象或 JSON 字符串） */
@@ -57,6 +63,14 @@ public class UserConfigSaveRequest {
 
     public void setVersion(String version) {
         this.version = version;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
     }
 
     public String getSource() {
