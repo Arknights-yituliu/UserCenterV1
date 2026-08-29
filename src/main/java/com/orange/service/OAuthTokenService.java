@@ -3,6 +3,7 @@ package com.orange.service;
 import com.orange.entity.vo.oauth.ConsentInfoVO;
 import com.orange.entity.vo.oauth.LoginTicketVO;
 import com.orange.entity.vo.oauth.OAuthTokenVO;
+import com.orange.entity.vo.oauth.UserInfoVO;
 import jakarta.servlet.http.HttpServletRequest;
 
 /**
@@ -112,6 +113,23 @@ public interface OAuthTokenService {
     OAuthTokenVO refreshToken(String clientId, String clientSecret, String refreshToken);
 
     /**
+     * 令牌签发统一入口：按授权类型分发
+     * （authorization_code → 授权码换令牌，refresh_token → 刷新令牌），
+     * 不支持的授权类型直接拒绝
+     *
+     * @param grantType    授权类型：authorization_code / refresh_token
+     * @param clientId     客户端 ID
+     * @param clientSecret 客户端密钥（公共客户端传空）
+     * @param code         授权码（authorization_code 时必填）
+     * @param redirectUri  回调地址（authorization_code 时必填，须与授权时一致）
+     * @param codeVerifier PKCE code_verifier
+     * @param refreshToken 刷新令牌（refresh_token 时必填）
+     * @return 令牌响应
+     */
+    OAuthTokenVO issueToken(String grantType, String clientId, String clientSecret,
+                            String code, String redirectUri, String codeVerifier, String refreshToken);
+
+    /**
      * 吊销令牌（RFC 7009）：客户端携带自己名下的 access_token / refresh_token 调用，
      * 使其立即失效。refresh_token 被吊销时，其派生出的 access_token 一并吊销；
      * 令牌不存在或已失效同样视为成功（幂等，不泄露令牌是否有效）
@@ -129,6 +147,17 @@ public interface OAuthTokenService {
      * @return 令牌主体信息
      */
     OAuthTokenPrincipal resolveAccessToken(String accessToken);
+
+    /**
+     * 查询 OAuth 用户信息：根据令牌主体（uid + 客户端 + 授权范围）
+     * 查库补齐用户基础资料并按 scope 组装响应（邮箱仅授权 user.email 时返回）
+     *
+     * @param uid      用户 uid
+     * @param clientId 签发令牌的客户端 ID
+     * @param scope    授权范围
+     * @return 用户信息（uid、邮箱、用户名、昵称、头像）
+     */
+    UserInfoVO getUserInfo(Long uid, String clientId, String scope);
 
     /**
      * 访问令牌主体信息（uid + 客户端 + 范围）

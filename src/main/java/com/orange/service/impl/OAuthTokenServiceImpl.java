@@ -10,10 +10,13 @@ import com.orange.common.util.RedisKeyUtil;
 import com.orange.common.util.RequestUtil;
 import com.orange.entity.dto.SessionInfo;
 import com.orange.entity.po.OAuthClient;
+import com.orange.entity.po.UserInfo;
 import com.orange.entity.vo.oauth.ConsentInfoVO;
 import com.orange.entity.vo.oauth.LoginTicketVO;
 import com.orange.entity.vo.oauth.OAuthTokenVO;
+import com.orange.entity.vo.oauth.UserInfoVO;
 import com.orange.mapper.OAuthClientMapper;
+import com.orange.mapper.UserInfoMapper;
 import com.orange.service.OAuthTokenService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
@@ -69,6 +72,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
             "user.profile", "查看并修改你的个人资料");
 
     private final OAuthClientMapper oauthClientMapper;
+    private final UserInfoMapper userInfoMapper;
     private final StringRedisTemplate stringRedisTemplate;
     private final ObjectMapper objectMapper;
     private final PasswordEncoder passwordEncoder;
@@ -105,12 +109,14 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      * 构造器注入依赖
      *
      * @param oauthClientMapper   OAuth 客户端 Mapper
+     * @param userInfoMapper      用户表 Mapper（userinfo 组装用户资料）
      * @param stringRedisTemplate Redis 客户端
      * @param objectMapper        JSON 序列化器
      */
-    public OAuthTokenServiceImpl(OAuthClientMapper oauthClientMapper, StringRedisTemplate stringRedisTemplate,
-                                 ObjectMapper objectMapper) {
+    public OAuthTokenServiceImpl(OAuthClientMapper oauthClientMapper, UserInfoMapper userInfoMapper,
+                                 StringRedisTemplate stringRedisTemplate, ObjectMapper objectMapper) {
         this.oauthClientMapper = oauthClientMapper;
+        this.userInfoMapper = userInfoMapper;
         this.stringRedisTemplate = stringRedisTemplate;
         this.objectMapper = objectMapper;
         this.passwordEncoder = new BCryptPasswordEncoder();
@@ -448,6 +454,37 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         return issueTokens(client, uid, scope);
     }
 
+    /**
+     * 令牌签发统一入口：按授权类型分发到授权码兑换/令牌刷新，不支持的类型直接拒绝
+     *
+     * @param grantType    授权类型：authorization_code / refresh_token
+     * @param clientId     客户端 ID
+     * @param clientSecret 客户端密钥（公共客户端传空）
+     * @param code         授权码（authorization_code 时必填）
+     * @param redirectUri  回调地址（authorization_code 时必填）
+     * @param codeVerifier PKCE code_verifier
+     * @param refreshToken 刷新令牌（refresh_token 时必填）
+     * @return 令牌响应
+     */
+    @Override
+    public OAuthTokenVO issueToken(String grantType, String clientId, String clientSecret,
+                                   String code, String redirectUri, String codeVerifier, String refreshToken) {
+        // 1. 授权码兑换：校验授权码/回调地址/客户端认证/PKCE 后签发令牌
+        if ("authorization_code".equals(grantType)) {
+            LogUtil.debug(OAuthTokenServiceImpl.class, "[OAuth] 授权码换令牌: clientId={}, redirectUri={}, codeVerifier={}",
+                    clientId, redirectUri, StringUtils.hasText(codeVerifier) ? "yes" : "no");
+            return exchangeToken(clientId, clientSecret, code, redirectUri, codeVerifier);
+        }
+        // 2. 刷新令牌：一次性轮换签发新令牌对
+        if ("refresh_token".equals(grantType)) {
+            LogUtil.debug(OAuthTokenServiceImpl.class, "[OAuth] 刷新令牌: clientId={}", clientId);
+            return refreshToken(clientId, clientSecret, refreshToken);
+        }
+        // 3. 其他授权类型一律拒绝
+        LogUtil.warn(OAuthTokenServiceImpl.class, "[OAuth] 不支持的 grant_type: {}", grantType);
+        throw new BusinessException(ResultCode.OAUTH_GRANT_INVALID);
+    }
+
     @Override
     public void revokeToken(String clientId, String clientSecret, String token) {
         // 1. 参数必填校验
@@ -522,6 +559,22 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         }
         Long uid = ((Number) record.get("uid")).longValue();
         return new OAuthTokenPrincipal(uid, (String) record.get("clientId"), (String) record.get("scope"));
+    }
+
+    /**
+     * 查询 OAuth 用户信息：查库补齐用户基础资料，按 scope 组装响应
+     * （邮箱仅授权 user.email 时返回明文，否则不下发）
+     *
+     * @param uid      用户 uid
+     * @param clientId 签发令牌的客户端 ID
+     * @param scope    授权范围
+     * @return 用户信息 VO
+     */
+    @Override
+    public UserInfoVO getUserInfo(Long uid, String clientId, String scope) {
+        UserInfo user = userInfoMapper.selectById(uid);
+        LogUtil.debug(OAuthTokenServiceImpl.class, "[OAuth] 用户信息: uid={}, clientId={}, scope={}", uid, clientId, scope);
+        return UserInfoVO.of(new OAuthTokenPrincipal(uid, clientId, scope), user);
     }
 
     /**
