@@ -4,22 +4,13 @@ import com.orange.common.context.UserContext;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.util.LogUtil;
-import com.orange.common.util.RequestUtil;
 import com.orange.common.util.Result;
-import com.orange.entity.dto.auth.RegisterRequest;
-import com.orange.entity.po.UserInfo;
-import com.orange.entity.vo.auth.ServerLoginVO;
 import com.orange.entity.vo.oauth.ConsentInfoVO;
-import com.orange.entity.vo.oauth.DirectLoginSessionVO;
-import com.orange.entity.vo.oauth.DirectLoginTicketVO;
 import com.orange.entity.vo.oauth.LoginTicketVO;
 import com.orange.entity.vo.oauth.OAuthConsentRequest;
 import com.orange.entity.vo.oauth.OAuthTokenVO;
 import com.orange.entity.vo.oauth.UserInfoVO;
-import com.orange.mapper.UserInfoMapper;
-import com.orange.service.AuthService;
 import com.orange.service.OAuthTokenService;
-import com.orange.service.OAuthTokenService.OAuthTokenPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
@@ -54,21 +45,13 @@ public class OAuthController {
 
     private final OAuthTokenService oauthTokenService;
 
-    private final UserInfoMapper userInfoMapper;
-
-    private final AuthService authService;
-
     /**
      * 构造器注入依赖
      *
      * @param oauthTokenService OAuth 令牌服务
-     * @param userInfoMapper    用户表 Mapper（userinfo 组装用户资料）
-     * @param authService       认证服务（服务端登录）
      */
-    public OAuthController(OAuthTokenService oauthTokenService, UserInfoMapper userInfoMapper, AuthService authService) {
+    public OAuthController(OAuthTokenService oauthTokenService) {
         this.oauthTokenService = oauthTokenService;
-        this.userInfoMapper = userInfoMapper;
-        this.authService = authService;
     }
 
     /**
@@ -228,22 +211,11 @@ public class OAuthController {
                                       @RequestParam(value = "redirect_uri", required = false) String redirectUri,
                                       @RequestParam(value = "code_verifier", required = false) String codeVerifier,
                                       @RequestParam(value = "refresh_token", required = false) String refreshToken) {
-        OAuthTokenVO vo;
-        if ("authorization_code".equals(grantType)) {
-            LogUtil.debug(OAuthController.class, "[OAuth] 授权码换令牌: clientId={}, redirectUri={}, code={}, codeVerifier={}",
-                    clientId, redirectUri, mask(code), StringUtils.hasText(codeVerifier) ? "yes" : "no");
-            vo = oauthTokenService.exchangeToken(clientId, clientSecret, code, redirectUri, codeVerifier);
-            LogUtil.debug(OAuthController.class, "[OAuth] 授权码换令牌成功: clientId={}, accessToken={}, expiresIn={}s",
-                    clientId, mask(vo.getAccessToken()), vo.getExpiresIn());
-        } else if ("refresh_token".equals(grantType)) {
-            LogUtil.debug(OAuthController.class, "[OAuth] 刷新令牌: clientId={}, refreshToken={}", clientId, mask(refreshToken));
-            vo = oauthTokenService.refreshToken(clientId, clientSecret, refreshToken);
-            LogUtil.debug(OAuthController.class, "[OAuth] 刷新令牌成功: clientId={}, accessToken={}, refreshToken={}",
-                    clientId, mask(vo.getAccessToken()), mask(vo.getRefreshToken()));
-        } else {
-            LogUtil.warn(OAuthController.class, "[OAuth] 不支持的 grant_type: {}", grantType);
-            throw new BusinessException(ResultCode.OAUTH_GRANT_INVALID);
-        }
+        // grant_type 分发与协议校验由 Service 统一入口完成
+        OAuthTokenVO vo = oauthTokenService.issueToken(grantType, clientId, clientSecret,
+                code, redirectUri, codeVerifier, refreshToken);
+        LogUtil.debug(OAuthController.class, "[OAuth] 令牌签发成功: grantType={}, clientId={}, accessToken={}, expiresIn={}s",
+                grantType, clientId, mask(vo.getAccessToken()), vo.getExpiresIn());
         return Result.success(vo);
     }
 
@@ -268,141 +240,16 @@ public class OAuthController {
     }
 
     /**
-     * 服务端登录（旧系统对接）：旧系统服务端以 client_id + client_secret 认证后，
-     * 用账号密码换取用户信息（uid/昵称/头像/脱敏邮箱/状态），供旧系统本地缓存做账号打通。
-     * 不签发 UC 会话 token
-     *
-     * @param clientId     OAuth 客户端 ID
-     * @param clientSecret 客户端密钥
-     * @param account      登录账号（邮箱或用户名）
-     * @param password     明文密码
-     * @return 用户信息（uid/昵称/头像/脱敏邮箱/状态）
-     */
-    @Operation(summary = "服务端登录（旧系统对接，client 认证 + 账号密码换用户信息）")
-    @PostMapping("/server-login")
-    public Result<ServerLoginVO> serverLogin(@RequestParam("client_id") String clientId,
-                                             @RequestParam("client_secret") String clientSecret,
-                                             @RequestParam("account") String account,
-                                             @RequestParam("password") String password) {
-        ServerLoginVO vo = authService.serverLogin(clientId, clientSecret, account, password);
-        LogUtil.debug(OAuthController.class, "[OAuth] 服务端登录成功: clientId={}, uid={}", clientId, vo.getUid());
-        return Result.success(vo);
-    }
-
-    /**
-     * 直连登录-发起会话（旧系统后端调用）：以 client_id + client_secret 换取短时发起会话凭证，
-     * 前端持凭证才能调直连登录接口，避免 client_secret 暴露给浏览器
-     *
-     * @param clientId     OAuth 客户端 ID
-     * @param clientSecret 客户端密钥
-     * @return 发起会话凭证（channel）及有效期
-     */
-    @Operation(summary = "直连登录-发起会话（旧系统后端调用）")
-    @PostMapping("/direct-session")
-    public Result<DirectLoginSessionVO> directSession(@RequestParam("client_id") String clientId,
-                                                      @RequestParam("client_secret") String clientSecret) {
-        DirectLoginSessionVO vo = authService.createDirectSession(clientId, clientSecret);
-        LogUtil.debug(OAuthController.class, "[OAuth] 直连登录发起会话: clientId={}", clientId);
-        return Result.success(vo);
-    }
-
-    /**
-     * 直连登录-提交凭证（前端直接调用）：旧系统保持自家登录页，登录凭证（密码或邮箱验证码）
-     * 由浏览器直接提交到 UC，校验通过后返回一次性登录票据（凭证不经过旧系统后端），
-     * 前端将票据交给旧系统后端
-     *
-     * @param channel     发起会话凭证（旧系统后端签发）
-     * @param accountType 登录方式：password=账号密码（默认）/ email=邮箱验证码
-     * @param account     登录账号（密码方式为邮箱或用户名；邮箱方式为邮箱）
-     * @param password    明文密码（密码方式必填）
-     * @param code        邮箱验证码（邮箱方式必填）
-     * @return 一次性登录票据及有效期
-     */
-    @Operation(summary = "直连登录-提交凭证（前端直接调用，凭证不经旧系统后端）")
-    @PostMapping("/direct-login")
-    public Result<DirectLoginTicketVO> directLogin(@RequestParam("channel") String channel,
-                                                   @RequestParam(value = "account_type", required = false) String accountType,
-                                                   @RequestParam("account") String account,
-                                                   @RequestParam(value = "password", required = false) String password,
-                                                   @RequestParam(value = "code", required = false) String code) {
-        DirectLoginTicketVO vo = authService.directLogin(channel, accountType, account, password, code);
-        LogUtil.debug(OAuthController.class, "[OAuth] 直连登录成功: channel={}, accountType={}", channel, accountType);
-        return Result.success(vo);
-    }
-
-    /**
-     * 直连注册（前端直接调用）：旧系统保持自家注册页，注册信息（含密码/验证码）由浏览器
-     * 直接提交到 UC，创建用户后返回一次性登录票据（注册信息不经过旧系统后端），
-     * 前端将票据交给旧系统后端，由后端凭票据兑换用户信息（复用 /oauth2/direct-user）
-     *
-     * @param channel      发起会话凭证（旧系统后端签发）
-     * @param registerType 注册方式：password=密码注册 / email_code=邮箱验证码注册
-     * @param email        邮箱（与用户名至少一个；填了邮箱需提供验证码）
-     * @param userName     用户名（可选，3-20 位字母数字下划线）
-     * @param password     密码（必填，6-32 位）
-     * @param code         邮箱验证码（填邮箱时必填）
-     * @param nickname     昵称（可选）
-     * @param request      HTTP 请求（取注册 IP）
-     * @return 一次性登录票据及有效期
-     */
-    @Operation(summary = "直连注册（前端直接调用，注册信息不经旧系统后端）")
-    @PostMapping("/direct-register")
-    public Result<DirectLoginTicketVO> directRegister(@RequestParam("channel") String channel,
-                                                      @RequestParam("register_type") String registerType,
-                                                      @RequestParam(value = "email", required = false) String email,
-                                                      @RequestParam(value = "user_name", required = false) String userName,
-                                                      @RequestParam(value = "password", required = false) String password,
-                                                      @RequestParam(value = "code", required = false) String code,
-                                                      @RequestParam(value = "nickname", required = false) String nickname,
-                                                      HttpServletRequest request) {
-        RegisterRequest req = new RegisterRequest();
-        req.setRegisterType(registerType);
-        req.setEmail(email);
-        req.setUserName(userName);
-        req.setPassword(password);
-        req.setVerificationCode(code);
-        req.setNickname(nickname);
-        DirectLoginTicketVO vo = authService.directRegister(channel, req, RequestUtil.getIp(request));
-        LogUtil.debug(OAuthController.class, "[OAuth] 直连注册成功: channel={}, registerType={}", channel, registerType);
-        return Result.success(vo);
-    }
-
-    /**
-     * 直连登录-兑换用户信息（旧系统后端调用）：凭一次性登录票据兑换用户信息，
-     * 校验票据归属该 client 且未被消费
-     *
-     * @param clientId     OAuth 客户端 ID
-     * @param clientSecret 客户端密钥
-     * @param ticket       一次性登录票据
-     * @return 用户信息（uid/昵称/头像/脱敏邮箱/状态）
-     */
-    @Operation(summary = "直连登录-兑换用户信息（旧系统后端调用）")
-    @PostMapping("/direct-user")
-    public Result<ServerLoginVO> directUser(@RequestParam("client_id") String clientId,
-                                            @RequestParam("client_secret") String clientSecret,
-                                            @RequestParam("ticket") String ticket) {
-        ServerLoginVO vo = authService.directUser(clientId, clientSecret, ticket);
-        LogUtil.debug(OAuthController.class, "[OAuth] 直连登录兑换成功: clientId={}, uid={}", clientId, vo.getUid());
-        return Result.success(vo);
-    }
-
-    /**
-     * 获取当前授权用户信息：access_token 由 OAuthAuthInterceptor 统一校验并注入上下文
-     *
-     * <p>令牌解析出 uid 后查库补齐用户基础资料（邮箱/用户名/昵称/头像），
-     * 便于无自有账户体系的接入方直接以 UC 用户作为登录账号。</p>
+     * 获取当前授权用户信息：access_token 由 OAuthAuthInterceptor 统一校验并注入上下文，
+     * 查库与按 scope 组装由 Service 完成（便于无自有账户体系的接入方直接以 UC 用户作为登录账号）
      *
      * @return 用户信息（uid、邮箱、用户名、昵称、头像）
      */
     @Operation(summary = "OAuth 用户信息")
     @GetMapping("/userinfo")
     public Result<UserInfoVO> userinfo() {
-        OAuthTokenPrincipal principal = new OAuthTokenPrincipal(
-                UserContext.requireUid(), UserContext.getClientId(), UserContext.getScope());
-        UserInfo user = userInfoMapper.selectById(principal.getUid());
-        LogUtil.debug(OAuthController.class, "[OAuth] 用户信息: uid={}, clientId={}, scope={}",
-                principal.getUid(), principal.getClientId(), principal.getScope());
-        return Result.success(UserInfoVO.of(principal, user));
+        return Result.success(oauthTokenService.getUserInfo(
+                UserContext.requireUid(), UserContext.getClientId(), UserContext.getScope()));
     }
 
     /**
