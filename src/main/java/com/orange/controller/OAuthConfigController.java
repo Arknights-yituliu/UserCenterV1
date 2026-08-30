@@ -28,7 +28,7 @@ import java.util.List;
  */
 @Tag(name = "OAuth 用户配置接口")
 @RestController
-@RequestMapping("/oauth/config")
+@RequestMapping("/oauth2/config")
 public class OAuthConfigController {
 
     private final UserConfigService userConfigService;

@@ -158,6 +158,24 @@ public final class RedisKeyUtil {
     }
 
     /**
+     * OAuth access_token key 前缀（按客户端批量扫描清理时使用）
+     *
+     * @return 前缀（含结尾冒号）
+     */
+    public static String oauthAccessPrefix() {
+        return PREFIX_OAUTH_ACCESS;
+    }
+
+    /**
+     * OAuth refresh_token key 前缀（按客户端批量扫描清理时使用）
+     *
+     * @return 前缀（含结尾冒号）
+     */
+    public static String oauthRefreshPrefix() {
+        return PREFIX_OAUTH_REFRESH;
+    }
+
+    /**
      * OAuth 跨站登录票据 key
      *
      * @param ticket 一次性登录票据

@@ -82,9 +82,12 @@ CREATE TABLE `oauth_client` (
     `access_token_ttl`  BIGINT       DEFAULT NULL COMMENT 'access_token 有效期（秒），NULL 用全局默认',
     `refresh_token_ttl` BIGINT       DEFAULT NULL COMMENT 'refresh_token 有效期（秒）',
     `status`            TINYINT      NOT NULL DEFAULT 1 COMMENT '状态：1=启用 0=停用',
+    `admin_banned`      TINYINT      NOT NULL DEFAULT 0 COMMENT '管理员封禁：0=正常 1=封禁（优先级高于 status，封禁期间一切授权/换票拒绝）',
+    `owner_uid`         BIGINT       DEFAULT NULL COMMENT '所有者用户 uid（开发者账号，NULL=平台托管）',
     `create_time`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     PRIMARY KEY (`id`),
-    KEY `idx_status` (`status`)
+    KEY `idx_status` (`status`),
+    KEY `idx_owner_uid` (`owner_uid`)
 ) ENGINE = InnoDB COMMENT = 'OAuth2 客户端注册表';
 
 -- -------------------------------------------------------------

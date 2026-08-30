@@ -20,6 +20,8 @@ public enum ResultCode {
     PARAM_VALID_ERROR(10002, "参数校验失败"),
     /** 非法操作 */
     ILLEGAL_OPERATION(10003, "非法操作"),
+    /** 配置存储总量超过大小限制 */
+    CONFIG_TOO_LARGE(10004, "配置存储总量超过大小限制（500KB）"),
 
     // ---------- 2xxxx 账号错误 ----------
     /** 用户不存在 */
@@ -85,7 +87,11 @@ public enum ResultCode {
     /** 跨站登录票据无效或已过期 */
     OAUTH_TICKET_INVALID(90010, "登录票据无效或已过期"),
     /** 授权确认单无效或已过期 */
-    OAUTH_CONSENT_INVALID(90011, "授权确认单无效或已过期，请重新发起授权");
+    OAUTH_CONSENT_INVALID(90011, "授权确认单无效或已过期，请重新发起授权"),
+    /** 客户端数量已达上限 */
+    OAUTH_CLIENT_LIMIT(90012, "客户端数量已达上限"),
+    /** 客户端已被管理员封禁 */
+    OAUTH_CLIENT_BANNED(90013, "OAuth 客户端已被管理员封禁");
 
     /** 状态码 */
     private final int code;

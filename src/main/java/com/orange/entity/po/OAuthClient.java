@@ -58,6 +58,12 @@ public class OAuthClient {
     /** 状态：1=启用 0=停用 */
     private Integer status;
 
+    /** 管理员封禁：0=正常 1=封禁（优先级高于 status） */
+    private Integer adminBanned;
+
+    /** 所有者用户 uid（开发者账号，NULL=平台托管） */
+    private Long ownerUid;
+
     /** 创建时间 */
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
@@ -164,6 +170,22 @@ public class OAuthClient {
 
     public void setStatus(Integer status) {
         this.status = status;
+    }
+
+    public Integer getAdminBanned() {
+        return adminBanned;
+    }
+
+    public void setAdminBanned(Integer adminBanned) {
+        this.adminBanned = adminBanned;
+    }
+
+    public Long getOwnerUid() {
+        return ownerUid;
+    }
+
+    public void setOwnerUid(Long ownerUid) {
+        this.ownerUid = ownerUid;
     }
 
     public LocalDateTime getCreateTime() {

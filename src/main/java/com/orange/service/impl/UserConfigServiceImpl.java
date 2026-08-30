@@ -30,6 +30,9 @@ public class UserConfigServiceImpl implements UserConfigService {
 
     private static final Logger log = LoggerFactory.getLogger(UserConfigServiceImpl.class);
 
+    /** 单个用户落库配置内容的总大小上限（字节）：500KB */
+    private static final long MAX_CONFIG_TOTAL_BYTES = 500L * 1024;
+
     private final UserConfigMapper userConfigMapper;
     private final ObjectMapper objectMapper;
 
@@ -83,7 +86,17 @@ public class UserConfigServiceImpl implements UserConfigService {
         }
         config.setSource(request.getSource());
         config.setNote(request.getNote());
-        config.setConfig(toConfigString(request.getConfig()));
+        String configStr = toConfigString(request.getConfig());
+        // 单用户落库配置总量上限 500KB（按 UTF-8 字节数统计，覆盖编辑时先扣减旧值再累计）
+        long oldBytes = config.getId() != null && config.getConfig() != null
+                ? config.getConfig().getBytes(java.nio.charset.StandardCharsets.UTF_8).length
+                : 0;
+        long newBytes = configStr.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+        long totalBytes = userConfigMapper.sumConfigBytes(uid) - oldBytes + newBytes;
+        if (totalBytes > MAX_CONFIG_TOTAL_BYTES) {
+            throw new BusinessException(ResultCode.CONFIG_TOO_LARGE);
+        }
+        config.setConfig(configStr);
         if (config.getId() == null) {
             userConfigMapper.insert(config);
         } else {

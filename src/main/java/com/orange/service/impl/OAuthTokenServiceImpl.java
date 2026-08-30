@@ -635,6 +635,9 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         if (client == null || client.getStatus() == null || client.getStatus() != 1) {
             throw new BusinessException(ResultCode.OAUTH_CLIENT_INVALID);
         }
+        if (client.getAdminBanned() != null && client.getAdminBanned() == 1) {
+            throw new BusinessException(ResultCode.OAUTH_CLIENT_BANNED);
+        }
         return client;
     }
 

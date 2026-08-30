@@ -42,8 +42,9 @@ public class WebConfig implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         // 用户侧接口：仅校验用户会话
+        // （/oauth2/client/** 为开发者自助管理自己的 OAuth 客户端，同样需要用户会话）
         registry.addInterceptor(userAuthInterceptor)
-                .addPathPatterns("/user/**", "/auth/logout");
+                .addPathPatterns("/user/**", "/auth/logout", "/oauth2/client/**");
         // OAuth 资源接口：需要 access_token 的接口统一走此拦截器
         // （/oauth2/userinfo 为 OAuthController 的用户信息端点，/oauth/config/** 为 OAuth 令牌版用户配置）
         registry.addInterceptor(oauthAuthInterceptor)

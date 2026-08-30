@@ -74,6 +74,8 @@ user-center:
     consent-ttl-seconds: 300
     # CORS 跨域白名单（逗号分隔，来自 oauth_client 登记的网站 origin，仅对 /oauth2/** /auth/** /user/** 生效）
     allowed-origins: http://localhost:3000
+    # 单个开发者账号可注册的 OAuth 客户端数量上限（默认 10）
+    max-clients-per-owner: 5
 
 springdoc:
   api-docs:
