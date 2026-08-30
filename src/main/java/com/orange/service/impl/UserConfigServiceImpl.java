@@ -57,8 +57,8 @@ public class UserConfigServiceImpl implements UserConfigService {
         String clientId = requireClientId();
         UserConfig config;
         if (request.getId() != null) {
-            // 编辑：校验记录存在且归属当前用户，client_id 以登录上下文为准
-            config = getOwnedConfig(uid, request.getId());
+            // 编辑：校验记录存在且归属当前用户+客户端（防跨客户端越权），client_id 以登录上下文为准
+            config = getOwnedConfig(uid, clientId, request.getId());
             config.setClientId(clientId);
             config.setCategory(request.getCategory());
             config.setVersion(request.getVersion());
@@ -139,23 +139,25 @@ public class UserConfigServiceImpl implements UserConfigService {
      */
     @Override
     public void deleteConfig(Long uid, Long id) {
-        UserConfig config = getOwnedConfig(uid, id);
+        String clientId = requireClientId();
+        UserConfig config = getOwnedConfig(uid, clientId, id);
         userConfigMapper.deleteById(config.getId());
     }
 
     /**
-     * 查询归属当前用户的配置，不存在或非本人所有则抛异常
+     * 查询归属当前用户+客户端的配置，不存在、非本人所有或非本客户端所有则抛异常
      *
-     * @param uid 用户 uid
-     * @param id  配置 id
+     * @param uid      用户 uid
+     * @param clientId 来源客户端标识
+     * @param id       配置 id
      * @return 配置实体
      */
-    private UserConfig getOwnedConfig(Long uid, Long id) {
+    private UserConfig getOwnedConfig(Long uid, String clientId, Long id) {
         UserConfig config = userConfigMapper.selectById(id);
         if (config == null) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "配置不存在或已删除");
         }
-        if (!uid.equals(config.getUid())) {
+        if (!uid.equals(config.getUid()) || !clientId.equals(config.getClientId())) {
             throw new BusinessException(ResultCode.FORBIDDEN, "无权操作该配置");
         }
         return config;
