@@ -79,7 +79,7 @@ public class OAuthLegacyLoginController {
                                                    @RequestParam(value = "password", required = false) String password,
                                                    @RequestParam(value = "code", required = false) String code) {
         DirectLoginTicketVO vo = authService.directLogin(channel, accountType, account, password, code);
-        LogUtil.debug(OAuthLegacyLoginController.class, "[OAuth] 直连登录成功: channel={}, accountType={}", channel, accountType);
+        LogUtil.debug(OAuthLegacyLoginController.class, "[OAuth] 直连登录成功: accountType={}", accountType);
         return Result.success(vo);
     }
 
@@ -116,7 +116,7 @@ public class OAuthLegacyLoginController {
         req.setVerificationCode(code);
         req.setNickname(nickname);
         DirectLoginTicketVO vo = authService.directRegister(channel, req, RequestUtil.getIp(request));
-        LogUtil.debug(OAuthLegacyLoginController.class, "[OAuth] 直连注册成功: channel={}, registerType={}", channel, registerType);
+        LogUtil.debug(OAuthLegacyLoginController.class, "[OAuth] 直连注册成功: registerType={}", registerType);
         return Result.success(vo);
     }
 

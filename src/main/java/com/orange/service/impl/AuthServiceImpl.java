@@ -311,7 +311,7 @@ public class AuthServiceImpl implements AuthService {
                         stringRedisTemplate.opsForSet().remove(RedisKeyUtil.uidSession(session.getUid()), token);
                     }
                 } catch (JsonProcessingException ignored) {
-                    LogUtil.warn(AuthServiceImpl.class, "会话反序列化失败，跳过反向索引清理：token={}", token);
+                    LogUtil.warn(AuthServiceImpl.class, "会话反序列化失败，跳过反向索引清理");
                 }
             }
         }

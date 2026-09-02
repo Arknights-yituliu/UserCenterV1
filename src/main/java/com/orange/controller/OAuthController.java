@@ -113,7 +113,7 @@ public class OAuthController {
     @PostMapping("/ticket")
     public Result<LoginTicketVO> ticket(HttpServletRequest request) {
         LoginTicketVO vo = oauthTokenService.createLoginTicket(request);
-        LogUtil.debug(OAuthController.class, "[OAuth] 签发跨站登录票据成功: ticket={}, expiresIn={}s", mask(vo.getTicket()), vo.getExpiresIn());
+        LogUtil.debug(OAuthController.class, "[OAuth] 签发跨站登录票据成功: expiresIn={}s", vo.getExpiresIn());
         return Result.success(vo);
     }
 
@@ -156,7 +156,7 @@ public class OAuthController {
         boolean approve = body.getApprove();
         // 2. 调用服务确认授权（同意签发授权码 / 拒绝回跳 access_denied）
         String redirectUrl = oauthTokenService.confirmAuthorization(pendingId, approve, request);
-        LogUtil.debug(OAuthController.class, "[OAuth] 授权确认{}: pendingId={}, redirect={}", approve ? "同意" : "拒绝", mask(pendingId), redirectUrl);
+        LogUtil.debug(OAuthController.class, "[OAuth] 授权确认{}: pendingId={}", approve ? "同意" : "拒绝", mask(pendingId));
         return Result.success(redirectUrl);
     }
 
@@ -178,15 +178,15 @@ public class OAuthController {
                                        String state, String codeChallenge, String codeChallengeMethod,
                                        HttpServletRequest request, HttpServletResponse response) throws IOException {
         String ucTicket = request.getParameter("uc_ticket");
-        LogUtil.debug(OAuthController.class, "[OAuth] authorize 请求: clientId={}, redirectUri={}, scope={}, state={}, pkce={}({})",
-                clientId, redirectUri, scope, state,
+        LogUtil.debug(OAuthController.class, "[OAuth] authorize 请求: clientId={}, redirectUri={}, scope={}, pkce={}({})",
+                clientId, redirectUri, scope,
                 StringUtils.hasText(codeChallenge) ? "yes" : "no", codeChallengeMethod);
         if (StringUtils.hasText(ucTicket)) {
-            LogUtil.debug(OAuthController.class, "[OAuth] authorize 携带跨站登录票据: uc_ticket={}", mask(ucTicket));
+            LogUtil.debug(OAuthController.class, "[OAuth] authorize 携带跨站登录票据");
         }
         String redirectUrl = oauthTokenService.buildAuthorizeRedirectUrl(
                 responseType, clientId, redirectUri, scope, state, codeChallenge, codeChallengeMethod, request);
-        LogUtil.debug(OAuthController.class, "[OAuth] authorize 302 跳转: {}", redirectUrl);
+        LogUtil.debug(OAuthController.class, "[OAuth] authorize 302 跳转完成");
         response.sendRedirect(redirectUrl);
     }
 
@@ -214,8 +214,8 @@ public class OAuthController {
         // grant_type 分发与协议校验由 Service 统一入口完成
         OAuthTokenVO vo = oauthTokenService.issueToken(grantType, clientId, clientSecret,
                 code, redirectUri, codeVerifier, refreshToken);
-        LogUtil.debug(OAuthController.class, "[OAuth] 令牌签发成功: grantType={}, clientId={}, accessToken={}, expiresIn={}s",
-                grantType, clientId, mask(vo.getAccessToken()), vo.getExpiresIn());
+        LogUtil.debug(OAuthController.class, "[OAuth] 令牌签发成功: grantType={}, clientId={}, expiresIn={}s",
+                grantType, clientId, vo.getExpiresIn());
         return Result.success(vo);
     }
 
@@ -235,7 +235,7 @@ public class OAuthController {
                                @RequestParam(value = "client_secret", required = false) String clientSecret,
                                @RequestParam("token") String token) {
         oauthTokenService.revokeToken(clientId, clientSecret, token);
-        LogUtil.debug(OAuthController.class, "[OAuth] 吊销令牌请求: clientId={}, token={}", clientId, mask(token));
+        LogUtil.debug(OAuthController.class, "[OAuth] 吊销令牌请求: clientId={}", clientId);
         return Result.success();
     }
 
