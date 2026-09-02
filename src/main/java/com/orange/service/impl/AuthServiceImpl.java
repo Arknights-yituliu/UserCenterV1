@@ -11,6 +11,7 @@ import com.orange.common.util.IdGenerator;
 import com.orange.common.util.LogUtil;
 import com.orange.common.util.OAuthUtil;
 import com.orange.common.util.RedisKeyUtil;
+import com.orange.common.util.RedisRateLimiter;
 import com.orange.common.util.SignUtil;
 import com.orange.entity.dto.SessionInfo;
 import com.orange.entity.dto.auth.LoginRequest;
@@ -43,6 +44,7 @@ import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -89,6 +91,54 @@ public class AuthServiceImpl implements AuthService {
     /** 直连登录一次性票据有效期（秒）：默认 60 秒 */
     @Value("${user-center.oauth.direct-ticket-ttl-seconds:60}")
     private long directTicketTtlSeconds;
+
+    /** 直连登录发起会话限流配置。 */
+    @Value("${user-center.oauth.direct-rate-limit.session.ip-limit:60}")
+    private long directSessionIpLimit = 60;
+
+    @Value("${user-center.oauth.direct-rate-limit.session.client-ip-limit:20}")
+    private long directSessionClientIpLimit = 20;
+
+    @Value("${user-center.oauth.direct-rate-limit.session.window-seconds:60}")
+    private long directSessionWindowSeconds = 60;
+
+    /** 直连登录提交凭证限流与失败锁定配置。 */
+    @Value("${user-center.oauth.direct-rate-limit.login.ip-request-limit:30}")
+    private long directLoginIpRequestLimit = 30;
+
+    @Value("${user-center.oauth.direct-rate-limit.login.ip-request-window-seconds:60}")
+    private long directLoginIpRequestWindowSeconds = 60;
+
+    @Value("${user-center.oauth.direct-rate-limit.login.failure-window-seconds:900}")
+    private long directLoginFailureWindowSeconds = 900;
+
+    @Value("${user-center.oauth.direct-rate-limit.login.first-lock-threshold:5}")
+    private long directLoginFirstLockThreshold = 5;
+
+    @Value("${user-center.oauth.direct-rate-limit.login.first-lock-seconds:60}")
+    private long directLoginFirstLockSeconds = 60;
+
+    @Value("${user-center.oauth.direct-rate-limit.login.second-lock-threshold:10}")
+    private long directLoginSecondLockThreshold = 10;
+
+    @Value("${user-center.oauth.direct-rate-limit.login.second-lock-seconds:300}")
+    private long directLoginSecondLockSeconds = 300;
+
+    @Value("${user-center.oauth.direct-rate-limit.login.third-lock-threshold:15}")
+    private long directLoginThirdLockThreshold = 15;
+
+    @Value("${user-center.oauth.direct-rate-limit.login.third-lock-seconds:900}")
+    private long directLoginThirdLockSeconds = 900;
+
+    /** 直连注册限流配置。 */
+    @Value("${user-center.oauth.direct-rate-limit.register.ip-limit:10}")
+    private long directRegisterIpLimit = 10;
+
+    @Value("${user-center.oauth.direct-rate-limit.register.email-limit:3}")
+    private long directRegisterEmailLimit = 3;
+
+    @Value("${user-center.oauth.direct-rate-limit.register.window-seconds:3600}")
+    private long directRegisterWindowSeconds = 3600;
 
     /**
      * 构造器注入依赖
@@ -357,11 +407,13 @@ public class AuthServiceImpl implements AuthService {
      * @return 发起会话凭证及有效期
      */
     @Override
-    public DirectLoginSessionVO createDirectSession(String clientId, String clientSecret) {
+    public DirectLoginSessionVO createDirectSession(String clientId, String clientSecret, String sourceIp) {
         // 1. 客户端认证：仅登记且启用的 client 可发起
         OAuthClient client = requireEnabledOAuthClient(clientId);
         authenticateOAuthClient(client, clientSecret);
-        // 2. 签发发起会话凭证（绑定 clientId，短时有效）
+        // 2. 客户端认证通过后，使用一图流转发的来源 IP 进行限流。
+        enforceDirectSessionRateLimit(clientId, sourceIp);
+        // 3. 签发发起会话凭证（绑定 clientId，短时有效）
         String channel = OAuthUtil.generateToken();
         Map<String, Object> record = new HashMap<>();
         record.put("clientId", clientId);
@@ -385,23 +437,34 @@ public class AuthServiceImpl implements AuthService {
      * @return 一次性登录票据及有效期
      */
     @Override
-    public DirectLoginTicketVO directLogin(String channel, String accountType, String account, String password, String code) {
-        // 1. 校验发起会话凭证有效（防无门槛撞库：前端必须持旧系统后端换取的 channel）
-        String clientId = readDirectChannel(channel);
-        // 2. 按登录方式校验凭证（密码/邮箱验证码，复用主登录逻辑：含失败锁定与失败计数）
+    public DirectLoginTicketVO directLogin(String channel, String accountType, String account, String password,
+                                           String code, String sourceIp) {
+        // 1. 先按来源 IP 与账号进行限流，避免无效 channel 请求绕开风控。
         UserInfo user;
         String type = StringUtils.hasText(accountType) ? accountType : TYPE_PASSWORD;
-        if (TYPE_PASSWORD.equals(type)) {
-            user = passwordLogin(account, password);
-        } else if (TYPE_EMAIL_CODE.equals(type)) {
-            user = emailCodeLogin(account, code);
-        } else {
+        if (!TYPE_PASSWORD.equals(type) && !TYPE_EMAIL_CODE.equals(type)) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "不支持的登录方式");
         }
-        checkUserStatus(user);
-        // 3. 消费发起会话（一次性，防止重复使用）
+        String normalizedAccount = normalizeRateTarget(account);
+        enforceDirectLoginRateLimit(sourceIp, normalizedAccount);
+        // 2. 校验发起会话凭证有效（前端必须持旧系统后端换取的 channel）
+        String clientId = readDirectChannel(channel);
+        // 3. 按登录方式校验凭证（密码/邮箱验证码，复用主登录逻辑：含失败锁定与失败计数）
+        try {
+            if (TYPE_PASSWORD.equals(type)) {
+                user = passwordLogin(account, password);
+            } else {
+                user = emailCodeLogin(account, code);
+            }
+            checkUserStatus(user);
+        } catch (BusinessException e) {
+            recordDirectLoginFailure(sourceIp, normalizedAccount);
+            throw e;
+        }
+        clearDirectLoginAccountFailure(normalizedAccount);
+        // 4. 消费发起会话（一次性，防止重复使用）
         stringRedisTemplate.delete(RedisKeyUtil.directChannel(channel));
-        // 4. 签发一次性登录票据（绑定 clientId + uid，短时有效）
+        // 5. 签发一次性登录票据（绑定 clientId + uid，短时有效）
         LogUtil.debug(AuthServiceImpl.class, "[Auth] 直连登录成功: clientId={}, uid={}, type={}", clientId, user.getUid(), type);
         return issueDirectTicket(clientId, user.getUid());
     }
@@ -418,15 +481,17 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public DirectLoginTicketVO directRegister(String channel, RegisterRequest request, String ip) {
-        // 1. 校验发起会话凭证有效（防滥用：前端必须持旧系统后端换取的 channel）
+        // 1. 先按来源 IP 和邮箱限流，验证码发送频控由 EmailCodeService 统一执行。
+        enforceDirectRegisterRateLimit(ip, request.getEmail());
+        // 2. 校验发起会话凭证有效（前端必须持旧系统后端换取的 channel）
         String clientId = readDirectChannel(channel);
-        // 2. 手动 Bean Validation：直连注册为散参入参未走 @Valid，此处补齐与主站注册一致的格式/长度校验
+        // 3. 手动 Bean Validation：直连注册为散参入参未走 @Valid，此处补齐与主站注册一致的格式/长度校验
         validateRegisterRequest(request);
-        // 3. 复用注册校验与创建用户逻辑（含邮箱验证码校验、唯一性校验、密码加密）
+        // 4. 复用注册校验与创建用户逻辑（含邮箱验证码校验、唯一性校验、密码加密）
         UserInfo user = createRegisteredUser(request, ip);
-        // 4. 消费发起会话（一次性，防止重复使用）
+        // 5. 消费发起会话（一次性，防止重复使用）
         stringRedisTemplate.delete(RedisKeyUtil.directChannel(channel));
-        // 5. 签发一次性登录票据（绑定 clientId + uid），旧系统后端凭票兑换用户信息
+        // 6. 签发一次性登录票据（绑定 clientId + uid），旧系统后端凭票兑换用户信息
         LogUtil.debug(AuthServiceImpl.class, "[Auth] 直连注册成功: clientId={}, uid={}", clientId, user.getUid());
         return issueDirectTicket(clientId, user.getUid());
     }
@@ -465,6 +530,79 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException(ResultCode.PARAM_ERROR, "登录会话无效");
         }
         return clientId;
+    }
+
+    private void enforceDirectSessionRateLimit(String clientId, String sourceIp) {
+        String ip = normalizeRateTarget(sourceIp);
+        if (!RedisRateLimiter.tryAcquire(stringRedisTemplate, RedisKeyUtil.rate("direct-session-ip", ip),
+                directSessionIpLimit, directSessionWindowSeconds)
+                || !RedisRateLimiter.tryAcquire(stringRedisTemplate,
+                RedisKeyUtil.rate("direct-session-client-ip", clientId + ":" + ip),
+                directSessionClientIpLimit, directSessionWindowSeconds)) {
+            throw new BusinessException(ResultCode.IP_RATE_LIMITED);
+        }
+    }
+
+    private void enforceDirectLoginRateLimit(String sourceIp, String account) {
+        String ip = normalizeRateTarget(sourceIp);
+        if (Boolean.TRUE.equals(stringRedisTemplate.hasKey(RedisKeyUtil.rate("direct-login-ip-lock", ip)))
+                || !RedisRateLimiter.tryAcquire(stringRedisTemplate, RedisKeyUtil.rate("direct-login-ip", ip),
+                directLoginIpRequestLimit, directLoginIpRequestWindowSeconds)) {
+            throw new BusinessException(ResultCode.IP_RATE_LIMITED);
+        }
+        if (!account.isEmpty() && Boolean.TRUE.equals(stringRedisTemplate.hasKey(
+                RedisKeyUtil.rate("direct-login-account-lock", account)))) {
+            throw new BusinessException(ResultCode.LOGIN_LOCKED);
+        }
+    }
+
+    private void recordDirectLoginFailure(String sourceIp, String account) {
+        applyProgressiveDirectLoginLock("direct-login-ip-fail", "direct-login-ip-lock",
+                normalizeRateTarget(sourceIp));
+        if (!account.isEmpty()) {
+            applyProgressiveDirectLoginLock("direct-login-account-fail", "direct-login-account-lock", account);
+        }
+    }
+
+    private void applyProgressiveDirectLoginLock(String failureBiz, String lockBiz, String target) {
+        String failureKey = RedisKeyUtil.rate(failureBiz, target);
+        Long count = stringRedisTemplate.opsForValue().increment(failureKey);
+        if (count != null && count == 1L) {
+            stringRedisTemplate.expire(failureKey, directLoginFailureWindowSeconds, TimeUnit.SECONDS);
+        }
+        long lockSeconds = count == null ? 0
+                : count >= directLoginThirdLockThreshold ? directLoginThirdLockSeconds
+                : count >= directLoginSecondLockThreshold ? directLoginSecondLockSeconds
+                : count >= directLoginFirstLockThreshold ? directLoginFirstLockSeconds : 0;
+        if (lockSeconds > 0) {
+            stringRedisTemplate.opsForValue().set(RedisKeyUtil.rate(lockBiz, target), "1", lockSeconds,
+                    TimeUnit.SECONDS);
+        }
+    }
+
+    private void clearDirectLoginAccountFailure(String account) {
+        if (!account.isEmpty()) {
+            stringRedisTemplate.delete(RedisKeyUtil.rate("direct-login-account-fail", account));
+            stringRedisTemplate.delete(RedisKeyUtil.rate("direct-login-account-lock", account));
+        }
+    }
+
+    private void enforceDirectRegisterRateLimit(String sourceIp, String email) {
+        String ip = normalizeRateTarget(sourceIp);
+        if (!RedisRateLimiter.tryAcquire(stringRedisTemplate, RedisKeyUtil.rate("direct-register-ip", ip),
+                directRegisterIpLimit, directRegisterWindowSeconds)) {
+            throw new BusinessException(ResultCode.IP_RATE_LIMITED);
+        }
+        String normalizedEmail = normalizeRateTarget(email);
+        if (!normalizedEmail.isEmpty() && !RedisRateLimiter.tryAcquire(stringRedisTemplate,
+                RedisKeyUtil.rate("direct-register-email", normalizedEmail), directRegisterEmailLimit,
+                directRegisterWindowSeconds)) {
+            throw new BusinessException(ResultCode.IP_RATE_LIMITED);
+        }
+    }
+
+    private String normalizeRateTarget(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
 
     /**

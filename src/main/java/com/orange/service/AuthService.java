@@ -68,7 +68,7 @@ public interface AuthService {
      * @param clientSecret 客户端密钥
      * @return 发起会话凭证（channel）及有效期
      */
-    DirectLoginSessionVO createDirectSession(String clientId, String clientSecret);
+    DirectLoginSessionVO createDirectSession(String clientId, String clientSecret, String sourceIp);
 
     /**
      * 直连登录-提交凭证（前端直接调用）：持发起会话凭证提交登录凭证（密码或邮箱验证码），
@@ -81,7 +81,8 @@ public interface AuthService {
      * @param code        邮箱验证码（邮箱方式必填）
      * @return 一次性登录票据及有效期
      */
-    DirectLoginTicketVO directLogin(String channel, String accountType, String account, String password, String code);
+    DirectLoginTicketVO directLogin(String channel, String accountType, String account, String password, String code,
+                                    String sourceIp);
 
     /**
      * 直连注册（前端直接调用）：持发起会话凭证提交注册信息，创建用户后签发一次性登录票据

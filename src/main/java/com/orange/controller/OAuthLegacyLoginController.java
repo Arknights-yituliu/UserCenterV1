@@ -53,8 +53,11 @@ public class OAuthLegacyLoginController {
     @Operation(summary = "直连登录-发起会话（旧系统后端调用）")
     @PostMapping("/direct-session")
     public Result<DirectLoginSessionVO> directSession(@RequestParam("client_id") String clientId,
-                                                      @RequestParam("client_secret") String clientSecret) {
-        DirectLoginSessionVO vo = authService.createDirectSession(clientId, clientSecret);
+                                                      @RequestParam("client_secret") String clientSecret,
+                                                      @RequestParam(value = "source_ip", required = false) String sourceIp,
+                                                      HttpServletRequest request) {
+        String rateLimitIp = sourceIp == null || sourceIp.isBlank() ? RequestUtil.getIp(request) : sourceIp.trim();
+        DirectLoginSessionVO vo = authService.createDirectSession(clientId, clientSecret, rateLimitIp);
         LogUtil.debug(OAuthLegacyLoginController.class, "[OAuth] 直连登录发起会话: clientId={}", clientId);
         return Result.success(vo);
     }
@@ -77,8 +80,10 @@ public class OAuthLegacyLoginController {
                                                    @RequestParam(value = "account_type", required = false) String accountType,
                                                    @RequestParam("account") String account,
                                                    @RequestParam(value = "password", required = false) String password,
-                                                   @RequestParam(value = "code", required = false) String code) {
-        DirectLoginTicketVO vo = authService.directLogin(channel, accountType, account, password, code);
+                                                   @RequestParam(value = "code", required = false) String code,
+                                                   HttpServletRequest request) {
+        DirectLoginTicketVO vo = authService.directLogin(channel, accountType, account, password, code,
+                RequestUtil.getIp(request));
         LogUtil.debug(OAuthLegacyLoginController.class, "[OAuth] 直连登录成功: accountType={}", accountType);
         return Result.success(vo);
     }

@@ -72,6 +72,31 @@ user-center:
     consent-page-url: http://localhost:5000/oauth2/consent
     # 授权确认单有效期（秒）：默认 5 分钟
     consent-ttl-seconds: 300
+    # 直连登录 / 注册限流（固定窗口）与登录失败渐进锁定
+    direct-rate-limit:
+      session:
+        # 单 IP / 单 client+IP 发起会话上限，以及统计窗口（秒）
+        ip-limit: 60
+        client-ip-limit: 20
+        window-seconds: 60
+      login:
+        # 单 IP 提交登录上限，以及统计窗口（秒）
+        ip-request-limit: 30
+        ip-request-window-seconds: 60
+        # 同一 IP 或账号失败次数的统计窗口（秒）
+        failure-window-seconds: 900
+        # 失败次数达到阈值后，按级别锁定（秒）
+        first-lock-threshold: 5
+        first-lock-seconds: 60
+        second-lock-threshold: 10
+        second-lock-seconds: 300
+        third-lock-threshold: 15
+        third-lock-seconds: 900
+      register:
+        # 单 IP / 单邮箱注册上限，以及统计窗口（秒）
+        ip-limit: 10
+        email-limit: 3
+        window-seconds: 3600
     # CORS 跨域白名单（逗号分隔，来自 oauth_client 登记的网站 origin，仅对 /oauth2/** /auth/** /user/** 生效）
     allowed-origins: http://localhost:3000
     # 单个开发者账号可注册的 OAuth 客户端数量上限（默认 10）
