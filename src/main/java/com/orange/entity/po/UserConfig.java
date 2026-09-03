@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
-import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
@@ -45,6 +44,12 @@ public class UserConfig {
     /** 配置内容（JSON 字符串） */
     private String config;
 
+    /** 配置内容 SHA-256 */
+    private String contentHash;
+
+    /** 配置内容 UTF-8 字节数 */
+    private Long configBytes;
+
     /** 创建时间 */
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
@@ -52,10 +57,6 @@ public class UserConfig {
     /** 更新时间 */
     @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updateTime;
-
-    /** 删除标记：0=未删除 1=已删除（逻辑删除） */
-    @TableLogic
-    private Integer deleteFlag;
 
     public Long getId() {
         return id;
@@ -129,6 +130,22 @@ public class UserConfig {
         this.config = config;
     }
 
+    public String getContentHash() {
+        return contentHash;
+    }
+
+    public void setContentHash(String contentHash) {
+        this.contentHash = contentHash;
+    }
+
+    public Long getConfigBytes() {
+        return configBytes;
+    }
+
+    public void setConfigBytes(Long configBytes) {
+        this.configBytes = configBytes;
+    }
+
     public LocalDateTime getCreateTime() {
         return createTime;
     }
@@ -145,11 +162,4 @@ public class UserConfig {
         this.updateTime = updateTime;
     }
 
-    public Integer getDeleteFlag() {
-        return deleteFlag;
-    }
-
-    public void setDeleteFlag(Integer deleteFlag) {
-        this.deleteFlag = deleteFlag;
-    }
 }

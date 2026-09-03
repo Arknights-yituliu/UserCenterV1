@@ -45,3 +45,4 @@ DeepSeek/
 
 ### 本地脚本（不提交远程） ###
 /src/test/java/com/orange/local/
+/.yama/

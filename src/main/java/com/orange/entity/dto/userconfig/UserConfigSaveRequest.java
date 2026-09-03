@@ -1,5 +1,6 @@
 package com.orange.entity.dto.userconfig;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -40,6 +41,13 @@ public class UserConfigSaveRequest {
     /** 配置内容（JSON 对象或 JSON 字符串） */
     @NotNull(message = "配置内容不能为空")
     private Object config;
+
+    /** 客户端读取配置时获得的内容 hash；创建时显式传 null */
+    private String expectedHash;
+
+    /** 区分 expectedHash 未传与显式传 null */
+    @JsonIgnore
+    private boolean expectedHashPresent;
 
     public Long getId() {
         return id;
@@ -95,5 +103,18 @@ public class UserConfigSaveRequest {
 
     public void setConfig(Object config) {
         this.config = config;
+    }
+
+    public String getExpectedHash() {
+        return expectedHash;
+    }
+
+    public void setExpectedHash(String expectedHash) {
+        this.expectedHash = expectedHash;
+        this.expectedHashPresent = true;
+    }
+
+    public boolean isExpectedHashPresent() {
+        return expectedHashPresent;
     }
 }

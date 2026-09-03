@@ -5,23 +5,42 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.orange.common.context.UserContext;
 import com.orange.common.enums.ResultCode;
+import com.orange.common.exception.BadRequestException;
 import com.orange.common.exception.BusinessException;
+import com.orange.common.exception.ConfigConflictException;
 import com.orange.entity.dto.userconfig.UserConfigSaveRequest;
+import com.orange.entity.po.AuditLog;
 import com.orange.entity.po.UserConfig;
+import com.orange.entity.po.UserConfigQuota;
+import com.orange.entity.vo.UserConfigQuotaVO;
+import com.orange.entity.vo.UserConfigSaveVO;
 import com.orange.entity.vo.UserConfigVO;
+import com.orange.mapper.AuditLogMapper;
 import com.orange.mapper.UserConfigMapper;
+import com.orange.mapper.UserConfigQuotaMapper;
 import com.orange.service.UserConfigService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
- * 用户配置服务实现：保存、查询、删除
+ * 用户配置服务实现：CAS 保存、查询、物理删除和配额维护。
  *
  * @author UserCenter
  */
@@ -29,108 +48,116 @@ import java.util.stream.Collectors;
 public class UserConfigServiceImpl implements UserConfigService {
 
     private static final Logger log = LoggerFactory.getLogger(UserConfigServiceImpl.class);
-
-    /** 单个用户落库配置内容的总大小上限（字节）：500KB */
-    private static final long MAX_CONFIG_TOTAL_BYTES = 500L * 1024;
+    private static final long DEFAULT_CONFIG_QUOTA_BYTES = 500L * 1024;
+    private static final long MAX_ASSIGNABLE_CONFIG_BYTES = 10L * 1024 * 1024;
+    private static final Pattern SHA256_PATTERN = Pattern.compile("^[0-9a-fA-F]{64}$");
 
     private final UserConfigMapper userConfigMapper;
+    private final UserConfigQuotaMapper quotaMapper;
+    private final AuditLogMapper auditLogMapper;
     private final ObjectMapper objectMapper;
 
-    /**
-     * 构造器注入依赖
-     *
-     * @param userConfigMapper 用户配置 Mapper
-     * @param objectMapper     JSON 序列化器
-     */
-    public UserConfigServiceImpl(UserConfigMapper userConfigMapper, ObjectMapper objectMapper) {
+    public UserConfigServiceImpl(UserConfigMapper userConfigMapper,
+                                 UserConfigQuotaMapper quotaMapper,
+                                 AuditLogMapper auditLogMapper,
+                                 ObjectMapper objectMapper) {
         this.userConfigMapper = userConfigMapper;
+        this.quotaMapper = quotaMapper;
+        this.auditLogMapper = auditLogMapper;
         this.objectMapper = objectMapper;
     }
 
-    /**
-     * 保存用户配置：client_id 取自登录上下文（前端不可指定）；传 id 走编辑（校验归属），
-     * 不传 id 按（uid+客户端+分类+版本+名称）幂等覆盖，保证同键不重复
-     *
-     * @param uid     用户 uid
-     * @param request 保存参数
-     * @return 配置 id
-     */
     @Override
-    public Long saveConfig(Long uid, UserConfigSaveRequest request) {
+    @Transactional(rollbackFor = Exception.class)
+    public UserConfigSaveVO saveConfig(Long uid, UserConfigSaveRequest request) {
+        validateSaveRequest(request);
         String clientId = requireClientId();
-        UserConfig config;
-        if (request.getId() != null) {
-            // 编辑：校验记录存在且归属当前用户+客户端（防跨客户端越权），client_id 以登录上下文为准
-            config = getOwnedConfig(uid, clientId, request.getId());
-            config.setClientId(clientId);
-            config.setCategory(request.getCategory());
-            config.setVersion(request.getVersion());
-            config.setName(request.getName());
-        } else {
-            // 新增：同（uid+客户端+分类+版本+名称）已存在则复用该记录，保证幂等（version/name 必填，无空值匹配问题）
-            config = userConfigMapper.selectOne(Wrappers.<UserConfig>lambdaQuery()
-                    .eq(UserConfig::getUid, uid)
-                    .eq(UserConfig::getClientId, clientId)
-                    .eq(UserConfig::getCategory, request.getCategory())
-                    .eq(UserConfig::getVersion, request.getVersion())
-                    .eq(UserConfig::getName, request.getName()));
-            if (config == null) {
-                config = new UserConfig();
-                config.setUid(uid);
-                config.setClientId(clientId);
-                config.setCategory(request.getCategory());
-                config.setVersion(request.getVersion());
-                config.setName(request.getName());
-                config.setDeleteFlag(0);
-            }
+        String configString = toConfigString(request.getConfig());
+        long newBytes = configString.getBytes(StandardCharsets.UTF_8).length;
+        String newHash = sha256(configString);
+
+        if (request.getId() == null) {
+            return createConfig(uid, clientId, request, configString, newHash, newBytes);
         }
+        return updateConfig(uid, clientId, request, configString, newHash, newBytes);
+    }
+
+    private UserConfigSaveVO createConfig(Long uid,
+                                          String clientId,
+                                          UserConfigSaveRequest request,
+                                          String configString,
+                                          String newHash,
+                                          long newBytes) {
+        UserConfigQuota quota = initializeAndLockQuota(uid);
+        UserConfig existing = userConfigMapper.selectByIdentity(
+                uid, clientId, request.getCategory(), request.getVersion(), request.getName());
+        if (existing != null) {
+            throw new ConfigConflictException(existing.getContentHash());
+        }
+
+        long newUsedBytes = checkedUsage(quota, newBytes);
+        UserConfig config = new UserConfig();
+        config.setUid(uid);
+        config.setClientId(clientId);
+        config.setCategory(request.getCategory());
+        config.setVersion(request.getVersion());
+        config.setName(request.getName());
         config.setSource(request.getSource());
         config.setNote(request.getNote());
-        String configStr = toConfigString(request.getConfig());
-        // 单用户落库配置总量上限 500KB（按 UTF-8 字节数统计，覆盖编辑时先扣减旧值再累计）
-        long oldBytes = config.getId() != null && config.getConfig() != null
-                ? config.getConfig().getBytes(java.nio.charset.StandardCharsets.UTF_8).length
-                : 0;
-        long newBytes = configStr.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
-        long totalBytes = userConfigMapper.sumConfigBytes(uid) - oldBytes + newBytes;
-        if (totalBytes > MAX_CONFIG_TOTAL_BYTES) {
-            throw new BusinessException(ResultCode.CONFIG_TOO_LARGE);
-        }
-        config.setConfig(configStr);
-        if (config.getId() == null) {
+        config.setConfig(configString);
+        config.setContentHash(newHash);
+        config.setConfigBytes(newBytes);
+
+        try {
             userConfigMapper.insert(config);
-        } else {
-            userConfigMapper.updateById(config);
+        } catch (DuplicateKeyException e) {
+            UserConfig current = userConfigMapper.selectByIdentity(
+                    uid, clientId, request.getCategory(), request.getVersion(), request.getName());
+            throw new ConfigConflictException(current == null ? null : current.getContentHash());
         }
-        return config.getId();
+        updateQuotaUsage(quota, newUsedBytes);
+        return new UserConfigSaveVO(config.getId(), newHash);
     }
 
-    /**
-     * 获取当前登录上下文中的来源客户端标识，缺失时抛参数错误
-     *
-     * @return 来源客户端 id
-     */
-    private String requireClientId() {
-        String clientId = UserContext.getClientId();
-        if (!StringUtils.hasText(clientId)) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "缺少来源客户端标识，请重新登录");
+    private UserConfigSaveVO updateConfig(Long uid,
+                                          String clientId,
+                                          UserConfigSaveRequest request,
+                                          String configString,
+                                          String newHash,
+                                          long newBytes) {
+        UserConfig initial = userConfigMapper.selectOwnedById(request.getId(), uid, clientId);
+        if (initial == null) {
+            throw new ConfigConflictException(null);
         }
-        return clientId;
+
+        UserConfigQuota quota = lockExistingQuota(uid);
+        UserConfig current = userConfigMapper.selectOwnedByIdForUpdate(request.getId(), uid, clientId);
+        if (current == null) {
+            throw new ConfigConflictException(null);
+        }
+        validateIdentity(current, request);
+
+        String expectedHash = request.getExpectedHash().toLowerCase(Locale.ROOT);
+        if (!expectedHash.equals(current.getContentHash())) {
+            throw new ConfigConflictException(current.getContentHash());
+        }
+
+        long delta = newBytes - current.getConfigBytes();
+        long newUsedBytes = checkedUsage(quota, delta);
+        int updated = userConfigMapper.updateIfHashMatches(
+                request.getId(), uid, clientId, request.getSource(), request.getNote(),
+                configString, newHash, newBytes, expectedHash);
+        if (updated != 1) {
+            UserConfig latest = userConfigMapper.selectOwnedById(request.getId(), uid, clientId);
+            throw new ConfigConflictException(latest == null ? null : latest.getContentHash());
+        }
+
+        updateQuotaUsage(quota, newUsedBytes);
+        return new UserConfigSaveVO(request.getId(), newHash);
     }
 
-    /**
-     * 查询用户在某客户端某分类下的全部配置，config 由 JSON 字符串转为对象返回
-     *
-     * @param uid      用户 uid
-     * @param clientId 来源客户端标识
-     * @param category 配置分类
-     * @param version  配置版本（可空，空则返回该分类下全部版本）
-     * @param name     配置名称（可空，空则返回该版本下全部命名配置）
-     * @return 配置列表（按更新时间倒序）
-     */
     @Override
     public List<UserConfigVO> listConfigs(Long uid, String clientId, String category, String version, String name) {
-        // client_id 必须来自登录上下文，前端不可指定
         if (!StringUtils.hasText(clientId)) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "缺少来源客户端标识，请重新登录");
         }
@@ -144,44 +171,137 @@ public class UserConfigServiceImpl implements UserConfigService {
         return list.stream().map(this::toVO).collect(Collectors.toList());
     }
 
-    /**
-     * 删除用户配置（逻辑删除：delete_flag 置 1，由 @TableLogic 自动处理）
-     *
-     * @param uid 用户 uid
-     * @param id  配置 id
-     */
     @Override
+    public UserConfigQuotaVO getQuota(Long uid) {
+        UserConfigQuota quota = quotaMapper.selectById(uid);
+        if (quota == null) {
+            return new UserConfigQuotaVO(0, DEFAULT_CONFIG_QUOTA_BYTES);
+        }
+        return new UserConfigQuotaVO(quota.getUsedBytes(), quota.getLimitBytes());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public void deleteConfig(Long uid, Long id) {
         String clientId = requireClientId();
-        UserConfig config = getOwnedConfig(uid, clientId, id);
-        userConfigMapper.deleteById(config.getId());
+        UserConfig initial = userConfigMapper.selectOwnedById(id, uid, clientId);
+        if (initial == null) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "配置不存在");
+        }
+
+        UserConfigQuota quota = lockExistingQuota(uid);
+        UserConfig current = userConfigMapper.selectOwnedByIdForUpdate(id, uid, clientId);
+        if (current == null) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "配置不存在");
+        }
+        long newUsedBytes = quota.getUsedBytes() - current.getConfigBytes();
+        if (newUsedBytes < 0) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR, "用户配置配额数据异常");
+        }
+        if (userConfigMapper.deleteOwnedById(id, uid, clientId) != 1) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR, "删除配置失败");
+        }
+        updateQuotaUsage(quota, newUsedBytes);
     }
 
-    /**
-     * 查询归属当前用户+客户端的配置，不存在、非本人所有或非本客户端所有则抛异常
-     *
-     * @param uid      用户 uid
-     * @param clientId 来源客户端标识
-     * @param id       配置 id
-     * @return 配置实体
-     */
-    private UserConfig getOwnedConfig(Long uid, String clientId, Long id) {
-        UserConfig config = userConfigMapper.selectById(id);
-        if (config == null) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "配置不存在或已删除");
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void adjustQuota(Long uid, long newLimitBytes, Long operatorId, String reason) {
+        if (newLimitBytes <= 0 || newLimitBytes > MAX_ASSIGNABLE_CONFIG_BYTES) {
+            throw new BadRequestException("配置配额必须大于 0 且不超过平台上限");
         }
-        if (!uid.equals(config.getUid()) || !clientId.equals(config.getClientId())) {
-            throw new BusinessException(ResultCode.FORBIDDEN, "无权操作该配置");
+        UserConfigQuota quota = initializeAndLockQuota(uid);
+        if (newLimitBytes < quota.getUsedBytes()) {
+            throw new BadRequestException("配置配额不能低于当前已使用容量");
         }
-        return config;
+
+        long oldLimitBytes = quota.getLimitBytes();
+        quota.setLimitBytes(newLimitBytes);
+        if (quotaMapper.updateById(quota) != 1) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR, "调整配置配额失败");
+        }
+
+        AuditLog auditLog = new AuditLog();
+        auditLog.setOperatorType("admin");
+        auditLog.setOperatorId(operatorId);
+        auditLog.setAction("USER_CONFIG_QUOTA_ADJUST");
+        auditLog.setTarget("user:" + uid);
+        auditLog.setDetail(toAuditDetail(oldLimitBytes, newLimitBytes, reason));
+        auditLogMapper.insert(auditLog);
     }
 
-    /**
-     * 配置内容转 JSON 字符串存储（对象序列化，字符串保持原样）
-     *
-     * @param config 配置内容
-     * @return JSON 字符串
-     */
+    private void validateSaveRequest(UserConfigSaveRequest request) {
+        if (!request.isExpectedHashPresent()) {
+            throw new BadRequestException("expectedHash 字段缺失");
+        }
+        if (request.getId() == null) {
+            if (request.getExpectedHash() != null) {
+                throw new BadRequestException("创建配置时 id 和 expectedHash 必须为 null");
+            }
+            return;
+        }
+        if (request.getExpectedHash() == null
+                || !SHA256_PATTERN.matcher(request.getExpectedHash()).matches()) {
+            throw new BadRequestException("更新配置时 expectedHash 必须为 64 位 SHA-256 十六进制字符串");
+        }
+    }
+
+    private void validateIdentity(UserConfig current, UserConfigSaveRequest request) {
+        if (!Objects.equals(current.getCategory(), request.getCategory())
+                || !Objects.equals(current.getVersion(), request.getVersion())
+                || !Objects.equals(current.getName(), request.getName())) {
+            throw new BadRequestException("更新配置时 category、version 和 name 不能修改");
+        }
+    }
+
+    private UserConfigQuota initializeAndLockQuota(Long uid) {
+        quotaMapper.initialize(uid, DEFAULT_CONFIG_QUOTA_BYTES);
+        UserConfigQuota quota = quotaMapper.selectForUpdate(uid);
+        if (quota == null) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR, "初始化用户配置配额失败");
+        }
+        return quota;
+    }
+
+    private UserConfigQuota lockExistingQuota(Long uid) {
+        UserConfigQuota quota = quotaMapper.selectForUpdate(uid);
+        if (quota == null) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR, "用户配置配额不存在");
+        }
+        return quota;
+    }
+
+    private long checkedUsage(UserConfigQuota quota, long delta) {
+        long newUsedBytes;
+        try {
+            newUsedBytes = Math.addExact(quota.getUsedBytes(), delta);
+        } catch (ArithmeticException e) {
+            throw new BusinessException(ResultCode.CONFIG_TOO_LARGE);
+        }
+        if (newUsedBytes < 0) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR, "用户配置配额数据异常");
+        }
+        if (newUsedBytes > quota.getLimitBytes()) {
+            throw new BusinessException(ResultCode.CONFIG_TOO_LARGE);
+        }
+        return newUsedBytes;
+    }
+
+    private void updateQuotaUsage(UserConfigQuota quota, long usedBytes) {
+        quota.setUsedBytes(usedBytes);
+        if (quotaMapper.updateById(quota) != 1) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR, "更新用户配置配额失败");
+        }
+    }
+
+    private String requireClientId() {
+        String clientId = UserContext.getClientId();
+        if (!StringUtils.hasText(clientId)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "缺少来源客户端标识，请重新登录");
+        }
+        return clientId;
+    }
+
     private String toConfigString(Object config) {
         if (config instanceof String s) {
             return s;
@@ -194,27 +314,36 @@ public class UserConfigServiceImpl implements UserConfigService {
         }
     }
 
-    /**
-     * JSON 字符串转对象返回，解析失败时原样返回字符串
-     *
-     * @param configStr 配置内容（JSON 字符串）
-     * @return 配置对象
-     */
-    private Object parseConfig(String configStr) {
+    private String sha256(String value) {
         try {
-            return objectMapper.readValue(configStr, Object.class);
-        } catch (IOException e) {
-            log.warn("配置内容解析失败，原样返回：{}", e.getMessage());
-            return configStr;
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(digest.digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("JVM 不支持 SHA-256", e);
         }
     }
 
-    /**
-     * 实体转视图对象
-     *
-     * @param config 配置实体
-     * @return 配置视图
-     */
+    private String toAuditDetail(long oldLimitBytes, long newLimitBytes, String reason) {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("oldLimitBytes", oldLimitBytes);
+        detail.put("newLimitBytes", newLimitBytes);
+        detail.put("reason", reason);
+        try {
+            return objectMapper.writeValueAsString(detail);
+        } catch (JsonProcessingException e) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR, "配额审计数据序列化失败");
+        }
+    }
+
+    private Object parseConfig(String configString) {
+        try {
+            return objectMapper.readValue(configString, Object.class);
+        } catch (IOException e) {
+            log.warn("配置内容解析失败，原样返回：{}", e.getMessage());
+            return configString;
+        }
+    }
+
     private UserConfigVO toVO(UserConfig config) {
         UserConfigVO vo = new UserConfigVO();
         vo.setId(config.getId());
@@ -225,6 +354,7 @@ public class UserConfigServiceImpl implements UserConfigService {
         vo.setSource(config.getSource());
         vo.setNote(config.getNote());
         vo.setConfig(parseConfig(config.getConfig()));
+        vo.setHash(config.getContentHash());
         vo.setCreateTime(config.getCreateTime());
         vo.setUpdateTime(config.getUpdateTime());
         return vo;

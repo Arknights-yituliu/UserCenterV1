@@ -2,8 +2,11 @@ package com.orange.common.exception;
 
 import com.orange.common.enums.ResultCode;
 import com.orange.common.util.Result;
+import com.orange.entity.vo.UserConfigConflictVO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BindException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -19,6 +22,33 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    /**
+     * 处理用户配置 CAS 冲突。
+     *
+     * @param e CAS 冲突异常
+     * @return HTTP 409 与数据库当前 hash
+     */
+    @ExceptionHandler(ConfigConflictException.class)
+    public ResponseEntity<Result<UserConfigConflictVO>> handleConfigConflict(ConfigConflictException e) {
+        Result<UserConfigConflictVO> result = new Result<>(
+                ResultCode.CONFIG_HASH_CONFLICT.getCode(),
+                ResultCode.CONFIG_HASH_CONFLICT.getMessage(),
+                new UserConfigConflictVO(e.getCurrentHash()));
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(result);
+    }
+
+    /**
+     * 处理请求契约错误。
+     *
+     * @param e 请求错误
+     * @return HTTP 400
+     */
+    @ExceptionHandler(BadRequestException.class)
+    public ResponseEntity<Result<Void>> handleBadRequest(BadRequestException e) {
+        return ResponseEntity.badRequest().body(
+                Result.error(ResultCode.PARAM_VALID_ERROR.getCode(), e.getMessage()));
+    }
 
     /**
      * 处理业务异常
@@ -38,10 +68,10 @@ public class GlobalExceptionHandler {
      * @return 统一返回结果
      */
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public Result<Void> handleValidException(MethodArgumentNotValidException e) {
+    public ResponseEntity<Result<Void>> handleValidException(MethodArgumentNotValidException e) {
         FieldError fieldError = e.getBindingResult().getFieldError();
         String message = fieldError == null ? ResultCode.PARAM_VALID_ERROR.getMessage() : fieldError.getDefaultMessage();
-        return Result.error(ResultCode.PARAM_VALID_ERROR.getCode(), message);
+        return ResponseEntity.badRequest().body(Result.error(ResultCode.PARAM_VALID_ERROR.getCode(), message));
     }
 
     /**
@@ -51,10 +81,10 @@ public class GlobalExceptionHandler {
      * @return 统一返回结果
      */
     @ExceptionHandler(BindException.class)
-    public Result<Void> handleBindException(BindException e) {
+    public ResponseEntity<Result<Void>> handleBindException(BindException e) {
         FieldError fieldError = e.getBindingResult().getFieldError();
         String message = fieldError == null ? ResultCode.PARAM_VALID_ERROR.getMessage() : fieldError.getDefaultMessage();
-        return Result.error(ResultCode.PARAM_VALID_ERROR.getCode(), message);
+        return ResponseEntity.badRequest().body(Result.error(ResultCode.PARAM_VALID_ERROR.getCode(), message));
     }
 
     /**

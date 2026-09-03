@@ -33,6 +33,9 @@ public class UserConfigVO {
     /** 配置内容（JSON 对象） */
     private Object config;
 
+    /** 配置内容 SHA-256 */
+    private String hash;
+
     /** 创建时间 */
     private LocalDateTime createTime;
 
@@ -101,6 +104,14 @@ public class UserConfigVO {
 
     public void setConfig(Object config) {
         this.config = config;
+    }
+
+    public String getHash() {
+        return hash;
+    }
+
+    public void setHash(String hash) {
+        this.hash = hash;
     }
 
     public LocalDateTime getCreateTime() {

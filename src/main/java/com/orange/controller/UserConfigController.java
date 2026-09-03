@@ -4,6 +4,8 @@ import com.orange.common.context.UserContext;
 import com.orange.common.util.Result;
 import com.orange.entity.dto.userconfig.UserConfigDeleteRequest;
 import com.orange.entity.dto.userconfig.UserConfigSaveRequest;
+import com.orange.entity.vo.UserConfigQuotaVO;
+import com.orange.entity.vo.UserConfigSaveVO;
 import com.orange.entity.vo.UserConfigVO;
 import com.orange.service.UserConfigService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -40,15 +42,26 @@ public class UserConfigController {
     }
 
     /**
-     * 保存用户配置（同用户+项目+分类+版本已存在则覆盖更新）
+     * 通过 CAS 保存用户配置。
      *
      * @param request 保存参数
-     * @return 配置 id
+     * @return 配置 id 和新内容 hash
      */
     @Operation(summary = "保存用户配置")
     @PostMapping("/save")
-    public Result<Long> saveConfig(@Valid @RequestBody UserConfigSaveRequest request) {
+    public Result<UserConfigSaveVO> saveConfig(@Valid @RequestBody UserConfigSaveRequest request) {
         return Result.success(userConfigService.saveConfig(UserContext.requireUid(), request));
+    }
+
+    /**
+     * 查询当前用户的全局配置配额使用情况。
+     *
+     * @return 配额使用情况（字节）
+     */
+    @Operation(summary = "查询用户配置配额")
+    @GetMapping("/quota")
+    public Result<UserConfigQuotaVO> getQuota() {
+        return Result.success(userConfigService.getQuota(UserContext.requireUid()));
     }
 
     /**
@@ -69,7 +82,7 @@ public class UserConfigController {
     }
 
     /**
-     * 删除用户配置（逻辑删除）
+     * 物理删除用户配置。
      *
      * @param request 删除参数
      * @return 统一返回结果

@@ -22,6 +22,8 @@ public enum ResultCode {
     ILLEGAL_OPERATION(10003, "非法操作"),
     /** 配置存储总量超过大小限制 */
     CONFIG_TOO_LARGE(10004, "配置存储总量超过大小限制（500KB）"),
+    /** 用户配置内容版本冲突 */
+    CONFIG_HASH_CONFLICT(10005, "配置已被更新"),
 
     // ---------- 2xxxx 账号错误 ----------
     /** 用户不存在 */
