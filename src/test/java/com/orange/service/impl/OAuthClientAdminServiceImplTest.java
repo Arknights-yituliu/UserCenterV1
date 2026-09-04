@@ -9,6 +9,7 @@ import com.orange.entity.po.OAuthClient;
 import com.orange.entity.po.OAuthClientOrigin;
 import com.orange.entity.vo.oauth.OAuthClientCredentialVO;
 import com.orange.entity.vo.oauth.OAuthClientVO;
+import com.orange.event.OAuthClientReviewNotificationEvent;
 import com.orange.mapper.OAuthClientMapper;
 import com.orange.mapper.OAuthClientOriginMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -97,6 +98,12 @@ class OAuthClientAdminServiceImplTest {
         assertEquals("https://spa.example.com", storedOrigin.getOrigin());
         assertEquals(1, storedOrigin.getEnabled());
         assertEquals(0, storedOrigin.getAdminApproved());
+        ArgumentCaptor<OAuthClientReviewNotificationEvent> notificationCaptor =
+                ArgumentCaptor.forClass(OAuthClientReviewNotificationEvent.class);
+        verify(eventPublisher).publishEvent(notificationCaptor.capture());
+        assertEquals("注册", notificationCaptor.getValue().action());
+        assertEquals(stored.getId(), notificationCaptor.getValue().clientId());
+        assertEquals("https://spa.example.com", notificationCaptor.getValue().origin());
         assertNull(credential.getClientSecret());
         assertEquals("none", credential.getAuthMethod());
         assertTrue(credential.getOwnerEnabled());
@@ -291,6 +298,11 @@ class OAuthClientAdminServiceImplTest {
         verify(oauthClientOriginMapper).updateById(captor.capture());
         assertEquals("https://new.example.com", captor.getValue().getOrigin());
         assertEquals(0, captor.getValue().getAdminApproved());
+        ArgumentCaptor<OAuthClientReviewNotificationEvent> notificationCaptor =
+                ArgumentCaptor.forClass(OAuthClientReviewNotificationEvent.class);
+        verify(eventPublisher).publishEvent(notificationCaptor.capture());
+        assertEquals("更新", notificationCaptor.getValue().action());
+        assertEquals("https://new.example.com", notificationCaptor.getValue().origin());
     }
 
     @Test
