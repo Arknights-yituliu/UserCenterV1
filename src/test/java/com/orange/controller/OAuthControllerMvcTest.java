@@ -5,21 +5,20 @@ import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.exception.GlobalExceptionHandler;
 import com.orange.entity.vo.oauth.OAuthTokenVO;
+import com.orange.service.OAuthClientOriginCache;
 import com.orange.service.OAuthTokenService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.env.MapPropertySource;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockServletContext;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.support.AnnotationConfigWebApplicationContext;
+import org.springframework.web.filter.CorsFilter;
 import org.springframework.web.servlet.config.annotation.EnableWebMvc;
-
-import java.util.Map;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -34,7 +33,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.hamcrest.Matchers.nullValue;
 
 /**
- * OAuth 表单端点与静态 CORS 白名单的 MVC 契约测试。
+ * OAuth 表单端点与动态 CORS 白名单的 MVC 契约测试。
  *
  * <p>使用最小 WebMVC 上下文，只注册本控制器、异常处理器和 CORS 配置，避免数据库、
  * Redis 或完整应用启动影响 HTTP 参数绑定与跨域响应的验证。</p>
@@ -43,20 +42,22 @@ class OAuthControllerMvcTest {
 
     private AnnotationConfigWebApplicationContext context;
     private OAuthTokenService oauthTokenService;
+    private OAuthClientOriginCache originCache;
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
         context = new AnnotationConfigWebApplicationContext();
         context.setServletContext(new MockServletContext());
-        context.getEnvironment().getPropertySources().addFirst(new MapPropertySource(
-                "oauth-cors-test",
-                Map.of("user-center.oauth.allowed-origins",
-                        "https://spa.example.com, http://localhost:5173")));
-        context.register(TestWebConfig.class);
+        context.register(TestWebConfig.class, CorsConfig.class);
         context.refresh();
         oauthTokenService = context.getBean(OAuthTokenService.class);
-        mockMvc = MockMvcBuilders.webAppContextSetup(context).build();
+        originCache = context.getBean(OAuthClientOriginCache.class);
+        when(originCache.isAllowed("https://spa.example.com")).thenReturn(true);
+        when(originCache.isAllowed("http://localhost:5173")).thenReturn(true);
+        mockMvc = MockMvcBuilders.webAppContextSetup(context)
+                .addFilters(context.getBean(CorsFilter.class))
+                .build();
     }
 
     @AfterEach
@@ -135,6 +136,11 @@ class OAuthControllerMvcTest {
         }
 
         @Bean
+        OAuthClientOriginCache oauthClientOriginCache() {
+            return mock(OAuthClientOriginCache.class);
+        }
+
+        @Bean
         OAuthController oauthController(OAuthTokenService oauthTokenService) {
             return new OAuthController(oauthTokenService);
         }
@@ -144,11 +150,5 @@ class OAuthControllerMvcTest {
             return new GlobalExceptionHandler();
         }
 
-        @Bean
-        CorsConfig corsConfig() {
-            // 属性由测试 Environment 按生产中的 @Value 路径注入；测试值在逗号后带空格，
-            // 同时验证 CorsConfig 的清理逻辑不会破坏精确 Origin 匹配。
-            return new CorsConfig();
-        }
     }
 }

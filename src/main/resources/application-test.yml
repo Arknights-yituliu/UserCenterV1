@@ -58,6 +58,8 @@ user-center:
   email-send-interval-seconds: 60
   # ===== OAuth2 授权服务器配置（第三方 Web 网站接入） =====
   oauth:
+    # OAuth 客户端注册或更新后的管理员通知邮箱；留空则不发送
+    admin-email: xxx@example.com
     # access_token 有效期（秒）：默认 2 小时
     access-token-ttl-seconds: 7200
     # refresh_token 有效期（秒）：默认 90 天
@@ -97,8 +99,8 @@ user-center:
         ip-limit: 10
         email-limit: 3
         window-seconds: 3600
-    # CORS 跨域白名单（逗号分隔，来自 oauth_client 登记的网站 origin，仅对 /oauth2/** /auth/** /user/** 生效）
-    allowed-origins: http://localhost:3000
+    # oauth_client_origin 审批白名单的本地缓存刷新周期（毫秒）
+    origin-cache-refresh-ms: 60000
     # 单个开发者账号可注册的 OAuth 客户端数量上限（默认 10）
     max-clients-per-owner: 5
 

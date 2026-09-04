@@ -4,10 +4,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.entity.dto.oauthclient.OAuthClientRegisterRequest;
+import com.orange.entity.dto.oauthclient.OAuthClientUpdateRequest;
 import com.orange.entity.po.OAuthClient;
+import com.orange.entity.po.OAuthClientOrigin;
 import com.orange.entity.vo.oauth.OAuthClientCredentialVO;
 import com.orange.entity.vo.oauth.OAuthClientVO;
 import com.orange.mapper.OAuthClientMapper;
+import com.orange.mapper.OAuthClientOriginMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -16,6 +19,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -32,6 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 /**
@@ -47,13 +52,20 @@ class OAuthClientAdminServiceImplTest {
     private OAuthClientMapper oauthClientMapper;
 
     @Mock
+    private OAuthClientOriginMapper oauthClientOriginMapper;
+
+    @Mock
     private StringRedisTemplate redisTemplate;
+
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
 
     private OAuthClientAdminServiceImpl service;
 
     @BeforeEach
     void setUp() {
-        service = new OAuthClientAdminServiceImpl(oauthClientMapper, redisTemplate, new ObjectMapper());
+        service = new OAuthClientAdminServiceImpl(oauthClientMapper, oauthClientOriginMapper,
+                redisTemplate, new ObjectMapper(), eventPublisher);
         ReflectionTestUtils.setField(service, "maxClientsPerOwner", 10);
         lenient().when(oauthClientMapper.selectCount(any())).thenReturn(0L);
     }
@@ -77,6 +89,14 @@ class OAuthClientAdminServiceImplTest {
         assertEquals(1, stored.getOwnerEnabled());
         assertEquals(0, stored.getAdminApproved());
         assertEquals(0, stored.getDirectAuthEnabled());
+        ArgumentCaptor<OAuthClientOrigin> originCaptor = ArgumentCaptor.forClass(OAuthClientOrigin.class);
+        verify(oauthClientOriginMapper).insert(originCaptor.capture());
+        OAuthClientOrigin storedOrigin = originCaptor.getValue();
+        assertEquals(stored.getId(), storedOrigin.getClientId());
+        assertEquals("Example SPA", storedOrigin.getClientName());
+        assertEquals("https://spa.example.com", storedOrigin.getOrigin());
+        assertEquals(1, storedOrigin.getEnabled());
+        assertEquals(0, storedOrigin.getAdminApproved());
         assertNull(credential.getClientSecret());
         assertEquals("none", credential.getAuthMethod());
         assertTrue(credential.getOwnerEnabled());
@@ -241,14 +261,98 @@ class OAuthClientAdminServiceImplTest {
         client.setOwnerUid(7L);
         client.setDirectAuthEnabled(1);
         when(oauthClientMapper.selectById("client-1")).thenReturn(client);
+        OAuthClientOrigin origin = origin("https://spa.example.com", 1, 1);
+        when(oauthClientOriginMapper.selectById("client-1")).thenReturn(origin);
 
         OAuthClientVO vo = service.getClient(7L, "client-1");
 
         assertEquals("none", vo.getAuthMethod());
         assertEquals(Arrays.asList("authorization_code", "refresh_token"), vo.getGrantTypes());
+        assertEquals("https://spa.example.com", vo.getWebsiteOrigin());
+        assertTrue(vo.getOriginApproved());
         assertTrue(vo.getOwnerEnabled());
         assertTrue(vo.getAdminApproved());
         assertTrue(vo.getDirectAuthEnabled());
+    }
+
+    @Test
+    void changingOriginResetsOriginApproval() {
+        OAuthClient client = client("none", "authorization_code");
+        client.setOwnerUid(7L);
+        when(oauthClientMapper.selectById("client-1")).thenReturn(client);
+        OAuthClientOrigin existing = origin("https://old.example.com", 1, 1);
+        when(oauthClientOriginMapper.selectById("client-1")).thenReturn(existing);
+
+        OAuthClientUpdateRequest request = validUpdateRequest();
+        request.setWebsiteOrigin("https://new.example.com");
+        service.updateClient(7L, "client-1", request);
+
+        ArgumentCaptor<OAuthClientOrigin> captor = ArgumentCaptor.forClass(OAuthClientOrigin.class);
+        verify(oauthClientOriginMapper).updateById(captor.capture());
+        assertEquals("https://new.example.com", captor.getValue().getOrigin());
+        assertEquals(0, captor.getValue().getAdminApproved());
+    }
+
+    @Test
+    void keepingSameOriginPreservesOriginApproval() {
+        OAuthClient client = client("none", "authorization_code");
+        client.setOwnerUid(7L);
+        when(oauthClientMapper.selectById("client-1")).thenReturn(client);
+        when(oauthClientOriginMapper.selectById("client-1"))
+                .thenReturn(origin("https://spa.example.com", 1, 1));
+
+        service.updateClient(7L, "client-1", validUpdateRequest());
+
+        verify(oauthClientOriginMapper, never()).updateById(any());
+    }
+
+    @Test
+    void changingClientNameSyncsOriginWithoutResettingApproval() {
+        OAuthClient client = client("none", "authorization_code");
+        client.setOwnerUid(7L);
+        when(oauthClientMapper.selectById("client-1")).thenReturn(client);
+        OAuthClientOrigin existing = origin("https://spa.example.com", 1, 1);
+        when(oauthClientOriginMapper.selectById("client-1")).thenReturn(existing);
+        OAuthClientUpdateRequest request = validUpdateRequest();
+        request.setClientName("Renamed SPA");
+
+        service.updateClient(7L, "client-1", request);
+
+        ArgumentCaptor<OAuthClientOrigin> captor = ArgumentCaptor.forClass(OAuthClientOrigin.class);
+        verify(oauthClientOriginMapper).updateById(captor.capture());
+        assertEquals("Renamed SPA", captor.getValue().getClientName());
+        assertEquals(1, captor.getValue().getAdminApproved());
+    }
+
+    @Test
+    void removingOriginDeletesOriginApplication() {
+        OAuthClient client = client("none", "authorization_code");
+        client.setOwnerUid(7L);
+        when(oauthClientMapper.selectById("client-1")).thenReturn(client);
+        when(oauthClientOriginMapper.selectById("client-1"))
+                .thenReturn(origin("https://spa.example.com", 1, 1));
+        OAuthClientUpdateRequest request = validUpdateRequest();
+        request.setWebsiteOrigin(null);
+
+        service.updateClient(7L, "client-1", request);
+
+        verify(oauthClientOriginMapper).deleteById("client-1");
+    }
+
+    @Test
+    void disablingClientAlsoDisablesApprovedOrigin() {
+        OAuthClient client = client("none", "authorization_code");
+        client.setOwnerUid(7L);
+        when(oauthClientMapper.selectById("client-1")).thenReturn(client);
+        when(oauthClientOriginMapper.selectById("client-1"))
+                .thenReturn(origin("https://spa.example.com", 1, 1));
+
+        service.setOwnerEnabled(7L, "client-1", false);
+
+        ArgumentCaptor<OAuthClientOrigin> captor = ArgumentCaptor.forClass(OAuthClientOrigin.class);
+        verify(oauthClientOriginMapper).updateById(captor.capture());
+        assertEquals(0, captor.getValue().getEnabled());
+        assertEquals(1, captor.getValue().getAdminApproved());
     }
 
     private OAuthClientRegisterRequest validRequest() {
@@ -260,6 +364,25 @@ class OAuthClientAdminServiceImplTest {
         request.setGrantTypes(Arrays.asList("authorization_code", "refresh_token"));
         request.setWebsiteOrigin("https://spa.example.com");
         return request;
+    }
+
+    private OAuthClientUpdateRequest validUpdateRequest() {
+        OAuthClientUpdateRequest request = new OAuthClientUpdateRequest();
+        request.setClientName("Example SPA");
+        request.setRedirectUris(Collections.singletonList("https://spa.example.com/oauth/callback"));
+        request.setScopes(Collections.singletonList("user.read"));
+        request.setWebsiteOrigin("https://spa.example.com");
+        return request;
+    }
+
+    private OAuthClientOrigin origin(String value, int enabled, int approved) {
+        OAuthClientOrigin origin = new OAuthClientOrigin();
+        origin.setClientId("client-1");
+        origin.setClientName("Example SPA");
+        origin.setOrigin(value);
+        origin.setEnabled(enabled);
+        origin.setAdminApproved(approved);
+        return origin;
     }
 
     private OAuthClient client(String authMethod, String grantTypes) {

@@ -1,62 +1,83 @@
 package com.orange.common.config;
 
-import org.springframework.beans.factory.annotation.Value;
+import com.orange.service.OAuthClientOriginCache;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.util.StringUtils;
-import org.springframework.web.servlet.config.annotation.CorsRegistry;
-import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+import org.springframework.http.HttpHeaders;
+import org.springframework.util.AntPathMatcher;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.filter.CorsFilter;
 
-import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * CORS 跨域配置：对需要浏览器跨域调用的端点开放白名单来源
  *
  * <p>开放范围：/oauth2/**（OAuth 换 token、userinfo）、/auth/**（登录、注册、验证码、重设密码）、
- * /user/**（用户自助接口）。白名单来源取配置 user-center.oauth.allowed-origins（逗号分隔）。
+ * /user/**（用户自助接口）。白名单来源取 oauth_client_origin 的运行时内存快照。
  * /api/app/** 为服务端签名接口，刻意不开放跨域（AppSecret 不能暴露给浏览器）。</p>
  *
  * @author UserCenter
  */
 @Configuration
-public class CorsConfig implements WebMvcConfigurer {
+public class CorsConfig {
 
     /** 允许跨域访问的端点路径（/api/app/** 刻意排除，仅服务端签名调用） */
     private static final String[] OPEN_PATHS = {"/oauth2/**", "/auth/**", "/user/**"};
 
-    /**
-     * 允许跨域访问的静态 Origin 白名单（英文逗号分隔）。客户端登记的 websiteOrigin
-     * 只是申请信息，不会自动进入该白名单，避免任意自助注册值立即获得跨域信任。
-     */
-    @Value("${user-center.oauth.allowed-origins:}")
-    private String allowedOrigins;
+    private static final AntPathMatcher PATH_MATCHER = new AntPathMatcher();
 
     /**
-     * 注册 CORS 规则：仅对开放路径生效，白名单化，不开放全部来源
+     * 创建动态 CORS 配置源。允许时只把当前请求 Origin 放入响应配置，避免在请求路径上
+     * 对完整白名单进行线性扫描；未审批的 Origin 会由 Spring CORS 处理器直接拒绝。
      *
-     * @param registry CORS 注册器
+     * @param originCache 已审批 Origin 缓存
+     * @return 动态 CORS 配置源
      */
-    @Override
-    public void addCorsMappings(CorsRegistry registry) {
-        // 未配置白名单时不开放任何跨域
-        if (!StringUtils.hasText(allowedOrigins)) {
-            return;
+    @Bean
+    public CorsConfigurationSource oauthCorsConfigurationSource(OAuthClientOriginCache originCache) {
+        return request -> {
+            if (!isOpenPath(request)) {
+                return null;
+            }
+            CorsConfiguration configuration = new CorsConfiguration();
+            String origin = request.getHeader(HttpHeaders.ORIGIN);
+            configuration.setAllowedOrigins(originCache.isAllowed(origin)
+                    ? List.of(origin) : Collections.emptyList());
+            configuration.setAllowedMethods(List.of("GET", "POST", "OPTIONS"));
+            configuration.setAllowedHeaders(List.of("*"));
+            configuration.setAllowCredentials(true);
+            return configuration;
+        };
+    }
+
+    /**
+     * 在 MVC 拦截器之前处理预检和实际跨域请求。
+     *
+     * @param configurationSource 动态 CORS 配置源
+     * @return CORS 过滤器
+     */
+    @Bean
+    public CorsFilter corsFilter(
+            @Qualifier("oauthCorsConfigurationSource") CorsConfigurationSource configurationSource) {
+        return new CorsFilter(configurationSource);
+    }
+
+    private boolean isOpenPath(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        String contextPath = request.getContextPath();
+        if (!contextPath.isEmpty() && path.startsWith(contextPath)) {
+            path = path.substring(contextPath.length());
         }
-        // 配置文件常为便于阅读在逗号后留空格；注册 CORS 前统一清理空白和空项，
-        // 但不修改 scheme/host/port，仍由 Spring 按精确 Origin 执行匹配。
-        String[] origins = Arrays.stream(allowedOrigins.split(","))
-                .map(String::trim)
-                .filter(StringUtils::hasText)
-                .distinct()
-                .toArray(String[]::new);
-        if (origins.length == 0) {
-            return;
+        for (String pattern : OPEN_PATHS) {
+            if (PATH_MATCHER.match(pattern, path)) {
+                return true;
+            }
         }
-        for (String path : OPEN_PATHS) {
-            registry.addMapping(path)
-                    .allowedOrigins(origins)
-                    .allowedMethods("GET", "POST", "OPTIONS")
-                    .allowedHeaders("*")
-                    .allowCredentials(true);
-        }
+        return false;
     }
 }

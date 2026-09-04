@@ -10,19 +10,25 @@ import com.orange.common.util.RedisKeyUtil;
 import com.orange.entity.dto.oauthclient.OAuthClientRegisterRequest;
 import com.orange.entity.dto.oauthclient.OAuthClientUpdateRequest;
 import com.orange.entity.po.OAuthClient;
+import com.orange.entity.po.OAuthClientOrigin;
 import com.orange.entity.vo.oauth.OAuthClientCredentialVO;
 import com.orange.entity.vo.oauth.OAuthClientVO;
+import com.orange.event.OAuthClientOriginChangedEvent;
+import com.orange.event.OAuthClientReviewNotificationEvent;
 import com.orange.mapper.OAuthClientMapper;
+import com.orange.mapper.OAuthClientOriginMapper;
 import com.orange.service.OAuthClientAdminService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.Cursor;
 import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
@@ -36,6 +42,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -56,8 +63,10 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
     private static final String OAUTH_REFRESH_MEMBER_PREFIX = "refresh:";
 
     private final OAuthClientMapper oauthClientMapper;
+    private final OAuthClientOriginMapper oauthClientOriginMapper;
     private final StringRedisTemplate stringRedisTemplate;
     private final ObjectMapper objectMapper;
+    private final ApplicationEventPublisher eventPublisher;
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
     private final SecureRandom secureRandom = new SecureRandom();
 
@@ -69,15 +78,21 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
      * 构造器注入依赖
      *
      * @param oauthClientMapper    OAuth 客户端 Mapper
+     * @param oauthClientOriginMapper OAuth 客户端 Origin Mapper
      * @param stringRedisTemplate  Redis 客户端（级联清理令牌）
      * @param objectMapper         JSON 序列化器（解析令牌记录）
+     * @param eventPublisher       Spring 事务事件发布器
      */
     public OAuthClientAdminServiceImpl(OAuthClientMapper oauthClientMapper,
+                                       OAuthClientOriginMapper oauthClientOriginMapper,
                                        StringRedisTemplate stringRedisTemplate,
-                                       ObjectMapper objectMapper) {
+                                       ObjectMapper objectMapper,
+                                       ApplicationEventPublisher eventPublisher) {
         this.oauthClientMapper = oauthClientMapper;
+        this.oauthClientOriginMapper = oauthClientOriginMapper;
         this.stringRedisTemplate = stringRedisTemplate;
         this.objectMapper = objectMapper;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -91,6 +106,7 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
      * @return 客户端凭证（含明文 secret，仅此一次）
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public OAuthClientCredentialVO register(Long uid, OAuthClientRegisterRequest request) {
         // 1. 数量上限校验：单账号最多 maxClientsPerOwner 个客户端
         Long count = oauthClientMapper.selectCount(
@@ -127,7 +143,6 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
         // 安全策略：PKCE 与授权确认页为系统强制开启，不开放给开发者自助编辑
         client.setRequirePkce(1);
         client.setRequireAuthConsent(1);
-        client.setWebsiteOrigin(websiteOrigin);
         client.setAccessTokenTtl(request.getAccessTokenTtl());
         client.setRefreshTokenTtl(request.getRefreshTokenTtl());
         // 新客户端默认进入管理员审批状态，且不具备直连认证能力。直连登录和注册
@@ -137,6 +152,12 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
         client.setDirectAuthEnabled(0);
         client.setOwnerUid(uid);
         oauthClientMapper.insert(client);
+        if (websiteOrigin != null) {
+            oauthClientOriginMapper.insert(newPendingOrigin(
+                    clientId, request.getClientName(), websiteOrigin, true));
+            publishOriginChanged();
+        }
+        publishReviewNotification("注册", client, websiteOrigin);
         log.info("[OAuthClient] 注册客户端成功: ownerUid={}, clientId={}", uid, clientId);
         return credential(client, clientSecret);
     }
@@ -149,10 +170,17 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
      */
     @Override
     public List<OAuthClientVO> listClients(Long uid) {
-        return oauthClientMapper.selectList(Wrappers.<OAuthClient>lambdaQuery()
+        List<OAuthClient> clients = oauthClientMapper.selectList(Wrappers.<OAuthClient>lambdaQuery()
                         .eq(OAuthClient::getOwnerUid, uid)
-                        .orderByDesc(OAuthClient::getCreateTime))
-                .stream().map(this::toVO).collect(Collectors.toList());
+                        .orderByDesc(OAuthClient::getCreateTime));
+        if (clients.isEmpty()) {
+            return List.of();
+        }
+        Map<String, OAuthClientOrigin> origins = oauthClientOriginMapper.selectBatchIds(
+                        clients.stream().map(OAuthClient::getId).collect(Collectors.toList()))
+                .stream().collect(Collectors.toMap(OAuthClientOrigin::getClientId, origin -> origin));
+        return clients.stream().map(client -> toVO(client, origins.get(client.getId())))
+                .collect(Collectors.toList());
     }
 
     /**
@@ -164,7 +192,8 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
      */
     @Override
     public OAuthClientVO getClient(Long uid, String clientId) {
-        return toVO(getOwnedClient(uid, clientId));
+        OAuthClient client = getOwnedClient(uid, clientId);
+        return toVO(client, oauthClientOriginMapper.selectById(clientId));
     }
 
     /**
@@ -175,6 +204,7 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
      * @param request  更新参数
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void updateClient(Long uid, String clientId, OAuthClientUpdateRequest request) {
         List<String> redirectUris = normalizeRedirectUris(request.getRedirectUris());
         List<String> scopes = normalizeScopes(request.getScopes());
@@ -183,10 +213,14 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
         client.setClientName(request.getClientName());
         client.setRedirectUris(join(redirectUris));
         client.setScopes(join(scopes));
-        client.setWebsiteOrigin(websiteOrigin);
         client.setAccessTokenTtl(request.getAccessTokenTtl());
         client.setRefreshTokenTtl(request.getRefreshTokenTtl());
         oauthClientMapper.updateById(client);
+        if (syncOrigin(clientId, request.getClientName(), websiteOrigin,
+                client.getOwnerEnabled() != null && client.getOwnerEnabled() == 1)) {
+            publishOriginChanged();
+        }
+        publishReviewNotification("更新", client, websiteOrigin);
         log.info("[OAuthClient] 更新客户端成功: ownerUid={}, clientId={}", uid, clientId);
     }
 
@@ -223,6 +257,7 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
      * @param ownerEnabled 所有者是否启用客户端
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void setOwnerEnabled(Long uid, String clientId, boolean ownerEnabled) {
         OAuthClient client = getOwnedClient(uid, clientId);
         // 管理员审批优先级最高：待审批或封禁中的客户端不允许所有者自助启用。
@@ -231,6 +266,12 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
         }
         client.setOwnerEnabled(ownerEnabled ? 1 : 0);
         oauthClientMapper.updateById(client);
+        OAuthClientOrigin origin = oauthClientOriginMapper.selectById(clientId);
+        if (origin != null && !Objects.equals(origin.getEnabled(), ownerEnabled ? 1 : 0)) {
+            origin.setEnabled(ownerEnabled ? 1 : 0);
+            oauthClientOriginMapper.updateById(origin);
+            publishOriginChanged();
+        }
         log.info("[OAuthClient] {}客户端成功: ownerUid={}, clientId={}",
                 ownerEnabled ? "启用" : "停用", uid, clientId);
     }
@@ -242,10 +283,13 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
      * @param clientId 客户端 ID
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void deleteClient(Long uid, String clientId) {
         OAuthClient client = getOwnedClient(uid, clientId);
         revokeTokensByClient(clientId);
+        oauthClientOriginMapper.deleteById(clientId);
         oauthClientMapper.deleteById(client.getId());
+        publishOriginChanged();
         log.info("[OAuthClient] 删除客户端成功: ownerUid={}, clientId={}", uid, clientId);
     }
 
@@ -332,8 +376,8 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
 
     /**
      * 校验并规范化网站 Origin。Origin 只能包含 scheme、host 和可选 port，不能携带
-     * 路径、查询参数、用户信息或 fragment。该字段目前只是接入申请信息，真正的浏览器
-     * 放行仍由服务端静态 {@code allowed-origins} 白名单决定。
+     * 路径、查询参数、用户信息或 fragment。该值写入 oauth_client_origin 后默认为
+     * 待审核，只有管理员审批通过才会进入运行时 CORS 缓存。
      */
     private String normalizeWebsiteOrigin(String value) {
         if (!StringUtils.hasText(value)) {
@@ -478,7 +522,7 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
      * @param client 客户端实体
      * @return 客户端视图
      */
-    private OAuthClientVO toVO(OAuthClient client) {
+    private OAuthClientVO toVO(OAuthClient client, OAuthClientOrigin origin) {
         OAuthClientVO vo = new OAuthClientVO();
         vo.setClientId(client.getId());
         vo.setClientName(client.getClientName());
@@ -488,12 +532,70 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
         vo.setScopes(split(client.getScopes()));
         vo.setRequirePkce(client.getRequirePkce() != null && client.getRequirePkce() == 1);
         vo.setRequireAuthConsent(client.getRequireAuthConsent() != null && client.getRequireAuthConsent() == 1);
-        vo.setWebsiteOrigin(client.getWebsiteOrigin());
+        vo.setWebsiteOrigin(origin == null ? null : origin.getOrigin());
+        vo.setOriginApproved(origin != null && origin.getAdminApproved() != null
+                && origin.getAdminApproved() == 1);
         vo.setOwnerEnabled(client.getOwnerEnabled() != null && client.getOwnerEnabled() == 1);
         vo.setAdminApproved(client.getAdminApproved() != null && client.getAdminApproved() == 1);
         vo.setDirectAuthEnabled(client.getDirectAuthEnabled() != null && client.getDirectAuthEnabled() == 1);
         vo.setCreateTime(client.getCreateTime());
         return vo;
+    }
+
+    /**
+     * 同步客户端当前登记的唯一 Origin。Origin 内容变化时必须重新进入管理员审批。
+     *
+     * @return 是否修改了 Origin 表
+     */
+    private boolean syncOrigin(String clientId, String clientName, String normalizedOrigin, boolean enabled) {
+        OAuthClientOrigin existing = oauthClientOriginMapper.selectById(clientId);
+        if (normalizedOrigin == null) {
+            if (existing == null) {
+                return false;
+            }
+            oauthClientOriginMapper.deleteById(clientId);
+            return true;
+        }
+        if (existing == null) {
+            oauthClientOriginMapper.insert(newPendingOrigin(clientId, clientName, normalizedOrigin, enabled));
+            return true;
+        }
+
+        boolean originChanged = !normalizedOrigin.equals(existing.getOrigin());
+        boolean clientNameChanged = !Objects.equals(clientName, existing.getClientName());
+        int nextEnabled = enabled ? 1 : 0;
+        boolean enabledChanged = !Objects.equals(existing.getEnabled(), nextEnabled);
+        if (!originChanged && !clientNameChanged && !enabledChanged) {
+            return false;
+        }
+        existing.setClientName(clientName);
+        existing.setOrigin(normalizedOrigin);
+        existing.setEnabled(nextEnabled);
+        if (originChanged) {
+            existing.setAdminApproved(0);
+        }
+        oauthClientOriginMapper.updateById(existing);
+        return true;
+    }
+
+    private OAuthClientOrigin newPendingOrigin(
+            String clientId, String clientName, String origin, boolean enabled) {
+        OAuthClientOrigin record = new OAuthClientOrigin();
+        record.setClientId(clientId);
+        record.setClientName(clientName);
+        record.setOrigin(origin);
+        record.setEnabled(enabled ? 1 : 0);
+        record.setAdminApproved(0);
+        return record;
+    }
+
+    private void publishOriginChanged() {
+        eventPublisher.publishEvent(new OAuthClientOriginChangedEvent());
+    }
+
+    private void publishReviewNotification(String action, OAuthClient client, String origin) {
+        eventPublisher.publishEvent(new OAuthClientReviewNotificationEvent(
+                action, client.getId(), client.getClientName(), client.getOwnerUid(), origin));
     }
 
     /**

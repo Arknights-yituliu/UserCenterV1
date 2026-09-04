@@ -16,7 +16,7 @@
 - `authMethod=none`
 - `ownerEnabled=true`
 - `adminApproved=true`
-- 无后端 Web 应用的 Origin 已加入服务端 CORS 白名单
+- 无后端 Web 应用的 Origin 已登记到 `oauth_client_origin` 并通过管理员审核
 
 `redirect_uri` 必须与登记值完全一致，包括协议、域名、端口、路径和查询参数。
 

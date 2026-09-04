@@ -37,6 +37,9 @@ public class OAuthClientVO {
     /** 网站域名 origin */
     private String websiteOrigin;
 
+    /** 网站 Origin 是否已由管理员审批通过。 */
+    private Boolean originApproved;
+
     /** 所有者是否启用客户端。 */
     private Boolean ownerEnabled;
 
@@ -119,6 +122,14 @@ public class OAuthClientVO {
 
     public void setWebsiteOrigin(String websiteOrigin) {
         this.websiteOrigin = websiteOrigin;
+    }
+
+    public Boolean getOriginApproved() {
+        return originApproved;
+    }
+
+    public void setOriginApproved(Boolean originApproved) {
+        this.originApproved = originApproved;
     }
 
     public Boolean getOwnerEnabled() {

@@ -78,7 +78,6 @@ CREATE TABLE `oauth_client` (
     `scopes`            VARCHAR(256) NOT NULL COMMENT '可授权范围（逗号分隔）：user.read',
     `require_pkce`      TINYINT      NOT NULL DEFAULT 1 COMMENT '是否强制 PKCE：1=强制 0=不强制',
     `require_auth_consent` TINYINT    NOT NULL DEFAULT 1 COMMENT '授权时是否展示确认页（自研实现暂未启用确认页）',
-    `website_origin`    VARCHAR(255) DEFAULT NULL COMMENT '网站域名 origin（CORS 白名单来源）',
     `access_token_ttl`  BIGINT       DEFAULT NULL COMMENT 'access_token 有效期（秒），NULL 用全局默认',
     `refresh_token_ttl` BIGINT       DEFAULT NULL COMMENT 'refresh_token 有效期（秒）',
     `owner_enabled`     TINYINT      NOT NULL DEFAULT 1 COMMENT '所有者是否启用：1=启用 0=停用',
@@ -92,7 +91,23 @@ CREATE TABLE `oauth_client` (
 ) ENGINE = InnoDB COMMENT = 'OAuth2 客户端注册表';
 
 -- -------------------------------------------------------------
--- 5. SMTP 邮件渠道配置表（多渠道降级发送，配置存数据库可动态调整）
+-- 5. OAuth2 客户端 CORS Origin 表（独立审核和动态缓存）
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `oauth_client_origin`;
+CREATE TABLE `oauth_client_origin` (
+    `client_id`       VARCHAR(128) NOT NULL COMMENT 'OAuth客户端ID，一个客户端当前登记一个Origin',
+    `client_name`     VARCHAR(128) NOT NULL COMMENT '客户端名称（冗余保存，供管理员审核展示）',
+    `origin`          VARCHAR(255) NOT NULL COMMENT '规范化Origin（scheme、host和可选非默认端口）',
+    `enabled`         TINYINT      NOT NULL DEFAULT 1 COMMENT '所有者是否启用：1=启用 0=停用',
+    `admin_approved`  TINYINT      NOT NULL DEFAULT 0 COMMENT '管理员是否审批通过：1=通过 0=待审批或拒绝',
+    `create_time`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`client_id`),
+    KEY `idx_cors_status` (`enabled`, `admin_approved`, `origin`)
+) ENGINE = InnoDB COMMENT = 'OAuth2客户端CORS Origin白名单';
+
+-- -------------------------------------------------------------
+-- 6. SMTP 邮件渠道配置表（多渠道降级发送，配置存数据库可动态调整）
 -- -------------------------------------------------------------
 DROP TABLE IF EXISTS `smtp_config`;
 CREATE TABLE `smtp_config` (
@@ -113,7 +128,7 @@ CREATE TABLE `smtp_config` (
 ) ENGINE = InnoDB COMMENT = 'SMTP 邮件渠道配置表';
 
 -- -------------------------------------------------------------
--- 6. 用户配置表
+-- 7. 用户配置表
 -- -------------------------------------------------------------
 DROP TABLE IF EXISTS `user_config`;
 CREATE TABLE `user_config` (
@@ -134,7 +149,7 @@ CREATE TABLE `user_config` (
     UNIQUE KEY `uk_user_config_identity` (`uid`, `client_id`, `category`, `version`, `name`)
 ) ENGINE = InnoDB COMMENT = '用户配置表';
 -- -------------------------------------------------------------
--- 7. 用户配置容量配额表
+-- 8. 用户配置容量配额表
 -- -------------------------------------------------------------
 DROP TABLE IF EXISTS `user_config_quota`;
 CREATE TABLE `user_config_quota` (

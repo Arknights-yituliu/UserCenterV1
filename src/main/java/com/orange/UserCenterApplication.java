@@ -2,6 +2,8 @@ package com.orange;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * User Center 多站点统一用户服务启动类
@@ -9,6 +11,8 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * @author UserCenter
  */
 @SpringBootApplication
+@EnableAsync
+@EnableScheduling
 public class UserCenterApplication {
 
     /**
