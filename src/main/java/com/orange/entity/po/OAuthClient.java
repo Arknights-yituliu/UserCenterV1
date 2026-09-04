@@ -28,7 +28,7 @@ public class OAuthClient {
     /** 客户端名称（第三方网站名） */
     private String clientName;
 
-    /** 认证方式：client_secret_basic/client_secret_post */
+    /** 认证方式：none/client_secret_post */
     private String authMethods;
 
     /** 授权类型：authorization_code,refresh_token */
@@ -55,11 +55,14 @@ public class OAuthClient {
     /** refresh_token 有效期（秒） */
     private Long refreshTokenTtl;
 
-    /** 状态：1=启用 0=停用 */
-    private Integer status;
+    /** 所有者是否启用：1=启用 0=停用。 */
+    private Integer ownerEnabled;
 
-    /** 管理员封禁：0=正常 1=封禁（优先级高于 status） */
-    private Integer adminBanned;
+    /** 管理员是否审批通过：1=通过 0=待审批或已封禁。 */
+    private Integer adminApproved;
+
+    /** 是否允许直连认证（登录和注册）：1=允许 0=禁止。 */
+    private Integer directAuthEnabled;
 
     /** 所有者用户 uid（开发者账号，NULL=平台托管） */
     private Long ownerUid;
@@ -164,20 +167,28 @@ public class OAuthClient {
         this.refreshTokenTtl = refreshTokenTtl;
     }
 
-    public Integer getStatus() {
-        return status;
+    public Integer getOwnerEnabled() {
+        return ownerEnabled;
     }
 
-    public void setStatus(Integer status) {
-        this.status = status;
+    public void setOwnerEnabled(Integer ownerEnabled) {
+        this.ownerEnabled = ownerEnabled;
     }
 
-    public Integer getAdminBanned() {
-        return adminBanned;
+    public Integer getAdminApproved() {
+        return adminApproved;
     }
 
-    public void setAdminBanned(Integer adminBanned) {
-        this.adminBanned = adminBanned;
+    public void setAdminApproved(Integer adminApproved) {
+        this.adminApproved = adminApproved;
+    }
+
+    public Integer getDirectAuthEnabled() {
+        return directAuthEnabled;
+    }
+
+    public void setDirectAuthEnabled(Integer directAuthEnabled) {
+        this.directAuthEnabled = directAuthEnabled;
     }
 
     public Long getOwnerUid() {

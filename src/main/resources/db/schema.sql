@@ -72,7 +72,7 @@ CREATE TABLE `oauth_client` (
     `id`                VARCHAR(128) NOT NULL COMMENT '客户端ID（client_id）',
     `client_secret`     VARCHAR(256) DEFAULT NULL COMMENT '客户端密钥（BCrypt 哈希，公共客户端为空）',
     `client_name`       VARCHAR(128) NOT NULL COMMENT '客户端名称（第三方网站名）',
-    `auth_methods`      VARCHAR(256) NOT NULL COMMENT '认证方式：client_secret_basic/client_secret_post',
+    `auth_methods`      VARCHAR(256) NOT NULL COMMENT '认证方式：none/client_secret_post',
     `grant_types`       VARCHAR(256) NOT NULL COMMENT '授权类型：authorization_code,refresh_token',
     `redirect_uris`     VARCHAR(2048) NOT NULL COMMENT '回调地址白名单（逗号分隔，精确匹配）',
     `scopes`            VARCHAR(256) NOT NULL COMMENT '可授权范围（逗号分隔）：user.read',
@@ -81,12 +81,13 @@ CREATE TABLE `oauth_client` (
     `website_origin`    VARCHAR(255) DEFAULT NULL COMMENT '网站域名 origin（CORS 白名单来源）',
     `access_token_ttl`  BIGINT       DEFAULT NULL COMMENT 'access_token 有效期（秒），NULL 用全局默认',
     `refresh_token_ttl` BIGINT       DEFAULT NULL COMMENT 'refresh_token 有效期（秒）',
-    `status`            TINYINT      NOT NULL DEFAULT 1 COMMENT '状态：1=启用 0=停用',
-    `admin_banned`      TINYINT      NOT NULL DEFAULT 0 COMMENT '管理员封禁：0=正常 1=封禁（优先级高于 status，封禁期间一切授权/换票拒绝）',
+    `owner_enabled`     TINYINT      NOT NULL DEFAULT 1 COMMENT '所有者是否启用：1=启用 0=停用',
+    `admin_approved`    TINYINT      NOT NULL DEFAULT 0 COMMENT '管理员是否审批通过：1=通过 0=待审批或封禁',
+    `direct_auth_enabled` TINYINT    NOT NULL DEFAULT 0 COMMENT '是否允许直连认证（登录和注册）：1=允许 0=禁止',
     `owner_uid`         BIGINT       DEFAULT NULL COMMENT '所有者用户 uid（开发者账号，NULL=平台托管）',
     `create_time`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     PRIMARY KEY (`id`),
-    KEY `idx_status` (`status`),
+    KEY `idx_owner_enabled` (`owner_enabled`),
     KEY `idx_owner_uid` (`owner_uid`)
 ) ENGINE = InnoDB COMMENT = 'OAuth2 客户端注册表';
 
@@ -132,7 +133,6 @@ CREATE TABLE `user_config` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_user_config_identity` (`uid`, `client_id`, `category`, `version`, `name`)
 ) ENGINE = InnoDB COMMENT = '用户配置表';
-
 -- -------------------------------------------------------------
 -- 7. 用户配置容量配额表
 -- -------------------------------------------------------------

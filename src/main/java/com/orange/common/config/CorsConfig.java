@@ -6,6 +6,8 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
+import java.util.Arrays;
+
 /**
  * CORS 跨域配置：对需要浏览器跨域调用的端点开放白名单来源
  *
@@ -21,7 +23,10 @@ public class CorsConfig implements WebMvcConfigurer {
     /** 允许跨域访问的端点路径（/api/app/** 刻意排除，仅服务端签名调用） */
     private static final String[] OPEN_PATHS = {"/oauth2/**", "/auth/**", "/user/**"};
 
-    /** 允许跨域访问的站点 origin 白名单（逗号分隔，来自 oauth_client 登记的网站域名） */
+    /**
+     * 允许跨域访问的静态 Origin 白名单（英文逗号分隔）。客户端登记的 websiteOrigin
+     * 只是申请信息，不会自动进入该白名单，避免任意自助注册值立即获得跨域信任。
+     */
     @Value("${user-center.oauth.allowed-origins:}")
     private String allowedOrigins;
 
@@ -36,7 +41,16 @@ public class CorsConfig implements WebMvcConfigurer {
         if (!StringUtils.hasText(allowedOrigins)) {
             return;
         }
-        String[] origins = allowedOrigins.split(",");
+        // 配置文件常为便于阅读在逗号后留空格；注册 CORS 前统一清理空白和空项，
+        // 但不修改 scheme/host/port，仍由 Spring 按精确 Origin 执行匹配。
+        String[] origins = Arrays.stream(allowedOrigins.split(","))
+                .map(String::trim)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .toArray(String[]::new);
+        if (origins.length == 0) {
+            return;
+        }
         for (String path : OPEN_PATHS) {
             registry.addMapping(path)
                     .allowedOrigins(origins)

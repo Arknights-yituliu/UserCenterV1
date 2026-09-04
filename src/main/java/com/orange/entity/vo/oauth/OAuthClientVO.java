@@ -16,6 +16,12 @@ public class OAuthClientVO {
     /** 客户端名称 */
     private String clientName;
 
+    /** 客户端认证方式：none=公共客户端，client_secret_post=加密客户端。 */
+    private String authMethod;
+
+    /** 客户端获准使用的授权类型，响应中以列表形式返回。 */
+    private List<String> grantTypes;
+
     /** 回调地址白名单 */
     private List<String> redirectUris;
 
@@ -31,11 +37,14 @@ public class OAuthClientVO {
     /** 网站域名 origin */
     private String websiteOrigin;
 
-    /** 状态：1=启用 0=停用 */
-    private Integer status;
+    /** 所有者是否启用客户端。 */
+    private Boolean ownerEnabled;
 
-    /** 管理员封禁：0=正常 1=封禁 */
-    private Integer adminBanned;
+    /** 管理员是否已审批通过；false 表示待审批或已被管理员封禁。 */
+    private Boolean adminApproved;
+
+    /** 是否已由管理员开通直连认证能力（统一控制直连登录和直连注册）。 */
+    private Boolean directAuthEnabled;
 
     /** 创建时间 */
     private LocalDateTime createTime;
@@ -54,6 +63,22 @@ public class OAuthClientVO {
 
     public void setClientName(String clientName) {
         this.clientName = clientName;
+    }
+
+    public String getAuthMethod() {
+        return authMethod;
+    }
+
+    public void setAuthMethod(String authMethod) {
+        this.authMethod = authMethod;
+    }
+
+    public List<String> getGrantTypes() {
+        return grantTypes;
+    }
+
+    public void setGrantTypes(List<String> grantTypes) {
+        this.grantTypes = grantTypes;
     }
 
     public List<String> getRedirectUris() {
@@ -96,20 +121,28 @@ public class OAuthClientVO {
         this.websiteOrigin = websiteOrigin;
     }
 
-    public Integer getStatus() {
-        return status;
+    public Boolean getOwnerEnabled() {
+        return ownerEnabled;
     }
 
-    public void setStatus(Integer status) {
-        this.status = status;
+    public void setOwnerEnabled(Boolean ownerEnabled) {
+        this.ownerEnabled = ownerEnabled;
     }
 
-    public Integer getAdminBanned() {
-        return adminBanned;
+    public Boolean getAdminApproved() {
+        return adminApproved;
     }
 
-    public void setAdminBanned(Integer adminBanned) {
-        this.adminBanned = adminBanned;
+    public void setAdminApproved(Boolean adminApproved) {
+        this.adminApproved = adminApproved;
+    }
+
+    public Boolean getDirectAuthEnabled() {
+        return directAuthEnabled;
+    }
+
+    public void setDirectAuthEnabled(Boolean directAuthEnabled) {
+        this.directAuthEnabled = directAuthEnabled;
     }
 
     public LocalDateTime getCreateTime() {

@@ -90,7 +90,7 @@ public interface OAuthTokenService {
                                    String codeChallenge, String codeChallengeMethod, Long uid);
 
     /**
-     * 令牌交换：authorization_code → access_token + refresh_token
+     * 令牌交换：authorization_code → access_token；登记 refresh_token grant 时同时返回 refresh_token
      *
      * @param clientId     客户端 ID
      * @param clientSecret 客户端密钥（公共客户端传空）

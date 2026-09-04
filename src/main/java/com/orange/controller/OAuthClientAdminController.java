@@ -44,10 +44,10 @@ public class OAuthClientAdminController {
     }
 
     /**
-     * 注册客户端（client_secret 明文仅此一次返回，请立即保存）
+     * 注册客户端（默认待管理员审批；公共客户端不生成 secret；加密客户端明文 secret 仅此一次返回）
      *
      * @param request 注册参数
-     * @return 客户端凭证（含明文 secret）
+     * @return 客户端凭证（公共客户端 secret 为 null）
      */
     @Operation(summary = "注册 OAuth 客户端")
     @PostMapping("/register")
@@ -114,7 +114,7 @@ public class OAuthClientAdminController {
     @Operation(summary = "停用客户端")
     @PostMapping("/{clientId}/disable")
     public Result<Void> disable(@PathVariable("clientId") String clientId) {
-        oauthClientAdminService.setClientStatus(UserContext.requireUid(), clientId, false);
+        oauthClientAdminService.setOwnerEnabled(UserContext.requireUid(), clientId, false);
         return Result.success();
     }
 
@@ -127,7 +127,7 @@ public class OAuthClientAdminController {
     @Operation(summary = "启用客户端")
     @PostMapping("/{clientId}/enable")
     public Result<Void> enable(@PathVariable("clientId") String clientId) {
-        oauthClientAdminService.setClientStatus(UserContext.requireUid(), clientId, true);
+        oauthClientAdminService.setOwnerEnabled(UserContext.requireUid(), clientId, true);
         return Result.success();
     }
 

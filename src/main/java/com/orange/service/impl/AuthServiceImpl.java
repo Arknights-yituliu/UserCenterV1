@@ -1,9 +1,9 @@
 package com.orange.service.impl;
 
-import com.orange.common.util.IdGenerator;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.orange.common.enums.OAuthClientAuthMethod;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.util.DesensitizeUtil;
@@ -378,23 +378,50 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException(ResultCode.OAUTH_CLIENT_INVALID);
         }
         OAuthClient client = oauthClientMapper.selectById(clientId);
-        if (client == null || client.getStatus() == null || client.getStatus() != 1) {
+        if (client == null || client.getOwnerEnabled() == null || client.getOwnerEnabled() != 1) {
             throw new BusinessException(ResultCode.OAUTH_CLIENT_INVALID);
+        }
+        if (client.getAdminApproved() == null || client.getAdminApproved() != 1) {
+            throw new BusinessException(ResultCode.OAUTH_CLIENT_BANNED);
         }
         return client;
     }
 
     /**
-     * 客户端认证：需要密钥的客户端必须提供正确密钥（BCrypt 比对，与 OAuth 令牌流程一致）
+     * 旧系统直连登录客户端认证。
+     *
+     * <p>该流程由旧系统后端发起，协议契约始终要求 {@code client_secret_post}。公共客户端
+     * 即使数据库中的密钥为 null，也不能因此跳过认证进入直连登录；否则无后端 Web 应用的 client_id
+     * 会被误当成服务端凭证使用。未知认证方式视为客户端配置错误。</p>
      *
      * @param client       客户端实体
      * @param clientSecret 请求携带的密钥
      */
     private void authenticateOAuthClient(OAuthClient client, String clientSecret) {
-        boolean needsSecret = StringUtils.hasText(client.getClientSecret());
-        if (needsSecret && (!StringUtils.hasText(clientSecret)
-                || !passwordEncoder.matches(clientSecret, client.getClientSecret()))) {
+        if (OAuthClientAuthMethod.NONE.matches(client.getAuthMethods())) {
+            throw new BusinessException(ResultCode.OAUTH_SECRET_INVALID,
+                    "公共客户端不能使用旧系统直连登录");
+        }
+        if (!OAuthClientAuthMethod.CLIENT_SECRET_POST.matches(client.getAuthMethods())) {
+            throw new BusinessException(ResultCode.OAUTH_CLIENT_INVALID, "客户端认证方式不受支持");
+        }
+        if (!StringUtils.hasText(client.getClientSecret())
+                || !StringUtils.hasText(clientSecret)
+                || !passwordEncoder.matches(clientSecret, client.getClientSecret())) {
             throw new BusinessException(ResultCode.OAUTH_SECRET_INVALID);
+        }
+    }
+
+    /**
+     * 校验客户端是否已由管理员开通直连认证能力。
+     *
+     * <p>该能力统一控制直连登录和直连注册，默认关闭且不属于 OAuth grant type。</p>
+     *
+     * @param client 已完成基础状态校验的客户端
+     */
+    private void requireDirectAuthEnabled(OAuthClient client) {
+        if (client.getDirectAuthEnabled() == null || client.getDirectAuthEnabled() != 1) {
+            throw new BusinessException(ResultCode.OAUTH_DIRECT_AUTH_NOT_ALLOWED);
         }
     }
 
@@ -408,9 +435,10 @@ public class AuthServiceImpl implements AuthService {
      */
     @Override
     public DirectLoginSessionVO createDirectSession(String clientId, String clientSecret, String sourceIp) {
-        // 1. 客户端认证：仅登记且启用的 client 可发起
+        // 1. 客户端认证：仅登记、启用、审批且开通直连认证的加密客户端可发起
         OAuthClient client = requireEnabledOAuthClient(clientId);
         authenticateOAuthClient(client, clientSecret);
+        requireDirectAuthEnabled(client);
         // 2. 客户端认证通过后，使用一图流转发的来源 IP 进行限流。
         enforceDirectSessionRateLimit(clientId, sourceIp);
         // 3. 签发发起会话凭证（绑定 clientId，短时有效）
@@ -447,8 +475,11 @@ public class AuthServiceImpl implements AuthService {
         }
         String normalizedAccount = normalizeRateTarget(account);
         enforceDirectLoginRateLimit(sourceIp, normalizedAccount);
-        // 2. 校验发起会话凭证有效（前端必须持旧系统后端换取的 channel）
+        // 2. 校验发起会话凭证有效，并重新检查客户端状态和直连权限。
+        // 这样管理员关闭权限后，尚未使用的 channel 也会立即被拒绝。
         String clientId = readDirectChannel(channel);
+        OAuthClient client = requireEnabledOAuthClient(clientId);
+        requireDirectAuthEnabled(client);
         // 3. 按登录方式校验凭证（密码/邮箱验证码，复用主登录逻辑：含失败锁定与失败计数）
         try {
             if (TYPE_PASSWORD.equals(type)) {
@@ -483,8 +514,10 @@ public class AuthServiceImpl implements AuthService {
     public DirectLoginTicketVO directRegister(String channel, RegisterRequest request, String ip) {
         // 1. 先按来源 IP 和邮箱限流，验证码发送频控由 EmailCodeService 统一执行。
         enforceDirectRegisterRateLimit(ip, request.getEmail());
-        // 2. 校验发起会话凭证有效（前端必须持旧系统后端换取的 channel）
+        // 2. 校验发起会话凭证有效，并重新检查客户端状态和直连权限。
         String clientId = readDirectChannel(channel);
+        OAuthClient client = requireEnabledOAuthClient(clientId);
+        requireDirectAuthEnabled(client);
         // 3. 手动 Bean Validation：直连注册为散参入参未走 @Valid，此处补齐与主站注册一致的格式/长度校验
         validateRegisterRequest(request);
         // 4. 复用注册校验与创建用户逻辑（含邮箱验证码校验、唯一性校验、密码加密）
@@ -635,9 +668,10 @@ public class AuthServiceImpl implements AuthService {
      */
     @Override
     public ServerLoginVO directUser(String clientId, String clientSecret, String ticket) {
-        // 1. 客户端认证
+        // 1. 客户端认证并重新检查直连权限，使已签发但未兑换的 ticket 可被立即禁用
         OAuthClient client = requireEnabledOAuthClient(clientId);
         authenticateOAuthClient(client, clientSecret);
+        requireDirectAuthEnabled(client);
         if (!StringUtils.hasText(ticket)) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "登录票据缺失");
         }

@@ -1,5 +1,6 @@
 package com.orange.entity.vo.oauth;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
@@ -23,6 +24,7 @@ public class OAuthTokenVO {
 
     /** 刷新令牌 */
     @JsonProperty("refresh_token")
+    @JsonInclude(JsonInclude.Include.ALWAYS)
     private String refreshToken;
 
     /** 授权范围（逗号分隔） */

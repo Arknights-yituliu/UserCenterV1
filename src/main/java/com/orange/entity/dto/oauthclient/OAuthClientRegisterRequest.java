@@ -28,10 +28,12 @@ public class OAuthClientRegisterRequest {
     @NotEmpty(message = "授权范围不能为空")
     private List<@NotBlank(message = "授权范围不能为空") String> scopes;
 
-    /** 授权类型（默认 authorization_code,refresh_token） */
-    private List<String> grantTypes;
+    /** 授权类型，必须显式提交且至少包含 authorization_code */
+    @NotEmpty(message = "授权类型不能为空")
+    private List<@NotBlank(message = "授权类型不能为空") String> grantTypes;
 
-    /** 认证方式（默认 client_secret_post） */
+    /** 认证方式，必须显式提交 none 或 client_secret_post */
+    @NotBlank(message = "客户端认证方式不能为空")
     private String authMethod;
 
     /** 网站域名 origin（CORS 白名单来源） */

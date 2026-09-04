@@ -84,16 +84,18 @@ public enum ResultCode {
     OAUTH_SECRET_INVALID(90007, "客户端密钥校验失败"),
     /** PKCE 校验失败 */
     OAUTH_PKCE_INVALID(90008, "PKCE 校验失败"),
-    /** 访问令牌无效或已过期 */
-    OAUTH_TOKEN_INVALID(90009, "访问令牌无效或已过期"),
+    /** OAuth 令牌无效、已过期或一次性令牌已被使用 */
+    OAUTH_TOKEN_INVALID(90009, "OAuth 令牌无效、已过期或已被使用"),
     /** 跨站登录票据无效或已过期 */
     OAUTH_TICKET_INVALID(90010, "登录票据无效或已过期"),
     /** 授权确认单无效或已过期 */
     OAUTH_CONSENT_INVALID(90011, "授权确认单无效或已过期，请重新发起授权"),
     /** 客户端数量已达上限 */
     OAUTH_CLIENT_LIMIT(90012, "客户端数量已达上限"),
-    /** 客户端已被管理员封禁 */
-    OAUTH_CLIENT_BANNED(90013, "OAuth 客户端已被管理员封禁");
+    /** 客户端待管理员审批或已被封禁 */
+    OAUTH_CLIENT_BANNED(90013, "OAuth 客户端待管理员审批或已被封禁"),
+    /** 客户端未开通直连认证能力 */
+    OAUTH_DIRECT_AUTH_NOT_ALLOWED(90014, "OAuth 客户端未开通直连认证能力");
 
     /** 状态码 */
     private final int code;

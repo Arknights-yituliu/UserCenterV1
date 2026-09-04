@@ -15,11 +15,11 @@ import java.util.List;
 public interface OAuthClientAdminService {
 
     /**
-     * 注册客户端（client_id / client_secret 由系统生成，secret 明文仅此一次返回）
+     * 注册客户端（client_id 由系统生成；仅加密客户端生成 client_secret，明文只返回一次）
      *
      * @param uid     开发者用户 uid
      * @param request 注册参数
-     * @return 客户端凭证（含明文 secret，仅此一次）
+     * @return 客户端凭证（公共客户端 secret 为 null，加密客户端含一次性明文 secret）
      */
     OAuthClientCredentialVO register(Long uid, OAuthClientRegisterRequest request);
 
@@ -63,9 +63,9 @@ public interface OAuthClientAdminService {
      *
      * @param uid      开发者用户 uid
      * @param clientId 客户端 ID
-     * @param enabled  true=启用 false=停用
+     * @param ownerEnabled 所有者是否启用客户端
      */
-    void setClientStatus(Long uid, String clientId, boolean enabled);
+    void setOwnerEnabled(Long uid, String clientId, boolean ownerEnabled);
 
     /**
      * 删除客户端（级联吊销其名下全部令牌，不可恢复）

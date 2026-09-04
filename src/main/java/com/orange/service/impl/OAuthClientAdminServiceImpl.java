@@ -1,8 +1,9 @@
 package com.orange.service.impl;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.orange.common.enums.OAuthClientAuthMethod;
+import com.orange.common.enums.OAuthGrantType;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.util.RedisKeyUtil;
@@ -25,11 +26,17 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.EnumSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -74,7 +81,10 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
     }
 
     /**
-     * 注册客户端：校验数量上限与回调地址，生成 client_id/secret（BCrypt 入库），返回明文 secret 一次
+     * 注册客户端：校验协议能力与地址边界，按认证方式决定是否生成密钥。
+     *
+     * <p>{@code none} 表示浏览器等无法保密的公共客户端，数据库中的密钥必须为 null；
+     * {@code client_secret_post} 表示加密客户端，只保存 BCrypt 哈希，明文仅随本次响应返回。</p>
      *
      * @param uid     开发者用户 uid
      * @param request 注册参数
@@ -88,30 +98,43 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
         if (count >= maxClientsPerOwner) {
             throw new BusinessException(ResultCode.OAUTH_CLIENT_LIMIT);
         }
-        // 2. 回调地址安全校验（必须 https，本地联调允许 http://localhost）
-        validateRedirectUris(request.getRedirectUris());
-        // 3. 生成凭证
+        // 2. 在任何凭证生成和入库前完成归一化。这里集中处理必填项、白名单和跨字段规则，
+        // 避免 DTO 注解只能校验单字段、无法表达 grantTypes 依赖关系的问题。
+        OAuthClientAuthMethod authMethod = normalizeAuthMethod(request.getAuthMethod());
+        List<String> grantTypes = normalizeGrantTypes(request.getGrantTypes());
+        List<String> redirectUris = normalizeRedirectUris(request.getRedirectUris());
+        List<String> scopes = normalizeScopes(request.getScopes());
+        String websiteOrigin = normalizeWebsiteOrigin(request.getWebsiteOrigin());
+
+        // 3. client_id 对两类客户端都需要；只有加密客户端生成 client_secret。
         String clientId = randomToken("cl_", 24);
-        String clientSecret = randomToken("sk_", 32);
-        // 4. 组装并入库（secret 仅存 BCrypt 哈希）
+        String clientSecret = null;
+        String storedSecret = null;
+        if (authMethod == OAuthClientAuthMethod.CLIENT_SECRET_POST) {
+            clientSecret = randomToken("sk_", 32);
+            storedSecret = passwordEncoder.encode(clientSecret);
+        }
+
+        // 4. 组装并入库。公共客户端显式写入 NULL，不能用空串伪装成“无密钥”。
         OAuthClient client = new OAuthClient();
         client.setId(clientId);
-        client.setClientSecret(passwordEncoder.encode(clientSecret));
+        client.setClientSecret(storedSecret);
         client.setClientName(request.getClientName());
-        client.setAuthMethods(StringUtils.hasText(request.getAuthMethod())
-                ? request.getAuthMethod() : "client_secret_post");
-        client.setGrantTypes(join(request.getGrantTypes() == null || request.getGrantTypes().isEmpty()
-                ? Arrays.asList("authorization_code", "refresh_token") : request.getGrantTypes()));
-        client.setRedirectUris(join(request.getRedirectUris()));
-        client.setScopes(join(request.getScopes()));
+        client.setAuthMethods(authMethod.getValue());
+        client.setGrantTypes(join(grantTypes));
+        client.setRedirectUris(join(redirectUris));
+        client.setScopes(join(scopes));
         // 安全策略：PKCE 与授权确认页为系统强制开启，不开放给开发者自助编辑
         client.setRequirePkce(1);
         client.setRequireAuthConsent(1);
-        client.setWebsiteOrigin(request.getWebsiteOrigin());
+        client.setWebsiteOrigin(websiteOrigin);
         client.setAccessTokenTtl(request.getAccessTokenTtl());
         client.setRefreshTokenTtl(request.getRefreshTokenTtl());
-        client.setStatus(1);
-        client.setAdminBanned(0);
+        // 新客户端默认进入管理员审批状态，且不具备直连认证能力。直连登录和注册
+        // 只能由管理员对受信客户端开通，不能通过客户端自助接口申请或修改。
+        client.setOwnerEnabled(1);
+        client.setAdminApproved(0);
+        client.setDirectAuthEnabled(0);
         client.setOwnerUid(uid);
         oauthClientMapper.insert(client);
         log.info("[OAuthClient] 注册客户端成功: ownerUid={}, clientId={}", uid, clientId);
@@ -153,12 +176,14 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
      */
     @Override
     public void updateClient(Long uid, String clientId, OAuthClientUpdateRequest request) {
-        validateRedirectUris(request.getRedirectUris());
+        List<String> redirectUris = normalizeRedirectUris(request.getRedirectUris());
+        List<String> scopes = normalizeScopes(request.getScopes());
+        String websiteOrigin = normalizeWebsiteOrigin(request.getWebsiteOrigin());
         OAuthClient client = getOwnedClient(uid, clientId);
         client.setClientName(request.getClientName());
-        client.setRedirectUris(join(request.getRedirectUris()));
-        client.setScopes(join(request.getScopes()));
-        client.setWebsiteOrigin(request.getWebsiteOrigin());
+        client.setRedirectUris(join(redirectUris));
+        client.setScopes(join(scopes));
+        client.setWebsiteOrigin(websiteOrigin);
         client.setAccessTokenTtl(request.getAccessTokenTtl());
         client.setRefreshTokenTtl(request.getRefreshTokenTtl());
         oauthClientMapper.updateById(client);
@@ -175,6 +200,14 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
     @Override
     public OAuthClientCredentialVO rotateSecret(Long uid, String clientId) {
         OAuthClient client = getOwnedClient(uid, clientId);
+        // 公共客户端的安全模型建立在“没有可保密的凭证”之上。禁止通过轮换接口隐式
+        // 写入 secret，否则数据库声明仍为 none、运行时却出现密钥，形成配置漂移。
+        if (OAuthClientAuthMethod.NONE.matches(client.getAuthMethods())) {
+            throw new BusinessException(ResultCode.ILLEGAL_OPERATION, "公共客户端没有可轮换的密钥");
+        }
+        if (!OAuthClientAuthMethod.CLIENT_SECRET_POST.matches(client.getAuthMethods())) {
+            throw new BusinessException(ResultCode.OAUTH_CLIENT_INVALID, "客户端认证方式不受支持");
+        }
         String newSecret = randomToken("sk_", 32);
         client.setClientSecret(passwordEncoder.encode(newSecret));
         oauthClientMapper.updateById(client);
@@ -187,18 +220,19 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
      *
      * @param uid      开发者用户 uid
      * @param clientId 客户端 ID
-     * @param enabled  true=启用 false=停用
+     * @param ownerEnabled 所有者是否启用客户端
      */
     @Override
-    public void setClientStatus(Long uid, String clientId, boolean enabled) {
+    public void setOwnerEnabled(Long uid, String clientId, boolean ownerEnabled) {
         OAuthClient client = getOwnedClient(uid, clientId);
-        // 管理员封禁优先级最高：封禁中的客户端不允许用户自助启用
-        if (enabled && client.getAdminBanned() != null && client.getAdminBanned() == 1) {
+        // 管理员审批优先级最高：待审批或封禁中的客户端不允许所有者自助启用。
+        if (ownerEnabled && (client.getAdminApproved() == null || client.getAdminApproved() != 1)) {
             throw new BusinessException(ResultCode.OAUTH_CLIENT_BANNED);
         }
-        client.setStatus(enabled ? 1 : 0);
+        client.setOwnerEnabled(ownerEnabled ? 1 : 0);
         oauthClientMapper.updateById(client);
-        log.info("[OAuthClient] {}客户端成功: ownerUid={}, clientId={}", enabled ? "启用" : "停用", uid, clientId);
+        log.info("[OAuthClient] {}客户端成功: ownerUid={}, clientId={}",
+                ownerEnabled ? "启用" : "停用", uid, clientId);
     }
 
     /**
@@ -216,16 +250,161 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
     }
 
     /**
-     * 校验回调地址合法性：必须 https，本地联调允许 http://localhost
-     *
-     * @param redirectUris 回调地址列表
+     * 校验客户端认证方式。调用方必须明确声明客户端类型，不根据缺省字段推断；
+     * 值必须与枚举协议值完全一致，不接受大小写变体和首尾空格。
      */
-    private void validateRedirectUris(List<String> redirectUris) {
-        for (String uri : redirectUris) {
-            if (!uri.startsWith("https://") && !uri.startsWith("http://localhost")) {
-                throw new BusinessException(ResultCode.PARAM_ERROR, "回调地址必须使用 https（本地联调可 http://localhost）：" + uri);
-            }
+    private OAuthClientAuthMethod normalizeAuthMethod(String authMethod) {
+        if (!StringUtils.hasText(authMethod)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "authMethod 不能为空");
         }
+        return OAuthClientAuthMethod.fromValue(authMethod);
+    }
+
+    /**
+     * 归一化授权类型并执行跨字段规则。
+     *
+     * <p>调用方必须显式提交非空列表。输出顺序固定为枚举声明顺序，因而数据库不会
+     * 因为请求数组顺序或重复项而产生多种等价字符串。</p>
+     */
+    private List<String> normalizeGrantTypes(List<String> requestedGrantTypes) {
+        if (requestedGrantTypes == null || requestedGrantTypes.isEmpty()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "grantTypes 不能为空");
+        }
+        EnumSet<OAuthGrantType> normalized = EnumSet.noneOf(OAuthGrantType.class);
+        for (String grantType : requestedGrantTypes) {
+            normalized.add(OAuthGrantType.fromValue(grantType));
+        }
+        if (!normalized.contains(OAuthGrantType.AUTHORIZATION_CODE)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "grantTypes 必须包含 authorization_code");
+        }
+        return Arrays.stream(OAuthGrantType.values())
+                .filter(normalized::contains)
+                .map(OAuthGrantType::getValue)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * 清理 scope 列表：去除首尾空白、保持首次出现顺序并去重。
+     *
+     * <p>数据库使用英文逗号存储列表，所以单个 scope 内严禁逗号，否则读取时无法区分
+     * “一个带逗号的值”和“两个独立值”。</p>
+     */
+    private List<String> normalizeScopes(List<String> scopes) {
+        if (scopes == null || scopes.isEmpty()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "授权范围不能为空");
+        }
+        Set<String> normalized = new LinkedHashSet<>();
+        for (String scope : scopes) {
+            if (!StringUtils.hasText(scope)) {
+                throw new BusinessException(ResultCode.PARAM_ERROR, "授权范围不能为空");
+            }
+            String value = scope.trim();
+            if (value.contains(",")) {
+                throw new BusinessException(ResultCode.PARAM_ERROR, "单个授权范围不能包含英文逗号: " + value);
+            }
+            normalized.add(value);
+        }
+        return new ArrayList<>(normalized);
+    }
+
+    /**
+     * 校验并去重回调地址。登记值不会被 URL 解码或改写，授权阶段仍以完整字符串精确匹配。
+     *
+     * <p>生产地址只允许 HTTPS；HTTP 仅对精确的 loopback 主机开放。使用 {@link URI}
+     * 解析主机而不是字符串前缀判断，可阻止 {@code localhost.example.com} 绕过本地例外。</p>
+     */
+    private List<String> normalizeRedirectUris(List<String> redirectUris) {
+        if (redirectUris == null || redirectUris.isEmpty()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "回调地址不能为空");
+        }
+        Set<String> normalized = new LinkedHashSet<>();
+        for (String value : redirectUris) {
+            if (!StringUtils.hasText(value) || !value.equals(value.trim()) || value.contains(",")) {
+                throw new BusinessException(ResultCode.PARAM_ERROR, "回调地址格式不合法: " + value);
+            }
+            URI uri = parseUri(value, "回调地址");
+            validateWebUri(uri, value, true);
+            normalized.add(value);
+        }
+        return new ArrayList<>(normalized);
+    }
+
+    /**
+     * 校验并规范化网站 Origin。Origin 只能包含 scheme、host 和可选 port，不能携带
+     * 路径、查询参数、用户信息或 fragment。该字段目前只是接入申请信息，真正的浏览器
+     * 放行仍由服务端静态 {@code allowed-origins} 白名单决定。
+     */
+    private String normalizeWebsiteOrigin(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        if (!value.equals(value.trim()) || value.contains(",")) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "网站 Origin 格式不合法: " + value);
+        }
+        URI uri = parseUri(value, "网站 Origin");
+        validateWebUri(uri, value, false);
+        if (StringUtils.hasText(uri.getRawPath()) || uri.getRawQuery() != null) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "网站 Origin 不能包含路径或查询参数: " + value);
+        }
+
+        String scheme = uri.getScheme().toLowerCase(Locale.ROOT);
+        String host = stripIpv6Brackets(uri.getHost()).toLowerCase(Locale.ROOT);
+        int port = uri.getPort();
+        boolean defaultPort = ("https".equals(scheme) && port == 443) || ("http".equals(scheme) && port == 80);
+        String renderedHost = host.contains(":") ? "[" + host + "]" : host;
+        return scheme + "://" + renderedHost + (port == -1 || defaultPort ? "" : ":" + port);
+    }
+
+    /**
+     * 对回调地址和 Origin 共用的 URI 安全边界进行检查。
+     *
+     * @param uri          已解析 URI
+     * @param original     原始输入，用于错误信息
+     * @param allowContent true 时允许回调地址携带路径和查询参数
+     */
+    private void validateWebUri(URI uri, String original, boolean allowContent) {
+        if (!uri.isAbsolute() || uri.isOpaque() || !StringUtils.hasText(uri.getHost())
+                || uri.getRawUserInfo() != null || uri.getRawFragment() != null) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "地址必须是无 user-info 和 fragment 的绝对 URI: " + original);
+        }
+        if (uri.getPort() == 0 || uri.getPort() > 65535) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "地址端口不合法: " + original);
+        }
+
+        String scheme = uri.getScheme();
+        String host = stripIpv6Brackets(uri.getHost());
+        if ("https".equalsIgnoreCase(scheme)) {
+            return;
+        }
+        if ("http".equalsIgnoreCase(scheme) && isLoopbackHost(host)) {
+            return;
+        }
+        String addressType = allowContent ? "回调地址" : "网站 Origin";
+        throw new BusinessException(ResultCode.PARAM_ERROR,
+                addressType + "必须使用 https；http 仅允许 localhost、127.0.0.1 或 ::1: " + original);
+    }
+
+    /** 将文本解析为 URI，并把语法异常转换为统一业务参数错误。 */
+    private URI parseUri(String value, String fieldName) {
+        try {
+            return new URI(value);
+        } catch (URISyntaxException e) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, fieldName + "格式不合法: " + value);
+        }
+    }
+
+    /** 判断 URI host 是否为允许使用 HTTP 的本机回环地址。 */
+    private boolean isLoopbackHost(String host) {
+        return "localhost".equalsIgnoreCase(host) || "127.0.0.1".equals(host) || "::1".equals(host);
+    }
+
+    /** 兼容不同 JDK 对 IPv6 host 是否保留方括号的返回差异。 */
+    private String stripIpv6Brackets(String host) {
+        if (host != null && host.length() >= 2 && host.startsWith("[") && host.endsWith("]")) {
+            return host.substring(1, host.length() - 1);
+        }
+        return host;
     }
 
     /**
@@ -263,6 +442,7 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
      * @param memberPrefix uid 反向索引成员前缀
      * @param clientId    客户端 ID
      */
+    @SuppressWarnings("unchecked")
     private void revokeByPrefix(String prefix, String memberPrefix, String clientId) {
         Cursor<String> cursor = stringRedisTemplate.scan(
                 ScanOptions.scanOptions().match(prefix + "*").count(200).build());
@@ -302,13 +482,16 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
         OAuthClientVO vo = new OAuthClientVO();
         vo.setClientId(client.getId());
         vo.setClientName(client.getClientName());
+        vo.setAuthMethod(client.getAuthMethods());
+        vo.setGrantTypes(split(client.getGrantTypes()));
         vo.setRedirectUris(split(client.getRedirectUris()));
         vo.setScopes(split(client.getScopes()));
         vo.setRequirePkce(client.getRequirePkce() != null && client.getRequirePkce() == 1);
         vo.setRequireAuthConsent(client.getRequireAuthConsent() != null && client.getRequireAuthConsent() == 1);
         vo.setWebsiteOrigin(client.getWebsiteOrigin());
-        vo.setStatus(client.getStatus());
-        vo.setAdminBanned(client.getAdminBanned());
+        vo.setOwnerEnabled(client.getOwnerEnabled() != null && client.getOwnerEnabled() == 1);
+        vo.setAdminApproved(client.getAdminApproved() != null && client.getAdminApproved() == 1);
+        vo.setDirectAuthEnabled(client.getDirectAuthEnabled() != null && client.getDirectAuthEnabled() == 1);
         vo.setCreateTime(client.getCreateTime());
         return vo;
     }
@@ -325,7 +508,10 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
         vo.setClientId(client.getId());
         vo.setClientSecret(clientSecret);
         vo.setClientName(client.getClientName());
-        vo.setStatus(client.getStatus());
+        vo.setAuthMethod(client.getAuthMethods());
+        vo.setOwnerEnabled(client.getOwnerEnabled() != null && client.getOwnerEnabled() == 1);
+        vo.setAdminApproved(client.getAdminApproved() != null && client.getAdminApproved() == 1);
+        vo.setDirectAuthEnabled(client.getDirectAuthEnabled() != null && client.getDirectAuthEnabled() == 1);
         return vo;
     }
 
