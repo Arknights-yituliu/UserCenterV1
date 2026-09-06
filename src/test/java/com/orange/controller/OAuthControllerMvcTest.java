@@ -30,7 +30,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-import static org.hamcrest.Matchers.nullValue;
 
 /**
  * OAuth 表单端点与动态 CORS 白名单的 MVC 契约测试。
@@ -71,6 +70,7 @@ class OAuthControllerMvcTest {
         response.setAccessToken("access-1");
         response.setTokenType("Bearer");
         response.setExpiresIn(7200L);
+        response.setRefreshToken("refresh-1");
         when(oauthTokenService.issueToken(
                 eq("authorization_code"), eq("client-1"), eq(null),
                 eq("code-1"), eq("https://spa.example.com/callback"), eq("verifier-1"), eq(null)))
@@ -86,7 +86,7 @@ class OAuthControllerMvcTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.access_token").value("access-1"))
-                .andExpect(jsonPath("$.data.refresh_token").value(nullValue()));
+                .andExpect(jsonPath("$.data.refresh_token").value("refresh-1"));
 
         verify(oauthTokenService).issueToken(
                 "authorization_code", "client-1", null,
