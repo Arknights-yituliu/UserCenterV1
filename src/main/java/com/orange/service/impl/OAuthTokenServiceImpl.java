@@ -17,6 +17,8 @@ import com.orange.entity.po.UserInfo;
 import com.orange.entity.vo.oauth.ConsentInfoVO;
 import com.orange.entity.vo.oauth.LoginTicketVO;
 import com.orange.entity.vo.oauth.OAuthTokenVO;
+import com.orange.entity.vo.oauth.OAuthClientGrantGroupVO;
+import com.orange.entity.vo.oauth.OAuthGrantItemVO;
 import com.orange.entity.vo.oauth.RefreshGrantVO;
 import com.orange.entity.vo.oauth.UserInfoVO;
 import com.orange.mapper.OAuthClientMapper;
@@ -42,6 +44,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -677,8 +680,25 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      * @return refresh_token 授权记录列表
      */
     @Override
-    public List<RefreshGrantVO> listUserRefreshTokens(Long uid) {
-        return oauthGrantMapper.selectValidGrants(uid);
+    public List<OAuthClientGrantGroupVO> listUserRefreshTokens(Long uid) {
+        // 扁平查询结果已按授权时间倒序：分组后每组/组内条目天然保持该顺序
+        List<RefreshGrantVO> grants = oauthGrantMapper.selectValidGrants(uid);
+        Map<String, OAuthClientGrantGroupVO> groups = new LinkedHashMap<>();
+        for (RefreshGrantVO grant : grants) {
+            OAuthClientGrantGroupVO group = groups.get(grant.getClientId());
+            if (group == null) {
+                group = new OAuthClientGrantGroupVO();
+                group.setClientId(grant.getClientId());
+                group.setClientName(grant.getClientName());
+                groups.put(grant.getClientId(), group);
+            }
+            OAuthGrantItemVO item = new OAuthGrantItemVO();
+            item.setScope(grant.getScope());
+            item.setCreatedAt(grant.getCreatedAt());
+            item.setExpiresInSeconds(grant.getExpiresInSeconds());
+            group.getGrants().add(item);
+        }
+        return new ArrayList<>(groups.values());
     }
 
     /**

@@ -3,7 +3,7 @@ package com.orange.service;
 import com.orange.entity.vo.oauth.ConsentInfoVO;
 import com.orange.entity.vo.oauth.LoginTicketVO;
 import com.orange.entity.vo.oauth.OAuthTokenVO;
-import com.orange.entity.vo.oauth.RefreshGrantVO;
+import com.orange.entity.vo.oauth.OAuthClientGrantGroupVO;
 import com.orange.entity.vo.oauth.UserInfoVO;
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -165,15 +165,15 @@ public interface OAuthTokenService {
     UserInfoVO getUserInfo(Long uid, String clientId, String scope);
 
     /**
-     * 查看当前用户名下全部仍有效的 refresh_token 授权记录（用户自助，按授权时间倒序）。
+     * 查询指定用户名下仍有效的第三方应用授权，按应用（OAuth 客户端）分组返回。
      *
-     * <p>查询授权台账表（oauth_grant，LEFT JOIN oauth_client 补齐应用名），
-     * 令牌签发/吊销时同步维护台账。refresh_token 明文只在服务端内部处理，不会对外返回。</p>
+     * <p>一组对应一个授权过的应用：组头携带应用 ID 与名称，组内条目为逐次授权
+     * （一条 = 一个有效 refresh_token）。组与组之间按该应用最近一次授权时间倒序。</p>
      *
      * @param uid 用户 uid
-     * @return refresh_token 授权记录列表（列表长度为授权总数，空为无授权）
+     * @return 按应用分组的授权列表
      */
-    List<RefreshGrantVO> listUserRefreshTokens(Long uid);
+    List<OAuthClientGrantGroupVO> listUserRefreshTokens(Long uid);
 
     /**
      * 撤销指定用户对某应用（OAuth 客户端）的授权（用户自助，按应用整体撤销）。

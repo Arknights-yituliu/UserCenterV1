@@ -8,6 +8,8 @@ import com.orange.common.util.OAuthUtil;
 import com.orange.common.util.RedisKeyUtil;
 import com.orange.entity.po.OAuthClient;
 import com.orange.entity.po.OAuthGrant;
+import com.orange.entity.vo.oauth.OAuthClientGrantGroupVO;
+import com.orange.entity.vo.oauth.OAuthGrantItemVO;
 import com.orange.entity.vo.oauth.OAuthTokenVO;
 import com.orange.entity.vo.oauth.RefreshGrantVO;
 import com.orange.mapper.OAuthClientMapper;
@@ -26,6 +28,7 @@ import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -247,19 +250,48 @@ class OAuthTokenServiceImplTest {
     }
 
     @Test
-    void listUserRefreshTokensDelegatesToGrantTable() {
-        RefreshGrantVO first = new RefreshGrantVO();
-        first.setClientId("client-1");
-        first.setClientName("测试应用");
-        first.setScope("user.read");
-        first.setExpiresInSeconds(3600L);
-        when(oauthGrantMapper.selectValidGrants(9L)).thenReturn(List.of(first));
+    void listUserRefreshTokensGroupsByClient() {
+        RefreshGrantVO client1New = grant("client-1", "应用甲", "user.read,user.email", 7200L);
+        client1New.setCreatedAt(LocalDateTime.of(2026, 9, 2, 10, 0));
+        RefreshGrantVO client1Old = grant("client-1", "应用甲", "user.read", 3600L);
+        client1Old.setCreatedAt(LocalDateTime.of(2026, 9, 1, 10, 0));
+        RefreshGrantVO client2 = grant("client-2", "应用乙", "user.read", 100L);
+        client2.setCreatedAt(LocalDateTime.of(2026, 9, 3, 10, 0));
+        // Mapper 返回扁平记录已按授权时间倒序：client-2 最新在前
+        when(oauthGrantMapper.selectValidGrants(9L))
+                .thenReturn(List.of(client2, client1New, client1Old));
 
-        List<RefreshGrantVO> result = service.listUserRefreshTokens(9L);
+        List<OAuthClientGrantGroupVO> groups = service.listUserRefreshTokens(9L);
 
-        assertEquals(1, result.size());
-        assertSame(first, result.get(0));
-        assertEquals("client-1", result.get(0).getClientId());
+        assertEquals(2, groups.size());
+        // 组序 = 该应用最近一次授权的时间倒序（client-2 在 client-1 之前）
+        OAuthClientGrantGroupVO firstGroup = groups.get(0);
+        assertEquals("client-2", firstGroup.getClientId());
+        assertEquals("应用乙", firstGroup.getClientName());
+        assertEquals(1, firstGroup.getGrants().size());
+
+        OAuthClientGrantGroupVO secondGroup = groups.get(1);
+        assertEquals("client-1", secondGroup.getClientId());
+        assertEquals("应用甲", secondGroup.getClientName());
+        assertEquals(2, secondGroup.getGrants().size());
+        // 组内条目保持时间倒序，且不再重复携带 client 维度字段
+        OAuthGrantItemVO newest = secondGroup.getGrants().get(0);
+        assertEquals("user.read,user.email", newest.getScope());
+        assertEquals(LocalDateTime.of(2026, 9, 2, 10, 0), newest.getCreatedAt());
+        assertEquals(7200L, newest.getExpiresInSeconds());
+        OAuthGrantItemVO oldest = secondGroup.getGrants().get(1);
+        assertEquals("user.read", oldest.getScope());
+        assertEquals(3600L, oldest.getExpiresInSeconds());
+    }
+
+    /** 构造扁平授权记录测试数据 */
+    private RefreshGrantVO grant(String clientId, String clientName, String scope, long expiresInSeconds) {
+        RefreshGrantVO vo = new RefreshGrantVO();
+        vo.setClientId(clientId);
+        vo.setClientName(clientName);
+        vo.setScope(scope);
+        vo.setExpiresInSeconds(expiresInSeconds);
+        return vo;
     }
 
     @Test

@@ -10,7 +10,7 @@ import com.orange.entity.dto.user.UpdatePasswordRequest;
 import com.orange.entity.dto.user.UpdateProfileRequest;
 import com.orange.entity.vo.SessionVO;
 import com.orange.entity.vo.UserInfoVO;
-import com.orange.entity.vo.oauth.RefreshGrantVO;
+import com.orange.entity.vo.oauth.OAuthClientGrantGroupVO;
 import com.orange.service.OAuthTokenService;
 import com.orange.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -139,13 +139,13 @@ public class UserController {
     }
 
     /**
-     * 查看我授权过的第三方应用列表（refresh_token 粒度的授权记录）
+     * 查看我授权过的第三方应用列表（按应用分组：一组一条应用，组内为逐次授权）
      *
-     * @return 授权记录列表（列表长度即已授权 refresh_token 总数）
+     * @return 按应用分组的授权列表
      */
     @Operation(summary = "查看我的第三方应用授权列表")
     @GetMapping("/oauth/grants")
-    public Result<List<RefreshGrantVO>> listRefreshTokens() {
+    public Result<List<OAuthClientGrantGroupVO>> listRefreshTokens() {
         return Result.success(oauthTokenService.listUserRefreshTokens(UserContext.requireUid()));
     }
 
