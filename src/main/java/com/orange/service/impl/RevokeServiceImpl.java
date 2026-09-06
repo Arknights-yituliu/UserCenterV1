@@ -1,6 +1,7 @@
 package com.orange.service.impl;
 
 import com.orange.common.util.RedisKeyUtil;
+import com.orange.mapper.OAuthGrantMapper;
 import com.orange.service.RevokeService;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -24,13 +25,17 @@ public class RevokeServiceImpl implements RevokeService {
 
     private final StringRedisTemplate stringRedisTemplate;
 
+    private final OAuthGrantMapper oauthGrantMapper;
+
     /**
      * 构造器注入依赖
      *
      * @param stringRedisTemplate Redis 客户端（删除会话/令牌及索引）
+     * @param oauthGrantMapper    授权台账 Mapper（吊销时同步状态）
      */
-    public RevokeServiceImpl(StringRedisTemplate stringRedisTemplate) {
+    public RevokeServiceImpl(StringRedisTemplate stringRedisTemplate, OAuthGrantMapper oauthGrantMapper) {
         this.stringRedisTemplate = stringRedisTemplate;
+        this.oauthGrantMapper = oauthGrantMapper;
     }
 
     /**
@@ -62,7 +67,8 @@ public class RevokeServiceImpl implements RevokeService {
 
     /**
      * 吊销用户名下全部 OAuth 令牌：读 uid 反向索引，按成员类型删除令牌 key，
-     * 最后清理索引（令牌已过期时删除幂等，成员一并移除，惰性清理过期残留）
+     * 最后清理索引（令牌已过期时删除幂等，成员一并移除，惰性清理过期残留）。
+     * 同步把该用户名下全部未吊销授权台账置为已吊销。
      *
      * @param uid 用户 uid
      */
@@ -70,18 +76,19 @@ public class RevokeServiceImpl implements RevokeService {
     public void revokeUserTokens(Long uid) {
         String indexKey = RedisKeyUtil.uidOauth(uid);
         Set<String> members = stringRedisTemplate.opsForSet().members(indexKey);
-        if (members == null || members.isEmpty()) {
-            return;
-        }
-        for (String member : members) {
-            if (member.startsWith(OAUTH_ACCESS_MEMBER_PREFIX)) {
-                String token = member.substring(OAUTH_ACCESS_MEMBER_PREFIX.length());
-                stringRedisTemplate.delete(RedisKeyUtil.oauthAccess(token));
-            } else if (member.startsWith(OAUTH_REFRESH_MEMBER_PREFIX)) {
-                String token = member.substring(OAUTH_REFRESH_MEMBER_PREFIX.length());
-                stringRedisTemplate.delete(RedisKeyUtil.oauthRefresh(token));
+        if (members != null) {
+            for (String member : members) {
+                if (member.startsWith(OAUTH_ACCESS_MEMBER_PREFIX)) {
+                    String token = member.substring(OAUTH_ACCESS_MEMBER_PREFIX.length());
+                    stringRedisTemplate.delete(RedisKeyUtil.oauthAccess(token));
+                } else if (member.startsWith(OAUTH_REFRESH_MEMBER_PREFIX)) {
+                    String token = member.substring(OAUTH_REFRESH_MEMBER_PREFIX.length());
+                    stringRedisTemplate.delete(RedisKeyUtil.oauthRefresh(token));
+                }
             }
         }
+        // 台账整体置为已吊销（幂等）；无成员时也清理，防止 Redis 与台账状态不一致
+        oauthGrantMapper.markRevokedByUid(uid);
         stringRedisTemplate.delete(indexKey);
     }
 }

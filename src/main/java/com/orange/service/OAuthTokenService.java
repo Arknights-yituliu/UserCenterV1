@@ -167,13 +167,24 @@ public interface OAuthTokenService {
     /**
      * 查看当前用户名下全部仍有效的 refresh_token 授权记录（用户自助，按授权时间倒序）。
      *
-     * <p>通过 uid 反向索引定位令牌，逐个读取有效期与签发时间；索引中已过期/被吊销的
-     * 残留成员会在本次查询中惰性清理。refresh_token 明文只在服务端内部处理，不会对外返回。</p>
+     * <p>查询授权台账表（oauth_grant，LEFT JOIN oauth_client 补齐应用名），
+     * 令牌签发/吊销时同步维护台账。refresh_token 明文只在服务端内部处理，不会对外返回。</p>
      *
      * @param uid 用户 uid
      * @return refresh_token 授权记录列表（列表长度为授权总数，空为无授权）
      */
     List<RefreshGrantVO> listUserRefreshTokens(Long uid);
+
+    /**
+     * 撤销指定用户对某应用（OAuth 客户端）的授权（用户自助，按应用整体撤销）。
+     *
+     * <p>删除该用户在 clientId 下的全部 access/refresh token 及其反向索引成员，
+     * 并把授权台账按 uid+clientId 置为已吊销；操作幂等，重复调用返回成功。</p>
+     *
+     * @param uid      用户 uid
+     * @param clientId 要撤销授权的应用客户端 ID
+     */
+    void revokeClientAuthorization(Long uid, String clientId);
 
     /**
      * 访问令牌主体信息（uid + 客户端 + 范围）

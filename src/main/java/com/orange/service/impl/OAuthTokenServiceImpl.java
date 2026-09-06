@@ -12,6 +12,7 @@ import com.orange.common.util.RedisKeyUtil;
 import com.orange.common.util.RequestUtil;
 import com.orange.entity.dto.SessionInfo;
 import com.orange.entity.po.OAuthClient;
+import com.orange.entity.po.OAuthGrant;
 import com.orange.entity.po.UserInfo;
 import com.orange.entity.vo.oauth.ConsentInfoVO;
 import com.orange.entity.vo.oauth.LoginTicketVO;
@@ -19,6 +20,7 @@ import com.orange.entity.vo.oauth.OAuthTokenVO;
 import com.orange.entity.vo.oauth.RefreshGrantVO;
 import com.orange.entity.vo.oauth.UserInfoVO;
 import com.orange.mapper.OAuthClientMapper;
+import com.orange.mapper.OAuthGrantMapper;
 import com.orange.mapper.UserInfoMapper;
 import com.orange.service.OAuthTokenStore;
 import com.orange.service.OAuthTokenService;
@@ -33,12 +35,11 @@ import org.springframework.util.StringUtils;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -46,6 +47,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -75,6 +77,15 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     /** uid 反向索引中 refresh_token 成员前缀 */
     private static final String OAUTH_REFRESH_MEMBER_PREFIX = "refresh:";
 
+    /** 反向索引惰性清理触发概率分母（每签发 1/100 概率触发一次） */
+    private static final int GRANT_INDEX_CLEANUP_PROBABILITY = 100;
+
+    /** 反向索引惰性清理最小集合规模：成员太少时清理价值低，直接跳过 */
+    private static final int GRANT_INDEX_CLEANUP_MIN_SIZE = 500;
+
+    /** 反向索引单次惰性清理最多检查的成员数，避免一次性拉取整表造成长尾 */
+    private static final int GRANT_INDEX_CLEANUP_CHECK_LIMIT = 200;
+
     /** 已知 scope 的中文描述映射（未知 scope 直接展示原始标识） */
     private static final Map<String, String> SCOPE_DESCRIPTIONS = Map.of(
             "user.read", "查看你的账号基础资料（昵称、头像）",
@@ -82,6 +93,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
             "user.profile", "查看并修改你的个人资料");
 
     private final OAuthClientMapper oauthClientMapper;
+    private final OAuthGrantMapper oauthGrantMapper;
     private final UserInfoMapper userInfoMapper;
     private final StringRedisTemplate stringRedisTemplate;
     private final ObjectMapper objectMapper;
@@ -119,16 +131,19 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     /**
      * 构造器注入依赖
      *
-     * @param oauthClientMapper   OAuth 客户端 Mapper
-     * @param userInfoMapper      用户表 Mapper（userinfo 组装用户资料）
+     * @param oauthClientMapper  OAuth 客户端 Mapper
+     * @param oauthGrantMapper   授权台账 Mapper
+     * @param userInfoMapper     用户表 Mapper（userinfo 组装用户资料）
      * @param stringRedisTemplate Redis 客户端
-     * @param objectMapper        JSON 序列化器
-     * @param oauthTokenStore     OAuth 一次性凭证原子存储
+     * @param objectMapper       JSON 序列化器
+     * @param oauthTokenStore    OAuth 一次性凭证原子存储
      */
-    public OAuthTokenServiceImpl(OAuthClientMapper oauthClientMapper, UserInfoMapper userInfoMapper,
+    public OAuthTokenServiceImpl(OAuthClientMapper oauthClientMapper, OAuthGrantMapper oauthGrantMapper,
+                                 UserInfoMapper userInfoMapper,
                                  StringRedisTemplate stringRedisTemplate, ObjectMapper objectMapper,
                                  OAuthTokenStore oauthTokenStore) {
         this.oauthClientMapper = oauthClientMapper;
+        this.oauthGrantMapper = oauthGrantMapper;
         this.userInfoMapper = userInfoMapper;
         this.stringRedisTemplate = stringRedisTemplate;
         this.objectMapper = objectMapper;
@@ -512,6 +527,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
             throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID, "刷新令牌已失效或已被吊销");
         }
         // 刷新只签发新 access_token：refresh_token 未变、scope 未变，均无需回传
+        maybeCleanupExpiredGrantMembers(uid);
         return buildTokenResponse(newAccessToken, null, accessTtl, null);
     }
 
@@ -613,6 +629,12 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         if (uid != null) {
             stringRedisTemplate.opsForSet().remove(RedisKeyUtil.uidOauth(uid), OAUTH_REFRESH_MEMBER_PREFIX + token);
         }
+        // 同步置台账为已吊销；Redis 已删除即吊销生效，台账更新失败只告警不阻断
+        try {
+            oauthGrantMapper.markRevokedByTokenHash(sha256Hex(token));
+        } catch (Exception e) {
+            LogUtil.warn(OAuthTokenServiceImpl.class, "[OAuth] 更新授权台账吊销状态失败: clientId={}", expectedClientId, e);
+        }
         return true;
     }
 
@@ -648,110 +670,137 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     /**
      * 查看当前用户名下全部仍有效的 refresh_token 授权记录（按授权时间倒序）。
      *
-     * <p>refresh_token 为固定凭证，用户授权过的第三方应用即为一条有效记录。逐个读取
-     * Redis 有效期计算剩余时长；记录缺失（已过期/已吊销）时对反向索引做惰性清理。
-     * 客户端应用名按 clientId 批量查库补齐。</p>
+     * <p>直接查询授权台账表（LEFT JOIN oauth_client 补齐应用名），由数据库过滤
+     * 已吊销与已过期记录；令牌的签发/吊销状态由签发与吊销流程同步到台账，允许最终一致。</p>
      *
      * @param uid 用户 uid
      * @return refresh_token 授权记录列表
      */
     @Override
     public List<RefreshGrantVO> listUserRefreshTokens(Long uid) {
+        return oauthGrantMapper.selectValidGrants(uid);
+    }
+
+    /**
+     * 撤销指定用户对某应用（OAuth 客户端）的授权（按应用整体撤销，幂等）
+     *
+     * <p>先把授权台账按 uid+clientId 置为已吊销（成功后列表即不再展示该应用）；
+     * 再遍历 uid 反向索引，按记录归属删除该 clientId 的全部 access/refresh token。
+     * Redis 操作异常会向上抛出，可由调用方重试收敛（重试幂等，不会产生脏数据）。</p>
+     *
+     * @param uid      用户 uid
+     * @param clientId 客户端 ID
+     */
+    @Override
+    public void revokeClientAuthorization(Long uid, String clientId) {
+        // 1. 台账先置为已吊销：列表/统计立即收敛；无记录时也幂等成功
+        oauthGrantMapper.markRevokedByUidAndClient(uid, clientId);
+
+        // 2. 清理 Redis 反向索引中属于该 clientId 的令牌
         String indexKey = RedisKeyUtil.uidOauth(uid);
         Set<String> members = stringRedisTemplate.opsForSet().members(indexKey);
-        if (members == null || members.isEmpty()) {
-            return new ArrayList<>();
+        if (members == null) {
+            return;
         }
-
-        List<RefreshGrantVO> items = new ArrayList<>();
         for (String member : members) {
-            // 反向索引同时含 access_token 与 refresh_token 成员，只统计 refresh_token
-            if (!member.startsWith(OAUTH_REFRESH_MEMBER_PREFIX)) {
+            String tokenKey = resolveTokenKeyByMember(member);
+            if (tokenKey == null) {
                 continue;
             }
-            String token = member.substring(OAUTH_REFRESH_MEMBER_PREFIX.length());
-            String key = RedisKeyUtil.oauthRefresh(token);
-            String raw = stringRedisTemplate.opsForValue().get(key);
+            String raw = stringRedisTemplate.opsForValue().get(tokenKey);
             if (raw == null) {
-                // 过期/吊销残留：删除成员，保持索引干净（删除幂等）
-                stringRedisTemplate.opsForSet().remove(indexKey, member);
-                continue;
-            }
-            Long remainingSeconds = stringRedisTemplate.getExpire(key, TimeUnit.SECONDS);
-            if (remainingSeconds == null || remainingSeconds <= 0) {
+                // 令牌 key 已消失（过期/被吊销）：顺手摘除索引残留成员
                 stringRedisTemplate.opsForSet().remove(indexKey, member);
                 continue;
             }
             Map<String, Object> record = readJsonMapValue(raw);
-            // 防御：索引与记录不一致时跳过，不泄露其他用户信息
-            if (!uid.equals(((Number) record.get("uid")).longValue())) {
+            if (!Objects.equals(clientId, record.get("clientId"))) {
                 continue;
             }
-            RefreshGrantVO vo = new RefreshGrantVO();
-            vo.setClientId((String) record.get("clientId"));
-            vo.setScope((String) record.get("scope"));
-            vo.setCreatedAt(toLocalDateTime(record.get("createTime")));
-            vo.setExpiresInSeconds(remainingSeconds);
-            items.add(vo);
-        }
-
-        // 批量查库补齐应用名，避免逐条 selectById
-        fillClientNames(items);
-        // 按授权时间倒序（未知创建时间的存量令牌排最后）
-        items.sort(Comparator.comparing(RefreshGrantVO::getCreatedAt,
-                Comparator.nullsLast(Comparator.reverseOrder())));
-        return items;
-    }
-
-    /**
-     * 批量把 clientId 补齐为应用名称（应用已删除时保持名称为空）
-     *
-     * @param items 待补齐的授权记录列表
-     */
-    private void fillClientNames(List<RefreshGrantVO> items) {
-        Set<String> clientIds = new HashSet<>();
-        for (RefreshGrantVO item : items) {
-            if (StringUtils.hasText(item.getClientId())) {
-                clientIds.add(item.getClientId());
-            }
-        }
-        if (clientIds.isEmpty()) {
-            return;
-        }
-        Map<String, OAuthClient> clients = new HashMap<>();
-        for (OAuthClient client : oauthClientMapper.selectBatchIds(new ArrayList<>(clientIds))) {
-            if (client != null) {
-                clients.put(client.getId(), client);
-            }
-        }
-        for (RefreshGrantVO item : items) {
-            OAuthClient client = item.getClientId() == null ? null : clients.get(item.getClientId());
-            if (client != null) {
-                item.setClientName(client.getClientName());
-            }
+            stringRedisTemplate.delete(tokenKey);
+            stringRedisTemplate.opsForSet().remove(indexKey, member);
         }
     }
 
     /**
-     * Redis 记录中的 epoch 毫秒时间戳转本地时间
+     * 把反向索引成员（access:/refresh: 前缀）映射为对应的令牌 key
      *
-     * @param value 存储的时间戳（Number），缺失返回 null
-     * @return 本地时间
+     * @param member 反向索引成员
+     * @return 令牌 key；无法识别的成员返回 null
      */
-    private LocalDateTime toLocalDateTime(Object value) {
-        if (!(value instanceof Number)) {
-            return null;
+    private String resolveTokenKeyByMember(String member) {
+        if (member.startsWith(OAUTH_ACCESS_MEMBER_PREFIX)) {
+            String token = member.substring(OAUTH_ACCESS_MEMBER_PREFIX.length());
+            return RedisKeyUtil.oauthAccess(token);
         }
-        return Instant.ofEpochMilli(((Number) value).longValue())
-                .atZone(ZoneId.systemDefault())
-                .toLocalDateTime();
+        if (member.startsWith(OAUTH_REFRESH_MEMBER_PREFIX)) {
+            String token = member.substring(OAUTH_REFRESH_MEMBER_PREFIX.length());
+            return RedisKeyUtil.oauthRefresh(token);
+        }
+        return null;
+    }
+
+    /**
+     * 记录一次 refresh_token 授权到台账表
+     *
+     * <p>令牌仍在 Redis 中签发；台账供“我的授权”列表与审计查询。写入失败不阻断签发，
+     * 只记录告警，避免数据库故障拖垮核心令牌流程。</p>
+     *
+     * @param client        签发令牌的客户端
+     * @param uid           用户 uid
+     * @param scope         授权范围
+     * @param refreshToken  refresh_token 明文（只存摘要）
+     * @param refreshTtl    有效期（秒）
+     */
+    private void recordGrant(OAuthClient client, Long uid, String scope,
+                             String refreshToken, long refreshTtl) {
+        try {
+            OAuthGrant grant = new OAuthGrant();
+            grant.setUid(uid);
+            grant.setClientId(client.getId());
+            grant.setScope(scope);
+            grant.setTokenHash(sha256Hex(refreshToken));
+            LocalDateTime now = LocalDateTime.now();
+            grant.setIssueTime(now);
+            grant.setExpireTime(now.plusSeconds(refreshTtl));
+            grant.setRevoked(0);
+            oauthGrantMapper.insert(grant);
+        } catch (Exception e) {
+            LogUtil.warn(OAuthTokenServiceImpl.class, "[OAuth] 写入授权台账失败: uid={}, clientId={}",
+                    uid, client.getId(), e);
+        }
+    }
+
+    /**
+     * 计算字符串的 SHA-256 十六进制摘要（用于台账存储 refresh_token 摘要）
+     *
+     * @param value 原始字符串
+     * @return 64 位十六进制摘要
+     */
+    private String sha256Hex(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] bytes = digest.digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(bytes.length * 2);
+            for (byte b : bytes) {
+                String segment = Integer.toHexString(0xFF & b);
+                if (segment.length() == 1) {
+                    hex.append('0');
+                }
+                hex.append(segment);
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR, "令牌摘要计算失败");
+        }
     }
 
     /**
      * 签发客户端获准获得的令牌并写入 Redis。
      *
      * <p>access token 始终签发；只有客户端登记了 {@code refresh_token} grant 时才创建
-     * refresh token、Redis 记录及反向索引成员。这样 grant_types 不再只是展示字段。</p>
+     * refresh token、Redis 记录、反向索引成员，并同步写入授权台账表。
+     * 这样 grant_types 不再只是展示字段。</p>
      *
      * @param client 客户端
      * @param uid    用户 uid
@@ -774,9 +823,56 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
                     createRefreshRecord(client, uid, scope), refreshTtl);
             stringRedisTemplate.opsForSet().add(
                     RedisKeyUtil.uidOauth(uid), OAUTH_REFRESH_MEMBER_PREFIX + refreshToken);
+            // 授权台账：持久化查询与审计，失败不阻断签发
+            recordGrant(client, uid, scope, refreshToken, refreshTtl);
         }
 
+        maybeCleanupExpiredGrantMembers(uid);
         return buildTokenResponse(accessToken, refreshToken, accessTtl, scope);
+    }
+
+    /**
+     * 概率性惰性清理 uid 反向索引中的过期令牌成员
+     *
+     * <p>令牌 key 各自带 TTL 自动过期，但反向索引 Set 永不过期、Redis 不会摘除死成员；
+     * 逐条吊销只能清理当次，整体吊销前集合会随每次刷新持续膨胀。因此每次签发
+     * access_token 时以低概率触发一次清理：只检查有意义的规模（集合较大），且单次
+     * 检查数量受限，把偶发开销控制在可接受范围。清理失败只告警，不阻断签发。</p>
+     *
+     * @param uid 用户 uid
+     */
+    private void maybeCleanupExpiredGrantMembers(Long uid) {
+        if (ThreadLocalRandom.current().nextInt(GRANT_INDEX_CLEANUP_PROBABILITY) != 0) {
+            return;
+        }
+        String indexKey = RedisKeyUtil.uidOauth(uid);
+        try {
+            Set<String> members = stringRedisTemplate.opsForSet().members(indexKey);
+            if (members == null || members.size() < GRANT_INDEX_CLEANUP_MIN_SIZE) {
+                return;
+            }
+            int checked = 0;
+            for (String member : members) {
+                if (checked >= GRANT_INDEX_CLEANUP_CHECK_LIMIT) {
+                    break;
+                }
+                checked++;
+                String tokenKey = null;
+                if (member.startsWith(OAUTH_ACCESS_MEMBER_PREFIX)) {
+                    String token = member.substring(OAUTH_ACCESS_MEMBER_PREFIX.length());
+                    tokenKey = RedisKeyUtil.oauthAccess(token);
+                } else if (member.startsWith(OAUTH_REFRESH_MEMBER_PREFIX)) {
+                    String token = member.substring(OAUTH_REFRESH_MEMBER_PREFIX.length());
+                    tokenKey = RedisKeyUtil.oauthRefresh(token);
+                }
+                // 令牌 key 已消失（过期/被吊销）则摘除残留成员；删除幂等
+                if (tokenKey != null && !Boolean.TRUE.equals(stringRedisTemplate.hasKey(tokenKey))) {
+                    stringRedisTemplate.opsForSet().remove(indexKey, member);
+                }
+            }
+        } catch (Exception e) {
+            LogUtil.warn(OAuthTokenServiceImpl.class, "[OAuth] 反向索引惰性清理失败: uid={}", uid, e);
+        }
     }
 
     /** 创建持久化到 Redis 的 access token 记录。 */
@@ -794,9 +890,6 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         record.put("uid", uid);
         record.put("clientId", client.getId());
         record.put("scope", scope);
-        // 记录签发时间（epoch 毫秒），供用户自助“我的授权”列表展示创建时间；
-        // 本次升级前签发的存量令牌无该字段，列表会按未知时间兜底处理
-        record.put("createTime", System.currentTimeMillis());
         return record;
     }
 

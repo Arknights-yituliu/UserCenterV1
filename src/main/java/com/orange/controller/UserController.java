@@ -5,6 +5,7 @@ import com.orange.common.util.RequestUtil;
 import com.orange.common.util.Result;
 import com.orange.entity.dto.user.BindEmailRequest;
 import com.orange.entity.dto.user.ChangeEmailRequest;
+import com.orange.entity.dto.user.ClientAuthorizationRevokeRequest;
 import com.orange.entity.dto.user.UpdatePasswordRequest;
 import com.orange.entity.dto.user.UpdateProfileRequest;
 import com.orange.entity.vo.SessionVO;
@@ -143,9 +144,24 @@ public class UserController {
      * @return 授权记录列表（列表长度即已授权 refresh_token 总数）
      */
     @Operation(summary = "查看我的第三方应用授权列表")
-    @GetMapping("/oauth/refresh-tokens")
+    @GetMapping("/oauth/grants")
     public Result<List<RefreshGrantVO>> listRefreshTokens() {
         return Result.success(oauthTokenService.listUserRefreshTokens(UserContext.requireUid()));
+    }
+
+    /**
+     * 撤销我对某第三方应用的授权（删除该应用下的全部令牌并按应用置台账为已吊销）
+     *
+     * @param request 撤销请求（应用客户端 ID）
+     * @return 空结果
+     */
+    @Operation(summary = "撤销我对某第三方应用的授权")
+    @PostMapping("/oauth/grants/revoke")
+    public Result<Void> revokeClientAuthorization(
+            @Valid @RequestBody ClientAuthorizationRevokeRequest request) {
+        oauthTokenService.revokeClientAuthorization(
+                UserContext.requireUid(), request.getClientId());
+        return Result.success(null);
     }
 
     /**

@@ -7,9 +7,11 @@ import com.orange.common.exception.BusinessException;
 import com.orange.common.util.OAuthUtil;
 import com.orange.common.util.RedisKeyUtil;
 import com.orange.entity.po.OAuthClient;
+import com.orange.entity.po.OAuthGrant;
 import com.orange.entity.vo.oauth.OAuthTokenVO;
 import com.orange.entity.vo.oauth.RefreshGrantVO;
 import com.orange.mapper.OAuthClientMapper;
+import com.orange.mapper.OAuthGrantMapper;
 import com.orange.mapper.UserInfoMapper;
 import com.orange.service.OAuthTokenStore;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,23 +26,17 @@ import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.util.Arrays;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -68,6 +64,9 @@ class OAuthTokenServiceImplTest {
     private UserInfoMapper userInfoMapper;
 
     @Mock
+    private OAuthGrantMapper oauthGrantMapper;
+
+    @Mock
     private StringRedisTemplate redisTemplate;
 
     @Mock
@@ -87,7 +86,7 @@ class OAuthTokenServiceImplTest {
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         lenient().when(redisTemplate.opsForSet()).thenReturn(setOperations);
         service = new OAuthTokenServiceImpl(
-                oauthClientMapper, userInfoMapper, redisTemplate, objectMapper, oauthTokenStore);
+                oauthClientMapper, oauthGrantMapper, userInfoMapper, redisTemplate, objectMapper, oauthTokenStore);
         ReflectionTestUtils.setField(service, "accessTokenTtlSeconds", 7200L);
         ReflectionTestUtils.setField(service, "refreshTokenTtlSeconds", 86400L);
         ReflectionTestUtils.setField(service, "authorizationCodeTtlSeconds", 300L);
@@ -248,64 +247,68 @@ class OAuthTokenServiceImplTest {
     }
 
     @Test
-    void listUserRefreshTokensFiltersAccessAndPrunesExpiredMembers() throws Exception {
-        Long uid = 9L;
-        String indexKey = RedisKeyUtil.uidOauth(uid);
-        when(setOperations.members(indexKey)).thenReturn(new HashSet<>(Arrays.asList(
-                "refresh:refresh-1", "access:access-1", "refresh:expired-refresh")));
-        when(valueOperations.get(RedisKeyUtil.oauthRefresh("refresh-1")))
-                .thenReturn(refreshTokenJson("client-1", 1700000000000L));
-        when(valueOperations.get(RedisKeyUtil.oauthRefresh("expired-refresh"))).thenReturn(null);
-        when(redisTemplate.getExpire(RedisKeyUtil.oauthRefresh("refresh-1"), TimeUnit.SECONDS))
-                .thenReturn(3600L);
+    void listUserRefreshTokensDelegatesToGrantTable() {
+        RefreshGrantVO first = new RefreshGrantVO();
+        first.setClientId("client-1");
+        first.setClientName("测试应用");
+        first.setScope("user.read");
+        first.setExpiresInSeconds(3600L);
+        when(oauthGrantMapper.selectValidGrants(9L)).thenReturn(List.of(first));
 
-        OAuthClient client = client("none", "authorization_code,refresh_token", null, 1);
-        client.setClientName("测试应用");
-        when(oauthClientMapper.selectBatchIds(anyList())).thenReturn(List.of(client));
-
-        List<RefreshGrantVO> result = service.listUserRefreshTokens(uid);
+        List<RefreshGrantVO> result = service.listUserRefreshTokens(9L);
 
         assertEquals(1, result.size());
-        RefreshGrantVO vo = result.get(0);
-        assertEquals("client-1", vo.getClientId());
-        assertEquals("测试应用", vo.getClientName());
-        assertEquals("user.read", vo.getScope());
-        assertEquals(LocalDateTime.ofInstant(Instant.ofEpochMilli(1700000000000L), ZoneId.systemDefault()),
-                vo.getCreatedAt());
-        assertEquals(3600L, vo.getExpiresInSeconds());
-        // access_token 成员被过滤，已过期 refresh 残留被惰性清理
-        verify(setOperations).remove(indexKey, "refresh:expired-refresh");
+        assertSame(first, result.get(0));
+        assertEquals("client-1", result.get(0).getClientId());
     }
 
     @Test
-    void listUserRefreshTokensSortedByCreateTimeDescWithLegacyLast() throws Exception {
+    void issuingRefreshTokenWritesGrantRecord() throws Exception {
+        OAuthClient client = client("none", "authorization_code,refresh_token", null, 1);
+        prepareAuthorizationCode(client, "code-1", VERIFIER);
+
+        service.exchangeToken("client-1", null, "code-1", REDIRECT_URI, VERIFIER);
+
+        // 签发 refresh_token 时必须同步写入授权台账，且只存摘要不落明文
+        ArgumentCaptor<OAuthGrant> captor = ArgumentCaptor.forClass(OAuthGrant.class);
+        verify(oauthGrantMapper).insert(captor.capture());
+        OAuthGrant grant = captor.getValue();
+        assertEquals(9L, grant.getUid());
+        assertEquals("client-1", grant.getClientId());
+        assertEquals("user.read", grant.getScope());
+        assertEquals(64, grant.getTokenHash().length());
+        assertEquals(0, grant.getRevoked());
+        assertNotNull(grant.getIssueTime());
+        assertNotNull(grant.getExpireTime());
+    }
+
+    @Test
+    void revokeClientAuthorizationDeletesOnlyMatchingClientTokens() throws Exception {
         Long uid = 9L;
         String indexKey = RedisKeyUtil.uidOauth(uid);
-        when(setOperations.members(indexKey)).thenReturn(new HashSet<>(Arrays.asList(
-                "refresh:newer", "refresh:older", "refresh:legacy")));
-        when(valueOperations.get(RedisKeyUtil.oauthRefresh("newer")))
-                .thenReturn(refreshTokenJson("client-newer", 3000L));
-        when(valueOperations.get(RedisKeyUtil.oauthRefresh("older")))
-                .thenReturn(refreshTokenJson("client-older", 2000L));
-        when(valueOperations.get(RedisKeyUtil.oauthRefresh("legacy")))
-                .thenReturn(refreshTokenJson("client-legacy", null));
-        when(redisTemplate.getExpire(RedisKeyUtil.oauthRefresh("newer"), TimeUnit.SECONDS)).thenReturn(100L);
-        when(redisTemplate.getExpire(RedisKeyUtil.oauthRefresh("older"), TimeUnit.SECONDS)).thenReturn(200L);
-        when(redisTemplate.getExpire(RedisKeyUtil.oauthRefresh("legacy"), TimeUnit.SECONDS)).thenReturn(300L);
+        when(setOperations.members(indexKey)).thenReturn(Set.of(
+                "access:access-a", "access:access-b", "refresh:refresh-a", "refresh:dead"));
+        when(valueOperations.get(RedisKeyUtil.oauthAccess("access-a")))
+                .thenReturn(accessTokenJson("client-a"));
+        when(valueOperations.get(RedisKeyUtil.oauthAccess("access-b")))
+                .thenReturn(accessTokenJson("client-b"));
+        when(valueOperations.get(RedisKeyUtil.oauthRefresh("refresh-a")))
+                .thenReturn(refreshTokenJson("client-a"));
+        when(valueOperations.get(RedisKeyUtil.oauthRefresh("dead"))).thenReturn(null);
 
-        OAuthClient newer = clientWithId("client-newer", "none", "authorization_code,refresh_token", null, 1);
-        OAuthClient older = clientWithId("client-older", "none", "authorization_code,refresh_token", null, 1);
-        OAuthClient legacy = clientWithId("client-legacy", "none", "authorization_code,refresh_token", null, 1);
-        when(oauthClientMapper.selectBatchIds(anyList())).thenReturn(List.of(newer, older, legacy));
+        service.revokeClientAuthorization(uid, "client-a");
 
-        List<RefreshGrantVO> result = service.listUserRefreshTokens(uid);
-
-        // 按授权时间倒序；存量令牌（无 createTime）排最后
-        assertEquals(3, result.size());
-        assertEquals("client-newer", result.get(0).getClientId());
-        assertEquals("client-older", result.get(1).getClientId());
-        assertEquals("client-legacy", result.get(2).getClientId());
-        assertNull(result.get(2).getCreatedAt());
+        // 台账按 uid+clientId 置为已吊销
+        verify(oauthGrantMapper).markRevokedByUidAndClient(uid, "client-a");
+        // 只删除属于 client-a 的令牌，其他 client 的令牌不受影响
+        verify(redisTemplate).delete(RedisKeyUtil.oauthAccess("access-a"));
+        verify(redisTemplate).delete(RedisKeyUtil.oauthRefresh("refresh-a"));
+        verify(redisTemplate, never()).delete(RedisKeyUtil.oauthAccess("access-b"));
+        // 匹配令牌删除索引成员；过期残留一并摘除
+        verify(setOperations).remove(indexKey, "access:access-a");
+        verify(setOperations).remove(indexKey, "refresh:refresh-a");
+        verify(setOperations).remove(indexKey, "refresh:dead");
+        verify(setOperations, never()).remove(indexKey, "access:access-b");
     }
 
     private void prepareAuthorizationCode(OAuthClient client, String code, String verifier) throws Exception {
@@ -328,18 +331,10 @@ class OAuthTokenServiceImplTest {
     }
 
     private String refreshTokenJson(String clientId) throws JsonProcessingException {
-        return refreshTokenJson(clientId, 1700000000000L);
-    }
-
-    private String refreshTokenJson(String clientId, Long createTime) throws JsonProcessingException {
         Map<String, Object> record = new LinkedHashMap<>();
         record.put("uid", 9L);
         record.put("clientId", clientId);
         record.put("scope", "user.read");
-        // createTime 为空模拟本次升级前签发的存量令牌
-        if (createTime != null) {
-            record.put("createTime", createTime);
-        }
         return objectMapper.writeValueAsString(record);
     }
 
@@ -352,13 +347,8 @@ class OAuthTokenServiceImplTest {
     }
 
     private OAuthClient client(String authMethod, String grantTypes, String secret, int requirePkce) {
-        return clientWithId("client-1", authMethod, grantTypes, secret, requirePkce);
-    }
-
-    private OAuthClient clientWithId(String id, String authMethod, String grantTypes,
-                                     String secret, int requirePkce) {
         OAuthClient client = new OAuthClient();
-        client.setId(id);
+        client.setId("client-1");
         client.setAuthMethods(authMethod);
         client.setGrantTypes(grantTypes);
         client.setClientSecret(secret);
