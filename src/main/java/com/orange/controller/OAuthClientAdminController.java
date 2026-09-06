@@ -20,16 +20,17 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- * OAuth 客户端自助管理接口（需 UC 会话 token，由 UserAuthInterceptor 统一校验）
+ * OAuth 客户端自助管理接口（需 UC 会话 token，/user/** 由 UserAuthInterceptor 统一校验）
  *
  * <p>第三方开发者登录后维护自己名下的 OAuth 客户端：注册、查看、更新、密钥轮换、停用、删除，
- * 所有权按 owner_uid 隔离，只能操作自己名下的客户端。</p>
+ * 所有权按 owner_uid 隔离，只能操作自己名下的客户端。
+ * 归入 /user/oauth/client/** 与用户自助面一致，不再占用 OAuth 协议前缀 /oauth2。</p>
  *
  * @author UserCenter
  */
 @Tag(name = "OAuth 客户端自助管理")
 @RestController
-@RequestMapping("/oauth2/client")
+@RequestMapping("/user/oauth/client")
 public class OAuthClientAdminController {
 
     private final OAuthClientAdminService oauthClientAdminService;
