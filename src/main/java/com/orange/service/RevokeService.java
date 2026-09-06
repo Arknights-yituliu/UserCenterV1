@@ -25,8 +25,8 @@ public interface RevokeService {
     void kickAllSessions(Long uid);
 
     /**
-     * 吊销用户名下全部 OAuth 令牌（access_token / refresh_token 一并吊销，
-     * refresh_token 连带吊销其派生出的 access_token），并清理 uid 反向索引
+     * 吊销用户名下全部 OAuth 令牌（access_token 与 refresh_token 均删除，
+     * 按 uid 反向索引全量清理，不区分令牌间派生关系），并清理 uid 反向索引
      *
      * @param uid 用户 uid
      */

@@ -136,8 +136,8 @@ public interface OAuthTokenService {
 
     /**
      * 吊销令牌（RFC 7009）：客户端携带自己名下的 access_token / refresh_token 调用，
-     * 使其立即失效。refresh_token 被吊销时，其派生出的 access_token 一并吊销；
-     * 令牌不存在或已失效同样视为成功（幂等，不泄露令牌是否有效）
+     * 使其立即失效。吊销 refresh_token 只使其本身失效（派生 access 由各自 TTL 自然过期，
+     * 反向索引概率性惰性清理收敛）；令牌不存在或已失效同样视为成功（幂等，不泄露令牌是否有效）
      *
      * @param clientId     客户端 ID
      * @param clientSecret 客户端密钥（公共客户端传空）

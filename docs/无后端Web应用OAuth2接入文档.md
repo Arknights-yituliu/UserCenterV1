@@ -256,7 +256,7 @@ Content-Type: application/x-www-form-urlencoded
 client_id={CLIENT_ID}&token={TOKEN}
 ```
 
-`token` 可以是 access token 或 refresh token。吊销 refresh token 时，它派生的 access token（同一客户端名下）会被级联吊销。
+`token` 可以是 access token 或 refresh token。吊销 refresh token 只使其本身失效，此前派生的 access token 会按各自有效期自然过期（如需立即中断全部访问，请在用户中心撤回对该应用的授权）。
 
 成功响应：
 

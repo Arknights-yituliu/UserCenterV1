@@ -221,8 +221,8 @@ public class OAuthController {
 
     /**
      * 吊销令牌（RFC 7009）：客户端携带自己名下的 access_token / refresh_token 调用，
-     * 使其立即失效（自动识别令牌类型）。refresh_token 被吊销时其派生出的 access_token 一并失效；
-     * 令牌不存在或已失效同样返回成功（幂等，不泄露令牌是否有效）
+     * 使其立即失效（自动识别令牌类型）。吊销 refresh_token 只使其本身失效，此前派生的
+     * access_token 按各自有效期自然过期；令牌不存在或已失效同样返回成功（幂等，不泄露令牌是否有效）
      *
      * @param clientId     客户端 ID
      * @param clientSecret 客户端密钥（公共客户端传空）

@@ -63,7 +63,7 @@ import java.util.concurrent.TimeUnit;
  *   <li>授权码绑定客户端与回调地址，防止跨客户端盗用</li>
  *   <li>PKCE S256 校验；客户端强制 PKCE 时未携带 challenge 直接拒绝</li>
  *   <li>refresh_token 为固定凭证：有效期内可反复刷新，刷新只签发新 access_token，
- *       不删除不换发；吊销 refresh_token 时级联吊销同 uid 同 client 的 access_token</li>
+ *       不删除不换发；吊销 refresh_token 只使其本身失效，派生 access 由 TTL 与惰性清理收敛</li>
  * </ul>
  *
  * @author UserCenter
@@ -605,8 +605,9 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     }
 
     /**
-     * 吊销 refresh_token，并连带吊销它派生出的 access_token
-     * （access_token 本身无法作废，refresh 被吊销后其先前换出的 access 仍可能有效，需一并删除）
+     * 吊销 refresh_token：只使其本身失效，不级联删除此前派生的 access_token
+     * （派生 access 与 refresh 无父子关联记录，由各自 TTL 自然过期、配合反向索引
+     * 概率性惰性清理收敛；如需整体中断某客户端对某用户的授权请走 revokeClientAuthorization）
      *
      * @param token            refresh_token
      * @param expectedClientId 已通过认证的调用方客户端 ID
@@ -614,20 +615,12 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      */
     private boolean revokeRefreshToken(String token, String expectedClientId) {
         Map<String, Object> record = readJsonMap(RedisKeyUtil.oauthRefresh(token));
-        // 归属不匹配时连派生 access token 也不能触碰，否则可借 refresh token 字符串
-        // 越权中断另一个客户端的会话。
+        // 归属不匹配时不允许触碰，否则可借 refresh token 字符串越权中断另一个客户端的会话。
         if (record == null || !Objects.equals(expectedClientId, record.get("clientId"))) {
             return false;
         }
         Object uidObj = record.get("uid");
         Long uid = uidObj == null ? null : ((Number) uidObj).longValue();
-        String accessToken = (String) record.get("accessToken");
-        if (StringUtils.hasText(accessToken)) {
-            stringRedisTemplate.delete(RedisKeyUtil.oauthAccess(accessToken));
-            if (uid != null) {
-                stringRedisTemplate.opsForSet().remove(RedisKeyUtil.uidOauth(uid), OAUTH_ACCESS_MEMBER_PREFIX + accessToken);
-            }
-        }
         stringRedisTemplate.delete(RedisKeyUtil.oauthRefresh(token));
         if (uid != null) {
             stringRedisTemplate.opsForSet().remove(RedisKeyUtil.uidOauth(uid), OAUTH_REFRESH_MEMBER_PREFIX + token);
@@ -904,7 +897,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         return record;
     }
 
-    /** 创建 refresh token 记录（固定凭证，不绑定派生 access；吊销时按 uid+clientId 级联）。 */
+    /** 创建 refresh token 记录（固定凭证，不记录与派生 access 的父子关联）。 */
     private Map<String, Object> createRefreshRecord(OAuthClient client, Long uid, String scope) {
         Map<String, Object> record = new HashMap<>();
         record.put("uid", uid);
