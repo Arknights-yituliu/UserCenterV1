@@ -86,17 +86,16 @@ class UserConfigServiceImplTest {
     }
 
     @Test
-    void rejectsStaleHashAndKeepsQuotaUnchanged() {
+    void saveIfMatchRejectsStaleHashAndKeepsQuotaUnchanged() {
         String currentHash = "a".repeat(64);
         UserConfig current = config(9L, currentHash, 10);
         UserConfigQuota quota = quota(10, 512000);
-        when(userConfigMapper.selectOwnedById(9L, UID, CLIENT_ID)).thenReturn(current);
         when(quotaMapper.selectForUpdate(UID)).thenReturn(quota);
         when(userConfigMapper.selectOwnedByIdForUpdate(9L, UID, CLIENT_ID)).thenReturn(current);
 
         UserConfigSaveRequest request = updateRequest(9L, "b".repeat(64));
 
-        assertThatThrownBy(() -> service.saveConfig(UID, request))
+        assertThatThrownBy(() -> service.saveConfigIfMatch(UID, request))
                 .isInstanceOfSatisfying(ConfigConflictException.class,
                         exception -> assertThat(exception.getCurrentHash()).isEqualTo(currentHash));
         assertThat(quota.getUsedBytes()).isEqualTo(10);
@@ -106,17 +105,63 @@ class UserConfigServiceImplTest {
     }
 
     @Test
-    void rejectsRequestWhenExpectedHashIsMissing() {
+    void saveIfMatchRejectsMissingExpectedHash() {
         UserConfigSaveRequest request = new UserConfigSaveRequest();
+        request.setId(9L);
         request.setCategory("editor");
         request.setVersion("v1");
         request.setName("default");
         request.setConfig(Map.of("a", 1));
 
-        assertThatThrownBy(() -> service.saveConfig(UID, request))
+        assertThatThrownBy(() -> service.saveConfigIfMatch(UID, request))
                 .isInstanceOf(BadRequestException.class)
-                .hasMessage("expectedHash 字段缺失");
+                .hasMessageContaining("expectedHash");
         verify(quotaMapper, never()).initialize(any(), anyLong());
+    }
+
+    @Test
+    void saveConfigOverwritesByIdWithoutHashCheck() {
+        UserConfig current = config(9L, "old-hash-not-needed", 10);
+        UserConfigQuota quota = quota(100, 512000);
+        when(quotaMapper.selectForUpdate(UID)).thenReturn(quota);
+        when(userConfigMapper.selectOwnedByIdForUpdate(9L, UID, CLIENT_ID)).thenReturn(current);
+        when(userConfigMapper.updateOwnedById(
+                any(), any(), any(), any(), any(), any(), any(), anyLong())).thenReturn(1);
+        when(quotaMapper.updateById(quota)).thenReturn(1);
+
+        // 覆盖更新：不携带 expectedHash 也应成功
+        UserConfigSaveRequest request = updateRequest(9L, null);
+        UserConfigSaveVO result = service.saveConfig(UID, request);
+
+        assertThat(result.getId()).isEqualTo(9L);
+        assertThat(result.getHash())
+                .isEqualTo("015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862");
+        assertThat(quota.getUsedBytes()).isEqualTo(97);
+        verify(userConfigMapper).updateOwnedById(
+                9L, UID, CLIENT_ID, null, null, "{\"a\":1}", result.getHash(), 7L);
+    }
+
+    @Test
+    void saveIfMatchUpdatesWhenHashMatchesAndAppliesQuotaDelta() {
+        String currentHash = "A".repeat(64);
+        UserConfig current = config(9L, currentHash.toLowerCase(), 10);
+        UserConfigQuota quota = quota(100, 512000);
+        when(quotaMapper.selectForUpdate(UID)).thenReturn(quota);
+        when(userConfigMapper.selectOwnedByIdForUpdate(9L, UID, CLIENT_ID)).thenReturn(current);
+        when(userConfigMapper.updateIfHashMatches(
+                any(), any(), any(), any(), any(), any(), any(), anyLong(), any())).thenReturn(1);
+        when(quotaMapper.updateById(quota)).thenReturn(1);
+
+        UserConfigSaveRequest request = updateRequest(9L, currentHash);
+        UserConfigSaveVO result = service.saveConfigIfMatch(UID, request);
+
+        assertThat(result.getId()).isEqualTo(9L);
+        assertThat(result.getHash())
+                .isEqualTo("015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862");
+        assertThat(quota.getUsedBytes()).isEqualTo(97);
+        verify(userConfigMapper).updateIfHashMatches(
+                9L, UID, CLIENT_ID, null, null, "{\"a\":1}", result.getHash(), 7L,
+                currentHash.toLowerCase());
     }
 
     @Test
@@ -134,30 +179,6 @@ class UserConfigServiceImplTest {
         assertThat(missing.isExpectedHashPresent()).isFalse();
         assertThat(explicitNull.isExpectedHashPresent()).isTrue();
         assertThat(explicitNull.getExpectedHash()).isNull();
-    }
-
-    @Test
-    void updatesConfigAndAppliesQuotaDelta() {
-        String currentHash = "A".repeat(64);
-        UserConfig current = config(9L, currentHash.toLowerCase(), 10);
-        UserConfigQuota quota = quota(100, 512000);
-        when(userConfigMapper.selectOwnedById(9L, UID, CLIENT_ID)).thenReturn(current);
-        when(quotaMapper.selectForUpdate(UID)).thenReturn(quota);
-        when(userConfigMapper.selectOwnedByIdForUpdate(9L, UID, CLIENT_ID)).thenReturn(current);
-        when(userConfigMapper.updateIfHashMatches(
-                any(), any(), any(), any(), any(), any(), any(), anyLong(), any())).thenReturn(1);
-        when(quotaMapper.updateById(quota)).thenReturn(1);
-
-        UserConfigSaveRequest request = updateRequest(9L, currentHash);
-        UserConfigSaveVO result = service.saveConfig(UID, request);
-
-        assertThat(result.getId()).isEqualTo(9L);
-        assertThat(result.getHash())
-                .isEqualTo("015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862");
-        assertThat(quota.getUsedBytes()).isEqualTo(97);
-        verify(userConfigMapper).updateIfHashMatches(
-                9L, UID, CLIENT_ID, null, null, "{\"a\":1}", result.getHash(), 7L,
-                currentHash.toLowerCase());
     }
 
     @Test

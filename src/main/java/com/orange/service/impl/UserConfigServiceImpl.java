@@ -40,7 +40,8 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
- * 用户配置服务实现：CAS 保存、查询、物理删除和配额维护。
+ * 用户配置服务实现：保存（创建/按 id 覆盖更新）、条件保存（save-if-match 乐观锁）、
+ * 查询、物理删除和配额维护。
  *
  * @author UserCenter
  */
@@ -79,7 +80,20 @@ public class UserConfigServiceImpl implements UserConfigService {
         if (request.getId() == null) {
             return createConfig(uid, clientId, request, configString, newHash, newBytes);
         }
-        return updateConfig(uid, clientId, request, configString, newHash, newBytes);
+        // id 非空：按 id 直接覆盖更新，忽略 expectedHash（last-write-wins，不防并发）
+        return overwriteConfig(uid, clientId, request, configString, newHash, newBytes);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public UserConfigSaveVO saveConfigIfMatch(Long uid, UserConfigSaveRequest request) {
+        validateIfMatchRequest(request);
+        String clientId = requireClientId();
+        String configString = toConfigString(request.getConfig());
+        long newBytes = configString.getBytes(StandardCharsets.UTF_8).length;
+        String newHash = sha256(configString);
+        // save-if-match 仅承担更新（校验已保证 id 非空），防止并发覆盖
+        return updateConfigIfHashMatches(uid, clientId, request, configString, newHash, newBytes);
     }
 
     private UserConfigSaveVO createConfig(Long uid,
@@ -119,17 +133,44 @@ public class UserConfigServiceImpl implements UserConfigService {
         return new UserConfigSaveVO(config.getId(), newHash);
     }
 
-    private UserConfigSaveVO updateConfig(Long uid,
-                                          String clientId,
-                                          UserConfigSaveRequest request,
-                                          String configString,
-                                          String newHash,
-                                          long newBytes) {
-        UserConfig initial = userConfigMapper.selectOwnedById(request.getId(), uid, clientId);
-        if (initial == null) {
+    /**
+     * 按 id 直接覆盖更新：不校验内容 hash、不做并发控制（save 接口的更新分支）
+     */
+    private UserConfigSaveVO overwriteConfig(Long uid,
+                                             String clientId,
+                                             UserConfigSaveRequest request,
+                                             String configString,
+                                             String newHash,
+                                             long newBytes) {
+        UserConfigQuota quota = lockExistingQuota(uid);
+        UserConfig current = userConfigMapper.selectOwnedByIdForUpdate(request.getId(), uid, clientId);
+        if (current == null) {
             throw new ConfigConflictException(null);
         }
+        validateIdentity(current, request);
 
+        long delta = newBytes - current.getConfigBytes();
+        long newUsedBytes = checkedUsage(quota, delta);
+        int updated = userConfigMapper.updateOwnedById(
+                request.getId(), uid, clientId, request.getSource(), request.getNote(),
+                configString, newHash, newBytes);
+        if (updated != 1) {
+            throw new ConfigConflictException(null);
+        }
+        updateQuotaUsage(quota, newUsedBytes);
+        return new UserConfigSaveVO(request.getId(), newHash);
+    }
+
+    /**
+     * 按 id + expectedHash 条件更新（save-if-match，乐观锁防并发覆盖）：
+     * 仅当库中内容 hash 仍等于请求携带的 expectedHash 才落库，否则返回最新 hash 供调用方重试
+     */
+    private UserConfigSaveVO updateConfigIfHashMatches(Long uid,
+                                                       String clientId,
+                                                       UserConfigSaveRequest request,
+                                                       String configString,
+                                                       String newHash,
+                                                       long newBytes) {
         UserConfigQuota quota = lockExistingQuota(uid);
         UserConfig current = userConfigMapper.selectOwnedByIdForUpdate(request.getId(), uid, clientId);
         if (current == null) {
@@ -230,19 +271,30 @@ public class UserConfigServiceImpl implements UserConfigService {
         auditLogMapper.insert(auditLog);
     }
 
+    /**
+     * save 接口入参校验：id 为空=创建（不允许携带 expectedHash）；id 非空=直接覆盖更新，
+     * 不要求 expectedHash（携带与否均忽略，不做并发控制）
+     */
     private void validateSaveRequest(UserConfigSaveRequest request) {
-        if (!request.isExpectedHashPresent()) {
-            throw new BadRequestException("expectedHash 字段缺失");
-        }
         if (request.getId() == null) {
-            if (request.getExpectedHash() != null) {
-                throw new BadRequestException("创建配置时 id 和 expectedHash 必须为 null");
+            if (request.isExpectedHashPresent() && request.getExpectedHash() != null) {
+                throw new BadRequestException("创建配置时不能携带 expectedHash");
             }
             return;
         }
-        if (request.getExpectedHash() == null
+        // 覆盖更新：不校验 expectedHash（缺省或携带均忽略），last-write-wins
+    }
+
+    /**
+     * save-if-match 接口入参校验：仅承担更新，id 必填且 expectedHash 必填为 64 位 SHA-256
+     */
+    private void validateIfMatchRequest(UserConfigSaveRequest request) {
+        if (request.getId() == null) {
+            throw new BadRequestException("save-if-match 更新必须携带 id");
+        }
+        if (!request.isExpectedHashPresent() || request.getExpectedHash() == null
                 || !SHA256_PATTERN.matcher(request.getExpectedHash()).matches()) {
-            throw new BadRequestException("更新配置时 expectedHash 必须为 64 位 SHA-256 十六进制字符串");
+            throw new BadRequestException("save-if-match 更新必须携带 64 位 SHA-256 expectedHash");
         }
     }
 

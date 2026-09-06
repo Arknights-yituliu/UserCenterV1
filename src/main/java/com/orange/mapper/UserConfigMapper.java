@@ -38,6 +38,18 @@ public interface UserConfigMapper extends BaseMapper<UserConfig> {
 
     @Update("UPDATE user_config SET source = #{source}, note = #{note}, config = #{config}, "
             + "content_hash = #{newHash}, config_bytes = #{newBytes}, update_time = CURRENT_TIMESTAMP "
+            + "WHERE id = #{id} AND uid = #{uid} AND client_id = #{clientId}")
+    int updateOwnedById(@Param("id") Long id,
+                        @Param("uid") Long uid,
+                        @Param("clientId") String clientId,
+                        @Param("source") String source,
+                        @Param("note") String note,
+                        @Param("config") String config,
+                        @Param("newHash") String newHash,
+                        @Param("newBytes") long newBytes);
+
+    @Update("UPDATE user_config SET source = #{source}, note = #{note}, config = #{config}, "
+            + "content_hash = #{newHash}, config_bytes = #{newBytes}, update_time = CURRENT_TIMESTAMP "
             + "WHERE id = #{id} AND uid = #{uid} AND client_id = #{clientId} "
             + "AND content_hash = #{expectedHash}")
     int updateIfHashMatches(@Param("id") Long id,

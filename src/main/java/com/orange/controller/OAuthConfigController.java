@@ -45,15 +45,27 @@ public class OAuthConfigController {
     }
 
     /**
-     * 保存用户配置（client_id 取自 OAuth token）
+     * 保存用户配置（client_id 取自 OAuth token）：id 为空=创建；id 非空=按 id 直接覆盖更新
      *
      * @param request 保存参数
      * @return 配置 id 和新内容 hash
      */
-    @Operation(summary = "保存用户配置（OAuth）")
+    @Operation(summary = "保存用户配置（OAuth，创建 / 覆盖更新）")
     @PostMapping("/save")
     public Result<UserConfigSaveVO> saveConfig(@Valid @RequestBody UserConfigSaveRequest request) {
         return Result.success(userConfigService.saveConfig(UserContext.requireUid(), request));
+    }
+
+    /**
+     * 按 id + expectedHash 条件更新用户配置（client_id 取自 OAuth token，防并发覆盖）
+     *
+     * @param request 保存参数（id 与 expectedHash 必填）
+     * @return 配置 id 和新内容 hash
+     */
+    @Operation(summary = "条件更新用户配置（OAuth，save-if-match，防并发覆盖）")
+    @PostMapping("/save-if-match")
+    public Result<UserConfigSaveVO> saveConfigIfMatch(@Valid @RequestBody UserConfigSaveRequest request) {
+        return Result.success(userConfigService.saveConfigIfMatch(UserContext.requireUid(), request));
     }
 
     /**

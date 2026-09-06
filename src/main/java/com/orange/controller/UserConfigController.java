@@ -42,15 +42,27 @@ public class UserConfigController {
     }
 
     /**
-     * 通过 CAS 保存用户配置。
+     * 保存用户配置：id 为空=创建；id 非空=按 id 直接覆盖更新（不校验 hash，不做并发控制）
      *
      * @param request 保存参数
      * @return 配置 id 和新内容 hash
      */
-    @Operation(summary = "保存用户配置")
+    @Operation(summary = "保存用户配置（创建 / 覆盖更新）")
     @PostMapping("/save")
     public Result<UserConfigSaveVO> saveConfig(@Valid @RequestBody UserConfigSaveRequest request) {
         return Result.success(userConfigService.saveConfig(UserContext.requireUid(), request));
+    }
+
+    /**
+     * 按 id + expectedHash 条件更新用户配置（防并发覆盖）：hash 不匹配时返回 409 冲突与最新 hash
+     *
+     * @param request 保存参数（id 与 expectedHash 必填）
+     * @return 配置 id 和新内容 hash
+     */
+    @Operation(summary = "条件更新用户配置（save-if-match，防并发覆盖）")
+    @PostMapping("/save-if-match")
+    public Result<UserConfigSaveVO> saveConfigIfMatch(@Valid @RequestBody UserConfigSaveRequest request) {
+        return Result.success(userConfigService.saveConfigIfMatch(UserContext.requireUid(), request));
     }
 
     /**

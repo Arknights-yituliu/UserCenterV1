@@ -15,13 +15,29 @@ import java.util.List;
 public interface UserConfigService {
 
     /**
-     * 通过 CAS 保存用户配置。
+     * 保存用户配置（不做并发控制）：
+     * <ul>
+     *   <li>id 为空 → 新建（按 category+version+name 幂等键防重复，冲突抛 {@code ConfigConflictException}）</li>
+     *   <li>id 非空 → 按 id 直接覆盖更新（忽略 expectedHash，不校验内容 hash，last-write-wins）</li>
+     * </ul>
      *
      * @param uid     用户 uid
      * @param request 保存参数
      * @return 配置 id 和新内容 hash
      */
     UserConfigSaveVO saveConfig(Long uid, UserConfigSaveRequest request);
+
+    /**
+     * 按 id + expectedHash 条件更新配置（防并发覆盖，乐观锁）：
+     * 仅当数据库当前内容 hash 等于请求携带的 expectedHash 时更新成功，
+     * 否则抛 {@code ConfigConflictException}（携带最新 hash 供调用方重试）。
+     * 必须携带 id，且 category/version/name 不能修改；本接口不承担创建。
+     *
+     * @param uid     用户 uid
+     * @param request 保存参数（id + expectedHash 必填）
+     * @return 配置 id 和新内容 hash
+     */
+    UserConfigSaveVO saveConfigIfMatch(Long uid, UserConfigSaveRequest request);
 
     /**
      * 查询用户在某客户端某分类下的全部配置（clientId 取自登录上下文，前端不可指定）
