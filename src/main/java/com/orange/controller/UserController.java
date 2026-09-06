@@ -9,6 +9,8 @@ import com.orange.entity.dto.user.UpdatePasswordRequest;
 import com.orange.entity.dto.user.UpdateProfileRequest;
 import com.orange.entity.vo.SessionVO;
 import com.orange.entity.vo.UserInfoVO;
+import com.orange.entity.vo.oauth.RefreshGrantVO;
+import com.orange.service.OAuthTokenService;
 import com.orange.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -35,13 +37,17 @@ public class UserController {
 
     private final UserService userService;
 
+    private final OAuthTokenService oauthTokenService;
+
     /**
      * 构造器注入服务
      *
-     * @param userService 用户服务
+     * @param userService       用户服务
+     * @param oauthTokenService OAuth 令牌服务（查询我的第三方应用授权）
      */
-    public UserController(UserService userService) {
+    public UserController(UserService userService, OAuthTokenService oauthTokenService) {
         this.userService = userService;
+        this.oauthTokenService = oauthTokenService;
     }
 
     /**
@@ -129,6 +135,17 @@ public class UserController {
     @GetMapping("/sessions")
     public Result<List<SessionVO>> listSessions() {
         return Result.success(userService.listSessions(UserContext.requireUid()));
+    }
+
+    /**
+     * 查看我授权过的第三方应用列表（refresh_token 粒度的授权记录）
+     *
+     * @return 授权记录列表（列表长度即已授权 refresh_token 总数）
+     */
+    @Operation(summary = "查看我的第三方应用授权列表")
+    @GetMapping("/oauth/refresh-tokens")
+    public Result<List<RefreshGrantVO>> listRefreshTokens() {
+        return Result.success(oauthTokenService.listUserRefreshTokens(UserContext.requireUid()));
     }
 
     /**

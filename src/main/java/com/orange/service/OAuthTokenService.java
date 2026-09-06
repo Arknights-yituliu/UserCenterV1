@@ -3,8 +3,11 @@ package com.orange.service;
 import com.orange.entity.vo.oauth.ConsentInfoVO;
 import com.orange.entity.vo.oauth.LoginTicketVO;
 import com.orange.entity.vo.oauth.OAuthTokenVO;
+import com.orange.entity.vo.oauth.RefreshGrantVO;
 import com.orange.entity.vo.oauth.UserInfoVO;
 import jakarta.servlet.http.HttpServletRequest;
+
+import java.util.List;
 
 /**
  * OAuth2 授权服务器核心服务：授权码签发、令牌交换、令牌刷新、令牌解析
@@ -160,6 +163,17 @@ public interface OAuthTokenService {
      * @return 用户信息（uid、邮箱、用户名、昵称、头像）
      */
     UserInfoVO getUserInfo(Long uid, String clientId, String scope);
+
+    /**
+     * 查看当前用户名下全部仍有效的 refresh_token 授权记录（用户自助，按授权时间倒序）。
+     *
+     * <p>通过 uid 反向索引定位令牌，逐个读取有效期与签发时间；索引中已过期/被吊销的
+     * 残留成员会在本次查询中惰性清理。refresh_token 明文只在服务端内部处理，不会对外返回。</p>
+     *
+     * @param uid 用户 uid
+     * @return refresh_token 授权记录列表（列表长度为授权总数，空为无授权）
+     */
+    List<RefreshGrantVO> listUserRefreshTokens(Long uid);
 
     /**
      * 访问令牌主体信息（uid + 客户端 + 范围）
