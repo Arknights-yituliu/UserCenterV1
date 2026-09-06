@@ -162,3 +162,28 @@ CREATE TABLE `user_config_quota` (
     CONSTRAINT `chk_user_config_quota_used` CHECK (`used_bytes` <= `limit_bytes`)
 ) ENGINE = InnoDB COMMENT = '用户配置容量配额';
 
+-- -------------------------------------------------------------
+-- 9. OAuth refresh_token 授权台账表
+--
+-- 令牌本身仍是 Redis 中的热数据（含 TTL 自动过期与 Lua 原子校验），
+-- 本表只作为“我的授权”查询与审计的持久化投影，允许最终一致：
+-- 每次签发 refresh_token 插入一行，吊销时置 revoked=1，
+-- 过期状态在查询时按 expire_time 过滤，不依赖定时任务。
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `oauth_grant`;
+CREATE TABLE `oauth_grant` (
+    `id`          BIGINT          NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `uid`         BIGINT          NOT NULL COMMENT '授权用户 uid',
+    `client_id`   VARCHAR(128)    NOT NULL COMMENT '被授权的 OAuth 客户端 ID',
+    `scope`       VARCHAR(256)    NOT NULL COMMENT '授权范围（逗号分隔）',
+    `token_hash`  CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT 'refresh_token 的 SHA-256（不落明文）',
+    `issue_time`  DATETIME        NOT NULL COMMENT '授权（签发）时间',
+    `expire_time` DATETIME        NOT NULL COMMENT '过期时间',
+    `revoked`     TINYINT         NOT NULL DEFAULT 0 COMMENT '是否已吊销：1=已吊销 0=有效',
+    `create_time` DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间',
+    `update_time` DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '记录更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_oauth_grant_token_hash` (`token_hash`),
+    KEY `idx_oauth_grant_uid` (`uid`, `revoked`, `expire_time`)
+) ENGINE = InnoDB COMMENT = 'OAuth refresh_token 授权台账';
+
