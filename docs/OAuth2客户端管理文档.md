@@ -147,7 +147,7 @@ http://localhost:5173
 
 不能包含路径、查询参数、fragment、user-info 或末尾 `/`。
 
-注意：`websiteOrigin` 只是客户端登记信息，不会自动加入服务端 CORS 白名单。上线前仍需由服务端管理员把准确 Origin 加入 `user-center.oauth.allowed-origins`。
+注意：登记 `websiteOrigin` 后，服务端会将其同步到独立审核表 `oauth_client_origin`，默认处于待管理员审批状态，即列表/详情中的 `originApproved=false`。只有管理员审批通过（`originApproved=true`）后该 Origin 才会进入服务端运行时 CORS 白名单；更新客户端时若修改了 `websiteOrigin`，该 Origin 会重新回到待审批状态。
 
 ## 5. 注册客户端
 
@@ -278,10 +278,11 @@ Authorization: Bearer <UC_SESSION_TOKEN>
       "requirePkce": true,
       "requireAuthConsent": true,
       "websiteOrigin": "https://spa.example.com",
+      "originApproved": false,
       "ownerEnabled": true,
       "adminApproved": false,
       "directAuthEnabled": false,
-      "createTime": "2026-09-04 12:00:00"
+      "createTime": "2026-09-04T12:00:00"
     }
   ]
 }
@@ -430,32 +431,11 @@ Authorization: Bearer <UC_SESSION_TOKEN>
 
 管理 API 和数据库都使用正向语义。API 字段为 `ownerEnabled`、`adminApproved`、`directAuthEnabled`，对应数据库列为 `owner_enabled`、`admin_approved`、`direct_auth_enabled`。
 
-已有数据库在部署新版应用前，必须于维护窗口执行 [OAuth 客户端状态字段迁移脚本](../src/main/resources/db/oauth_client_state_columns_migration.sql)。迁移会保留原所有者启停状态，并把原反向的管理员封禁值转换为正向审批值。
+管理员核对客户端名称、所有者、回调地址、Origin、权限范围和用途后，通过受控的数据库运维将对应客户端的 `adminApproved` 置为 `true` 完成审批；拒绝审批时保持 `adminApproved=false`。
 
-还必须执行 [OAuth 客户端直连认证字段迁移脚本](../src/main/resources/db/oauth_client_direct_auth_migration.sql)。该脚本默认关闭所有现有客户端的直连认证能力；部署前应核实现有直连接入方并建立可信客户端白名单。
+审批通过后，如果 `ownerEnabled=true`，客户端立即可用；如果所有者已经主动停用，仍需所有者重新启用。
 
-管理员核对客户端名称、所有者、回调地址、Origin、权限范围和用途后，可执行等价于以下状态变更的操作：
-
-```sql
-UPDATE oauth_client
-SET admin_approved = 1
-WHERE id = '<审核通过的 client_id>'
-  AND admin_approved = 0;
-```
-
-审批通过后，如果 `ownerEnabled=true`，客户端立即可用；如果所有者已经主动停用，仍需所有者重新启用。审批拒绝时保持 `adminApproved=false`。
-
-管理员为已审批的加密客户端开通直连登录和直连注册：
-
-```sql
-UPDATE oauth_client
-SET direct_auth_enabled = 1
-WHERE id = '<审核通过的 client_id>'
-  AND admin_approved = 1
-  AND auth_methods = 'client_secret_post';
-```
-
-关闭时把 `direct_auth_enabled` 改回 `0`。服务端会在发起会话、提交登录或注册信息、兑换 ticket 时重新校验，所以关闭后尚未使用的 channel 和 ticket 也不能继续完成认证。管理员审批不会自动开通直连认证。
+管理员为已审批的加密客户端开通直连登录和直连注册时，将对应客户端的 `directAuthEnabled` 置为 `true`；关闭时改回 `false`。服务端会在发起会话、提交登录或注册信息、兑换 ticket 时重新校验，所以关闭后尚未使用的 channel 和 ticket 也不能继续完成认证。管理员审批不会自动开通直连认证。
 
 ## 14. 常见错误码
 
@@ -494,7 +474,7 @@ WHERE id = '<审核通过的 client_id>'
 - 待审批或管理员封禁时禁用“启用”操作，并展示管理员审批提示。
 - 删除操作必须二次确认。
 - 保存回调地址时保持原始完整字符串，不能擅自移除端口、路径或查询参数。
-- `websiteOrigin` 发生变化时，提醒管理员同步检查服务端 CORS 白名单。
+- `websiteOrigin` 修改后 Origin 会自动回到待审批状态（`originApproved=false`），需要管理员重新审批通过后才重新进入 CORS 白名单。
 
 ## 16. 无后端 Web 应用创建后的接入要求
 
@@ -504,6 +484,6 @@ WHERE id = '<审核通过的 client_id>'
 2. 使用 SHA-256 计算 `code_challenge`，并提交 `code_challenge_method=S256`。
 3. 回调后先校验 `state`，再使用 `client_id`、授权码、精确的 `redirect_uri` 和 `code_verifier` 换取令牌。
 4. 浏览器请求中不得包含或持久化 `client_secret`。
-5. 实际页面 Origin 必须已经加入服务端静态 CORS 白名单。
+5. 客户端登记的 `websiteOrigin` 必须已通过管理员审批（列表/详情中的 `originApproved=true`），该 Origin 才会进入服务端运行时 CORS 白名单，浏览器跨域请求才能放行。
 
-OAuth2 授权、换码、刷新、吊销和 userinfo 接口不属于本文档范围，参见 [无后端 Web 应用 OAuth2 公共客户端设计](./无后端Web应用OAuth2公共客户端设计.md)和[无后端 Web 应用 OAuth2 接入文档](./无后端Web应用OAuth2接入文档.md)。
+OAuth2 授权、换码、刷新、吊销和 userinfo 接口不属于本文档范围，参见[无后端 Web 应用 OAuth2 接入文档](./无后端Web应用OAuth2接入文档.md)。
