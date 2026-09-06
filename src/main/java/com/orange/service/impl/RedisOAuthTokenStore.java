@@ -20,11 +20,10 @@ import java.util.List;
 public class RedisOAuthTokenStore implements OAuthTokenStore {
 
     private static final String ACCESS_MEMBER_PREFIX = "access:";
-    private static final String REFRESH_MEMBER_PREFIX = "refresh:";
 
     private final StringRedisTemplate redisTemplate;
     private final DefaultRedisScript<Long> consumeAuthorizationCodeScript;
-    private final DefaultRedisScript<Long> rotateRefreshTokenScript;
+    private final DefaultRedisScript<Long> issueAccessFromRefreshScript;
 
     /**
      * 加载 classpath 中的 Lua 脚本。脚本文本由 Spring 计算 SHA 并优先使用 EVALSHA，
@@ -33,7 +32,7 @@ public class RedisOAuthTokenStore implements OAuthTokenStore {
     public RedisOAuthTokenStore(StringRedisTemplate redisTemplate) {
         this.redisTemplate = redisTemplate;
         this.consumeAuthorizationCodeScript = loadScript("scripts/oauth-code-consume.lua");
-        this.rotateRefreshTokenScript = loadScript("scripts/oauth-refresh-rotate.lua");
+        this.issueAccessFromRefreshScript = loadScript("scripts/oauth-refresh-issue.lua");
     }
 
     @Override
@@ -62,22 +61,17 @@ public class RedisOAuthTokenStore implements OAuthTokenStore {
     }
 
     @Override
-    public boolean rotateRefreshToken(RefreshTokenRotation rotation) {
+    public boolean issueAccessFromRefresh(RefreshAccessRequest request) {
         List<String> keys = Arrays.asList(
-                RedisKeyUtil.oauthRefresh(rotation.oldRefreshToken()),
-                RedisKeyUtil.oauthAccess(rotation.newAccessToken()),
-                RedisKeyUtil.oauthRefresh(rotation.newRefreshToken()),
-                RedisKeyUtil.uidOauth(rotation.uid()));
+                RedisKeyUtil.oauthRefresh(request.oldRefreshToken()),
+                RedisKeyUtil.oauthAccess(request.newAccessToken()),
+                RedisKeyUtil.uidOauth(request.uid()));
 
-        Long result = redisTemplate.execute(rotateRefreshTokenScript, keys,
-                rotation.expectedOldRefreshJson(),
-                rotation.newAccessJson(),
-                Long.toString(rotation.accessTtlSeconds()),
-                rotation.newRefreshJson(),
-                Long.toString(rotation.refreshTtlSeconds()),
-                REFRESH_MEMBER_PREFIX + rotation.oldRefreshToken(),
-                ACCESS_MEMBER_PREFIX + rotation.newAccessToken(),
-                REFRESH_MEMBER_PREFIX + rotation.newRefreshToken());
+        Long result = redisTemplate.execute(issueAccessFromRefreshScript, keys,
+                request.expectedOldRefreshJson(),
+                request.newAccessJson(),
+                Long.toString(request.accessTtlSeconds()),
+                ACCESS_MEMBER_PREFIX + request.newAccessToken());
         return Long.valueOf(1L).equals(result);
     }
 

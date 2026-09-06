@@ -82,7 +82,7 @@ class RedisOAuthTokenStoreIntegrationTest {
     }
 
     @Test
-    void twentyConcurrentRefreshRotationsWriteExactlyOneCompleteTokenPair() throws Exception {
+    void twentyConcurrentRefreshesAllIssueAccessAndKeepRefreshToken() throws Exception {
         String suffix = UUID.randomUUID().toString();
         String oldRefresh = "it-old-refresh-" + suffix;
         String oldRefreshKey = RedisKeyUtil.oauthRefresh(oldRefresh);
@@ -93,72 +93,61 @@ class RedisOAuthTokenStoreIntegrationTest {
         redisTemplate.opsForValue().set(oldRefreshKey, oldJson);
         redisTemplate.opsForSet().add(indexKey, "refresh:" + oldRefresh);
 
-        List<OAuthTokenStore.RefreshTokenRotation> rotations = new ArrayList<>();
+        List<OAuthTokenStore.RefreshAccessRequest> requests = new ArrayList<>();
         for (int i = 0; i < 20; i++) {
             String access = "it-access-" + suffix + "-" + i;
-            String refresh = "it-refresh-" + suffix + "-" + i;
             keysToDelete.add(RedisKeyUtil.oauthAccess(access));
-            keysToDelete.add(RedisKeyUtil.oauthRefresh(refresh));
-            rotations.add(new OAuthTokenStore.RefreshTokenRotation(
+            requests.add(new OAuthTokenStore.RefreshAccessRequest(
                     oldRefresh, oldJson,
                     access, "{\"kind\":\"access\",\"n\":" + i + "}", 60L,
-                    refresh, "{\"kind\":\"refresh\",\"n\":" + i + "}", 120L,
                     9L));
         }
 
         List<Callable<Boolean>> actions = new ArrayList<>();
-        for (OAuthTokenStore.RefreshTokenRotation rotation : rotations) {
-            actions.add(() -> tokenStore.rotateRefreshToken(rotation));
+        for (OAuthTokenStore.RefreshAccessRequest request : requests) {
+            actions.add(() -> tokenStore.issueAccessFromRefresh(request));
         }
         int successes = runConcurrently(actions);
 
-        assertEquals(1, successes);
-        assertNull(redisTemplate.opsForValue().get(oldRefreshKey));
+        // 固定凭证模型：并发刷新全部成功签发 access，refresh 保留不动
+        assertEquals(20, successes);
+        assertEquals(oldJson, redisTemplate.opsForValue().get(oldRefreshKey));
         Set<String> members = redisTemplate.opsForSet().members(indexKey);
         assertNotNull(members);
-        assertEquals(2, members.size());
-        assertTrue(members.stream().anyMatch(member -> member.startsWith("access:it-access-")));
-        assertTrue(members.stream().anyMatch(member -> member.startsWith("refresh:it-refresh-")));
+        // 1 个 refresh 成员 + 20 个 access 成员
+        assertEquals(21, members.size());
+        assertTrue(members.contains("refresh:" + oldRefresh));
 
-        long accessRecords = rotations.stream()
-                .filter(rotation -> redisTemplate.hasKey(RedisKeyUtil.oauthAccess(rotation.newAccessToken())))
+        long accessRecords = requests.stream()
+                .filter(request -> redisTemplate.hasKey(RedisKeyUtil.oauthAccess(request.newAccessToken())))
                 .count();
-        long refreshRecords = rotations.stream()
-                .filter(rotation -> redisTemplate.hasKey(RedisKeyUtil.oauthRefresh(rotation.newRefreshToken())))
-                .count();
-        assertEquals(1L, accessRecords);
-        assertEquals(1L, refreshRecords);
+        assertEquals(20L, accessRecords);
     }
 
     @Test
-    void scriptPreflightFailureLeavesOldRefreshTokenUntouched() {
+    void scriptPreflightFailureLeavesRefreshTokenUntouched() {
         String suffix = UUID.randomUUID().toString();
         String oldRefresh = "it-old-refresh-" + suffix;
         String newAccess = "it-new-access-" + suffix;
-        String newRefresh = "it-new-refresh-" + suffix;
         String oldKey = RedisKeyUtil.oauthRefresh(oldRefresh);
         String newAccessKey = RedisKeyUtil.oauthAccess(newAccess);
-        String newRefreshKey = RedisKeyUtil.oauthRefresh(newRefresh);
         String indexKey = RedisKeyUtil.uidOauth(9L);
         String oldJson = "{\"uid\":9,\"clientId\":\"client-1\"}";
         keysToDelete.add(oldKey);
         keysToDelete.add(newAccessKey);
-        keysToDelete.add(newRefreshKey);
         keysToDelete.add(indexKey);
         redisTemplate.opsForValue().set(oldKey, oldJson);
-        // 制造错误类型：脚本期望反向索引为 Set。预检应在删除旧 token 前返回失败。
+        // 制造错误类型：脚本期望反向索引为 Set。预检应在写 access 前返回失败。
         redisTemplate.opsForValue().set(indexKey, "wrong-type");
 
-        boolean rotated = tokenStore.rotateRefreshToken(new OAuthTokenStore.RefreshTokenRotation(
+        boolean issued = tokenStore.issueAccessFromRefresh(new OAuthTokenStore.RefreshAccessRequest(
                 oldRefresh, oldJson,
                 newAccess, "{\"kind\":\"access\"}", 60L,
-                newRefresh, "{\"kind\":\"refresh\"}", 120L,
                 9L));
 
-        assertFalse(rotated);
+        assertFalse(issued);
         assertEquals(oldJson, redisTemplate.opsForValue().get(oldKey));
         assertNull(redisTemplate.opsForValue().get(newAccessKey));
-        assertNull(redisTemplate.opsForValue().get(newRefreshKey));
     }
 
     private int runConcurrently(int threads, Callable<Boolean> action) throws Exception {

@@ -22,12 +22,13 @@ public class OAuthTokenVO {
     @JsonProperty("expires_in")
     private Long expiresIn;
 
-    /** 刷新令牌 */
+    /** 刷新令牌（null 时省略；仅授权码换码且客户端登记 refresh_token grant 时返回） */
     @JsonProperty("refresh_token")
-    @JsonInclude(JsonInclude.Include.ALWAYS)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private String refreshToken;
 
-    /** 授权范围（逗号分隔） */
+    /** 授权范围（逗号分隔；null 时省略） */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private String scope;
 
     public String getAccessToken() {

@@ -45,29 +45,27 @@ public interface OAuthTokenStore {
     String readRefreshToken(String refreshToken);
 
     /**
-     * 原子轮换 refresh token。只有旧记录仍与业务层读取的原始 JSON 完全一致时，才会
-     * 删除旧 refresh token、写入新 token 对并同步用户反向索引。
+     * 原子签发 access token。refresh token 为固定凭证：有效期内可反复刷新，脚本只校验
+     * 旧 refresh 记录仍与业务层读取的原始 JSON 完全一致（未被吊销/替换），然后写入新
+     * access token 并同步用户反向索引，不删除也不换发 refresh token。
      *
-     * @param rotation 已完成序列化的新旧令牌数据
-     * @return 是否成功完成轮换；false 表示旧 token 已被其他请求消费
+     * @param request 已序列化的刷新与签发参数
+     * @return 是否成功签发；false 表示 refresh 已失效或被其他流程吊销
      */
-    boolean rotateRefreshToken(RefreshTokenRotation rotation);
+    boolean issueAccessFromRefresh(RefreshAccessRequest request);
 
     /**
-     * refresh token 原子轮换所需的完整参数。
+     * refresh token 换取 access token 所需的完整参数。
      *
      * <p>使用不可变 record 把参数作为一个整体传递，避免多个字符串/TTL 参数在调用处
      * 发生位置错配。JSON 在进入存储层前已经生成，Lua 只负责原子状态转换。</p>
      */
-    record RefreshTokenRotation(
+    record RefreshAccessRequest(
             String oldRefreshToken,
             String expectedOldRefreshJson,
             String newAccessToken,
             String newAccessJson,
             long accessTtlSeconds,
-            String newRefreshToken,
-            String newRefreshJson,
-            long refreshTtlSeconds,
             Long uid) {
     }
 }

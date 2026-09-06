@@ -183,15 +183,15 @@ class OAuthTokenServiceImplTest {
                 () -> service.refreshToken("client-1", null, "refresh-1"));
 
         assertEquals(ResultCode.OAUTH_GRANT_INVALID.getCode(), exception.getCode());
-        verify(oauthTokenStore, never()).rotateRefreshToken(any());
+        verify(oauthTokenStore, never()).issueAccessFromRefresh(any());
     }
 
     @Test
-    void refreshRotationReturnsConflictWhenOldTokenWasConsumed() throws Exception {
+    void refreshFailsWhenRefreshTokenWasRevoked() throws Exception {
         OAuthClient client = client("none", "authorization_code,refresh_token", null, 1);
         when(oauthClientMapper.selectById("client-1")).thenReturn(client);
         when(oauthTokenStore.readRefreshToken("refresh-1")).thenReturn(refreshTokenJson("client-1"));
-        when(oauthTokenStore.rotateRefreshToken(any())).thenReturn(false);
+        when(oauthTokenStore.issueAccessFromRefresh(any())).thenReturn(false);
 
         BusinessException exception = assertThrows(BusinessException.class,
                 () -> service.refreshToken("client-1", null, "refresh-1"));
@@ -200,26 +200,27 @@ class OAuthTokenServiceImplTest {
     }
 
     @Test
-    void successfulRefreshUsesAtomicStoreAndReturnsNewTokenPair() throws Exception {
+    void successfulRefreshIssuesAccessOnly() throws Exception {
         OAuthClient client = client("none", "authorization_code,refresh_token", null, 1);
         String oldJson = refreshTokenJson("client-1");
         when(oauthClientMapper.selectById("client-1")).thenReturn(client);
         when(oauthTokenStore.readRefreshToken("refresh-1")).thenReturn(oldJson);
-        when(oauthTokenStore.rotateRefreshToken(any())).thenReturn(true);
+        when(oauthTokenStore.issueAccessFromRefresh(any())).thenReturn(true);
 
         OAuthTokenVO token = service.refreshToken("client-1", null, "refresh-1");
 
         assertNotNull(token.getAccessToken());
-        assertNotNull(token.getRefreshToken());
-        ArgumentCaptor<OAuthTokenStore.RefreshTokenRotation> captor =
-                ArgumentCaptor.forClass(OAuthTokenStore.RefreshTokenRotation.class);
-        verify(oauthTokenStore).rotateRefreshToken(captor.capture());
-        OAuthTokenStore.RefreshTokenRotation rotation = captor.getValue();
-        assertEquals("refresh-1", rotation.oldRefreshToken());
-        assertEquals(oldJson, rotation.expectedOldRefreshJson());
-        assertEquals(9L, rotation.uid());
-        assertEquals(7200L, rotation.accessTtlSeconds());
-        assertEquals(86400L, rotation.refreshTtlSeconds());
+        // 固定凭证：refresh_token 不换发、scope 不变，响应均不返回这两个字段
+        assertNull(token.getRefreshToken());
+        assertNull(token.getScope());
+        ArgumentCaptor<OAuthTokenStore.RefreshAccessRequest> captor =
+                ArgumentCaptor.forClass(OAuthTokenStore.RefreshAccessRequest.class);
+        verify(oauthTokenStore).issueAccessFromRefresh(captor.capture());
+        OAuthTokenStore.RefreshAccessRequest request = captor.getValue();
+        assertEquals("refresh-1", request.oldRefreshToken());
+        assertEquals(oldJson, request.expectedOldRefreshJson());
+        assertEquals(9L, request.uid());
+        assertEquals(7200L, request.accessTtlSeconds());
     }
 
     @Test
@@ -260,7 +261,6 @@ class OAuthTokenServiceImplTest {
         record.put("uid", 9L);
         record.put("clientId", clientId);
         record.put("scope", "user.read");
-        record.put("accessToken", "old-access");
         return objectMapper.writeValueAsString(record);
     }
 

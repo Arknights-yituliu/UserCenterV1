@@ -52,7 +52,8 @@ import java.util.concurrent.TimeUnit;
  *   <li>授权码在全部安全校验通过后由 Lua 原子消费，非法请求不能提前烧毁合法 code</li>
  *   <li>授权码绑定客户端与回调地址，防止跨客户端盗用</li>
  *   <li>PKCE S256 校验；客户端强制 PKCE 时未携带 challenge 直接拒绝</li>
- *   <li>refresh_token 通过 Lua 一次性轮换，并发请求最多一个成功</li>
+ *   <li>refresh_token 为固定凭证：有效期内可反复刷新，刷新只签发新 access_token，
+ *       不删除不换发；吊销 refresh_token 时级联吊销同 uid 同 client 的 access_token</li>
  * </ul>
  *
  * @author UserCenter
@@ -479,7 +480,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         Map<String, Object> record = readJsonMapValue(rawRecord);
 
         // 2. 先校验令牌归属，再校验客户端当前状态、认证方式和 refresh_token grant。
-        // 任一步失败都不会删除旧 refresh token。
+        // 任一步失败都不会对令牌做任何变更。
         if (!Objects.equals(clientId, record.get("clientId"))) {
             throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID, "刷新令牌与客户端不匹配");
         }
@@ -487,29 +488,26 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         requireGrantAllowed(client, OAuthGrantType.REFRESH_TOKEN);
         authenticateClient(client, clientSecret);
 
-        // 3. 预生成新 token 和 JSON。生成动作没有外部副作用；只有 Lua 成功后这些值
-        // 才会出现在 Redis 和响应中，因此失败请求不会留下半成品令牌。
+        // 3. 预生成新 access token 和 JSON。生成动作没有外部副作用；只有 Lua 成功后
+        // 这些值才会出现在 Redis 和响应中，因此失败请求不会留下半成品令牌。
         Long uid = ((Number) record.get("uid")).longValue();
         String scope = (String) record.get("scope");
         long accessTtl = resolveAccessTokenTtl(client);
-        long refreshTtl = resolveRefreshTokenTtl(client);
         String newAccessToken = OAuthUtil.generateToken();
-        String newRefreshToken = OAuthUtil.generateToken();
         String accessJson = writeJsonValue(createAccessRecord(client, uid, scope));
-        String refreshJson = writeJsonValue(createRefreshRecord(client, uid, scope, newAccessToken));
 
-        OAuthTokenStore.RefreshTokenRotation rotation = new OAuthTokenStore.RefreshTokenRotation(
+        OAuthTokenStore.RefreshAccessRequest request = new OAuthTokenStore.RefreshAccessRequest(
                 refreshToken, rawRecord,
                 newAccessToken, accessJson, accessTtl,
-                newRefreshToken, refreshJson, refreshTtl,
                 uid);
 
-        // 4. Lua 将“比较旧值、删除旧 refresh、写入新 token 对、更新反向索引”作为
-        // 一个原子状态转换执行。并发中的失败方统一返回 90009，不能重试旧 token。
-        if (!oauthTokenStore.rotateRefreshToken(rotation)) {
-            throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID, "刷新令牌已被使用");
+        // 4. Lua 将“校验 refresh 仍有效、写入新 access、更新反向索引”作为原子状态转换。
+        // refresh_token 为固定凭证，不删除不换发；失败说明它已被吊销或失效，返回 90009。
+        if (!oauthTokenStore.issueAccessFromRefresh(request)) {
+            throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID, "刷新令牌已失效或已被吊销");
         }
-        return buildTokenResponse(newAccessToken, newRefreshToken, accessTtl, scope);
+        // 刷新只签发新 access_token：refresh_token 未变、scope 未变，均无需回传
+        return buildTokenResponse(newAccessToken, null, accessTtl, null);
     }
 
     /**
@@ -533,7 +531,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
                     clientId, redirectUri, StringUtils.hasText(codeVerifier) ? "yes" : "no");
             return exchangeToken(clientId, clientSecret, code, redirectUri, codeVerifier);
         }
-        // 2. 刷新令牌：一次性轮换签发新令牌对
+        // 2. 刷新令牌：签发新 access_token（refresh_token 固定复用，不换发）
         if ("refresh_token".equals(grantType)) {
             LogUtil.debug(OAuthTokenServiceImpl.class, "[OAuth] 刷新令牌: clientId={}", clientId);
             return refreshToken(clientId, clientSecret, refreshToken);
@@ -666,7 +664,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
             long refreshTtl = resolveRefreshTokenTtl(client);
             refreshToken = OAuthUtil.generateToken();
             writeJson(RedisKeyUtil.oauthRefresh(refreshToken),
-                    createRefreshRecord(client, uid, scope, accessToken), refreshTtl);
+                    createRefreshRecord(client, uid, scope), refreshTtl);
             stringRedisTemplate.opsForSet().add(
                     RedisKeyUtil.uidOauth(uid), OAUTH_REFRESH_MEMBER_PREFIX + refreshToken);
         }
@@ -683,13 +681,12 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         return record;
     }
 
-    /** 创建 refresh token 记录，并绑定本次一同签发的 access token 供吊销联动。 */
-    private Map<String, Object> createRefreshRecord(OAuthClient client, Long uid, String scope, String accessToken) {
+    /** 创建 refresh token 记录（固定凭证，不绑定派生 access；吊销时按 uid+clientId 级联）。 */
+    private Map<String, Object> createRefreshRecord(OAuthClient client, Long uid, String scope) {
         Map<String, Object> record = new HashMap<>();
         record.put("uid", uid);
         record.put("clientId", client.getId());
         record.put("scope", scope);
-        record.put("accessToken", accessToken);
         return record;
     }
 
@@ -703,7 +700,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         return client.getRefreshTokenTtl() != null ? client.getRefreshTokenTtl() : refreshTokenTtlSeconds;
     }
 
-    /** 组装 OAuth 标准字段响应；公共或禁用 refresh grant 的客户端传入 null。 */
+    /** 组装 OAuth 标准字段响应；refreshToken/scope 传 null 时序列化省略（刷新场景仅返回新 access_token） */
     private OAuthTokenVO buildTokenResponse(String accessToken, String refreshToken, long accessTtl, String scope) {
         OAuthTokenVO vo = new OAuthTokenVO();
         vo.setAccessToken(accessToken);

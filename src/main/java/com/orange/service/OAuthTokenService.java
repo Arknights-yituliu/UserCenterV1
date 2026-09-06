@@ -103,7 +103,9 @@ public interface OAuthTokenService {
                                String redirectUri, String codeVerifier);
 
     /**
-     * 刷新令牌：refresh_token 一次性轮换，返回新的 access_token + refresh_token
+     * 刷新令牌：refresh_token 为固定凭证，有效期内可反复使用；每次刷新只签发新的
+     * access_token，不删除也不换发 refresh_token（响应仅含 access_token，不含
+     * refresh_token / scope）
      *
      * @param clientId     客户端 ID
      * @param clientSecret 客户端密钥（公共客户端传空）

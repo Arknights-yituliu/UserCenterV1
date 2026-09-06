@@ -167,13 +167,7 @@ grant_type=authorization_code
 }
 ```
 
-只有客户端登记了 `refresh_token` grant 时才会签发 refresh token，否则：
-
-```json
-{
-  "refresh_token": null
-}
-```
+只有客户端登记了 `refresh_token` grant 时才会签发 refresh token；否则响应体不包含 `refresh_token` 字段（`access_token`、`token_type`、`expires_in` 照常返回）。
 
 授权码只能成功兑换一次。业务后端应立即删除本次授权对应的 `state` 和 `code_verifier`，并且不得在日志、监控或错误上报中记录 `client_secret`、授权码、`code_verifier` 或令牌。
 
@@ -228,14 +222,25 @@ grant_type=refresh_token
 &refresh_token={REFRESH_TOKEN}
 ```
 
-成功响应格式与授权码换取令牌相同，并返回新的 access token 和 refresh token。
+成功响应格式与授权码换取令牌相同，仅返回新的 access token（refresh_token 未变、scope 未变，均不返回）：
 
-refresh token 采用一次性轮换：
+```json
+{
+  "code": 200,
+  "msg": "操作成功",
+  "data": {
+    "access_token": "access_token_value_2",
+    "token_type": "Bearer",
+    "expires_in": 7200
+  }
+}
+```
 
-- 刷新成功后，原子保存响应中的新 access token 和 refresh token。
-- 旧 refresh token 立即失效，不能再次使用。
-- 不要并发发起刷新请求；相同 refresh token 最多一个请求成功。
-- 刷新返回 `90009` 时清除本地令牌，并让用户重新发起授权。
+refresh token 为固定凭证：
+
+- 默认 90 天有效（从签发起算），有效期内可反复刷新，服务端不删除、不换发。
+- 每次刷新只签发新的 access token；本地无需更新 refresh token。
+- 刷新返回 `90009` 时表示 refresh token 已过期或被吊销，清除本地令牌并重新发起授权。
 
 每次刷新都必须提交当前有效的 `client_secret`。客户端密钥轮换后，应立即让所有后端实例使用新密钥；旧密钥不能继续刷新令牌。
 
@@ -252,7 +257,7 @@ client_id={CLIENT_ID}
 &token={TOKEN}
 ```
 
-`token` 可以是 access token 或 refresh token。吊销 refresh token 时，与其关联的 access token 会同时失效。
+`token` 可以是 access token 或 refresh token。吊销 refresh token 时，它派生的 access token（同一客户端名下）会被级联吊销。
 
 成功响应：
 
@@ -290,7 +295,7 @@ client_id={CLIENT_ID}
 | `90006` | grant type 未登记 | 检查客户端授权类型配置 |
 | `90007` | 客户端密钥校验失败 | 检查后端使用的密钥是否缺失、错误或已经轮换 |
 | `90008` | PKCE 校验失败 | 检查本次请求保存的 `code_verifier` |
-| `90009` | 令牌无效、过期或已使用 | 清除令牌并重新授权 |
+| `90009` | 令牌无效或已过期（含 refresh token 已被吊销） | 清除令牌并重新授权 |
 | `90013` | 客户端待审批或已被管理员封禁 | 联系管理员完成审批或解除封禁 |
 
 ## 10. 接入检查
@@ -304,6 +309,6 @@ client_id={CLIENT_ID}
 - 表单请求使用 `application/x-www-form-urlencoded`，不使用 `client_secret_basic`。
 - UserCenter 令牌保存在后端，浏览器使用业务系统自己的安全会话。
 - API 成功与否按响应体 `code` 判断。
-- 刷新成功后原子替换本地 access token 和 refresh token。
+- 刷新成功后更新本地 access token；refresh token 固定复用，无需替换。
 - 日志、URL、监控和错误上报不记录密钥、授权码、PKCE verifier 或令牌。
 - 客户端密钥轮换后，所有后端实例同步切换到新密钥。
