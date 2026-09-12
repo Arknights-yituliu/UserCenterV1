@@ -210,18 +210,6 @@ Authorization: Bearer {ACCESS_TOKEN}
 | `nickname` | 用户昵称，可能为 `null` |
 | `avatar` | 头像地址，可能为 `null` |
 
-`access_token` 缺失、无效或已过期时，UserCenter 的 OAuth 拦截器返回错误码 `80001`（HTTP 状态仍为 200），不会返回 `90009`：
-
-```json
-{
-  "code": 80001,
-  "msg": "未登录或登录已失效",
-  "data": null
-}
-```
-
-收到 `80001` 时应清除本地 access_token / refresh_token，引导用户重新发起授权。
-
 ## 7. 刷新令牌
 
 仅当客户端登记了 `refresh_token` grant 且换码响应返回了 refresh token 时调用。
@@ -298,9 +286,9 @@ client_id={CLIENT_ID}&token={TOKEN}
 
 | code | 含义 | 接入方处理 |
 | --- | --- | --- |
-| `10001` | 参数错误（例如 authorize 的 `response_type` 仅支持 `code`） | 按本文档参数表传参 |
-| `40001` | 系统繁忙（请求缺少必填参数时的兜底返回；或客户端要求授权确认但服务端未配置 `consent-page-url`） | 先补全必填参数；仍复现时联系管理员检查 OAuth 服务端配置 |
-| `80001` | 未登录或登录已失效（拦截器返回：未携带或无效/过期的 access_token 访问受保护资源接口；authorize 未配置登录页跳转时，未登录请求同样返回此码） | 清除令牌并重新发起授权 |
+| `10001` | 参数错误 | `response_type` 不是 `code` 时，修正授权请求参数 |
+| `40001` | 系统繁忙 | 服务端配置或未处理异常，稍后重试并联系管理员 |
+| `80001` | 未登录或登录已失效 | 用户信息接口未携带有效 access token，重新获取令牌 |
 | `90001` | 客户端不存在或所有者已停用 | 停止登录并联系管理员 |
 | `90002` | 回调地址不匹配 | 检查 `redirect_uri` 是否与登记值完全一致 |
 | `90003` | scope 未授权 | 只申请已批准的 scope |
