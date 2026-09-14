@@ -140,6 +140,16 @@ public class AuthServiceImpl implements AuthService {
     @Value("${user-center.oauth.direct-rate-limit.register.window-seconds:3600}")
     private long directRegisterWindowSeconds = 3600;
 
+    /** 主站注册限流配置：与直连注册同量级，避免 /auth/register 被用于批量探测邮箱是否已注册。 */
+    @Value("${user-center.register-rate-limit.ip-limit:10}")
+    private long registerIpLimit = 10;
+
+    @Value("${user-center.register-rate-limit.email-limit:3}")
+    private long registerEmailLimit = 3;
+
+    @Value("${user-center.register-rate-limit.window-seconds:3600}")
+    private long registerWindowSeconds = 3600;
+
     /**
      * 构造器注入依赖
      *
@@ -181,14 +191,20 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public LoginVO register(RegisterRequest request, String ip, String clientId) {
+        // 先按来源 IP 和邮箱限流，防止无凭证批量探测邮箱/用户名占用
+        enforceRegisterRateLimit("register", ip, request.getEmail(),
+                registerIpLimit, registerEmailLimit, registerWindowSeconds);
         // 校验 + 创建用户（含邮箱验证码校验、唯一性校验、密码加密）
         UserInfo user = createRegisteredUser(request, ip);
         return buildLoginVO(user, createSession(user.getUid(), clientId));
     }
 
     /**
-     * 创建注册用户：校验注册参数（邮箱/用户名至少一个、唯一性、邮箱验证码、密码），
+     * 创建注册用户：校验注册参数（邮箱/用户名至少一个、邮箱验证码、密码、唯一性），
      * 加密密码并落库（主站注册与直连注册共用）
+     *
+     * <p>唯一性校验刻意排在邮箱验证码校验之后：探测某邮箱是否已注册必须先持有该邮箱收到的
+     * 验证码，避免本方法退化为无需任何凭证即可批量枚举注册账号的入口。</p>
      *
      * @param request 注册参数
      * @param ip      注册 IP
@@ -202,16 +218,6 @@ public class AuthServiceImpl implements AuthService {
         // 邮箱与用户名至少提供一个作为登录凭证
         if (!hasEmail && !hasUserName) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "邮箱和用户名至少填写一个");
-        }
-        // 邮箱唯一性校验（填了才校验）
-        if (hasEmail && userMapper.selectCount(Wrappers.<UserInfo>lambdaQuery()
-                .eq(UserInfo::getEmail, email)) > 0) {
-            throw new BusinessException(ResultCode.EMAIL_ALREADY_EXISTS);
-        }
-        // 用户名唯一性校验（填了才校验）
-        if (hasUserName && userMapper.selectCount(Wrappers.<UserInfo>lambdaQuery()
-                .eq(UserInfo::getUserName, userName)) > 0) {
-            throw new BusinessException(ResultCode.USERNAME_ALREADY_EXISTS);
         }
 
         UserInfo user = new UserInfo();
@@ -247,6 +253,17 @@ public class AuthServiceImpl implements AuthService {
             }
         } else {
             throw new BusinessException(ResultCode.PARAM_ERROR, "不支持的注册方式");
+        }
+
+        // 邮箱唯一性校验（填了才校验）
+        if (hasEmail && userMapper.selectCount(Wrappers.<UserInfo>lambdaQuery()
+                .eq(UserInfo::getEmail, email)) > 0) {
+            throw new BusinessException(ResultCode.EMAIL_ALREADY_EXISTS);
+        }
+        // 用户名唯一性校验（填了才校验）
+        if (hasUserName && userMapper.selectCount(Wrappers.<UserInfo>lambdaQuery()
+                .eq(UserInfo::getUserName, userName)) > 0) {
+            throw new BusinessException(ResultCode.USERNAME_ALREADY_EXISTS);
         }
 
         userMapper.insert(user);
@@ -513,7 +530,8 @@ public class AuthServiceImpl implements AuthService {
     @Transactional(rollbackFor = Exception.class)
     public DirectLoginTicketVO directRegister(String channel, RegisterRequest request, String ip) {
         // 1. 先按来源 IP 和邮箱限流，验证码发送频控由 EmailCodeService 统一执行。
-        enforceDirectRegisterRateLimit(ip, request.getEmail());
+        enforceRegisterRateLimit("direct-register", ip, request.getEmail(),
+                directRegisterIpLimit, directRegisterEmailLimit, directRegisterWindowSeconds);
         // 2. 校验发起会话凭证有效，并重新检查客户端状态和直连权限。
         String clientId = readDirectChannel(channel);
         OAuthClient client = requireEnabledOAuthClient(clientId);
@@ -620,16 +638,29 @@ public class AuthServiceImpl implements AuthService {
         }
     }
 
-    private void enforceDirectRegisterRateLimit(String sourceIp, String email) {
+    /**
+     * 注册限流：按来源 IP 与邮箱双维度计数，主站注册与旧系统直连注册共用
+     *
+     * <p>计数桶按 biz 前缀隔离（register-* 与 direct-register-* 互不影响），
+     * 阈值与窗口由各自调用方传入。</p>
+     *
+     * @param biz           计数桶业务前缀
+     * @param sourceIp      来源 IP
+     * @param email         注册邮箱（为空则跳过邮箱维度计数）
+     * @param ipLimit       窗口内同 IP 最大注册尝试次数
+     * @param emailLimit    窗口内同邮箱最大注册尝试次数
+     * @param windowSeconds 计数窗口（秒）
+     */
+    private void enforceRegisterRateLimit(String biz, String sourceIp, String email,
+                                          long ipLimit, long emailLimit, long windowSeconds) {
         String ip = normalizeRateTarget(sourceIp);
-        if (!RedisRateLimiter.tryAcquire(stringRedisTemplate, RedisKeyUtil.rate("direct-register-ip", ip),
-                directRegisterIpLimit, directRegisterWindowSeconds)) {
+        if (!RedisRateLimiter.tryAcquire(stringRedisTemplate, RedisKeyUtil.rate(biz + "-ip", ip),
+                ipLimit, windowSeconds)) {
             throw new BusinessException(ResultCode.IP_RATE_LIMITED);
         }
         String normalizedEmail = normalizeRateTarget(email);
         if (!normalizedEmail.isEmpty() && !RedisRateLimiter.tryAcquire(stringRedisTemplate,
-                RedisKeyUtil.rate("direct-register-email", normalizedEmail), directRegisterEmailLimit,
-                directRegisterWindowSeconds)) {
+                RedisKeyUtil.rate(biz + "-email", normalizedEmail), emailLimit, windowSeconds)) {
             throw new BusinessException(ResultCode.IP_RATE_LIMITED);
         }
     }
