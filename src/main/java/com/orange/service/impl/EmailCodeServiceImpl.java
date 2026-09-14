@@ -1,9 +1,12 @@
 package com.orange.service.impl;
 
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.util.RedisKeyUtil;
 import com.orange.common.util.RedisRateLimiter;
+import com.orange.entity.po.UserInfo;
+import com.orange.mapper.UserInfoMapper;
 import com.orange.service.EmailCodeService;
 import com.orange.service.MailService;
 import org.springframework.beans.factory.annotation.Value;
@@ -16,6 +19,9 @@ import java.util.concurrent.TimeUnit;
 /**
  * 邮箱验证码服务实现（Redis 存储，5 分钟过期，一次性使用）
  *
+ * <p>register 用途在发信前先查邮箱是否已注册，已注册则直接报错，避免用户填完注册表单
+ * 才被拒且被邮箱维度限流锁住。</p>
+ *
  * @author UserCenter
  */
 @Service
@@ -24,8 +30,12 @@ public class EmailCodeServiceImpl implements EmailCodeService {
     /** 验证码位数 */
     private static final int CODE_LENGTH = 6;
 
+    /** 注册用途标识：仅此用途需要在发信前校验邮箱未被占用 */
+    private static final String USAGE_REGISTER = "register";
+
     private final StringRedisTemplate stringRedisTemplate;
     private final MailService mailService;
+    private final UserInfoMapper userMapper;
 
     /** 验证码有效期（秒） */
     @Value("${user-center.code-ttl-seconds:300}")
@@ -56,14 +66,21 @@ public class EmailCodeServiceImpl implements EmailCodeService {
      *
      * @param stringRedisTemplate Redis 客户端
      * @param mailService         邮件服务
+     * @param userMapper          用户 Mapper（注册用途发信前查邮箱占用）
      */
-    public EmailCodeServiceImpl(StringRedisTemplate stringRedisTemplate, MailService mailService) {
+    public EmailCodeServiceImpl(StringRedisTemplate stringRedisTemplate, MailService mailService,
+                                UserInfoMapper userMapper) {
         this.stringRedisTemplate = stringRedisTemplate;
         this.mailService = mailService;
+        this.userMapper = userMapper;
     }
 
     /**
      * 发送邮箱验证码（带发送限流）
+     *
+     * <p>register 用途在通过 IP 限流后、消耗邮箱限流额度前先查邮箱占用，
+     * 已注册则抛 EMAIL_ALREADY_EXISTS：既不发信，也不会把该邮箱锁进 5 分钟发送间隔，
+     * 用户可立即改用其他邮箱或转去登录。</p>
      *
      * @param email 目标邮箱
      * @param usage 验证码用途
@@ -76,6 +93,10 @@ public class EmailCodeServiceImpl implements EmailCodeService {
                 RedisKeyUtil.rate("send-code", ip), 1, ipIntervalSeconds)) {
             throw new BusinessException(ResultCode.CODE_SEND_TOO_FREQUENT,
                     "同 IP 发送过于频繁，请 " + ipIntervalSeconds + " 秒后再试");
+        }
+        // 注册用途前置查重：邮箱已注册则快速失败，无需等到提交注册才报错
+        if (USAGE_REGISTER.equals(usage) && isEmailRegistered(email)) {
+            throw new BusinessException(ResultCode.EMAIL_ALREADY_EXISTS);
         }
         // 同邮箱限流：间隔内只能发送一次
         if (!RedisRateLimiter.tryAcquire(stringRedisTemplate,
@@ -90,7 +111,7 @@ public class EmailCodeServiceImpl implements EmailCodeService {
 
         // 按业务场景选择邮件模板：注册 57132、登录 57133、重置/换绑等其他沿用默认
         Long templateId = switch (usage) {
-            case "register" -> registerTemplateId;
+            case USAGE_REGISTER -> registerTemplateId;
             case "login" -> loginTemplateId;
             default -> defaultTemplateId;
         };
@@ -118,6 +139,17 @@ public class EmailCodeServiceImpl implements EmailCodeService {
             throw new BusinessException(ResultCode.CODE_ERROR);
         }
         stringRedisTemplate.delete(key);
+    }
+
+    /**
+     * 查询邮箱是否已被注册（与注册时的唯一性校验口径一致）
+     *
+     * @param email 待查邮箱
+     * @return true=已存在同邮箱用户
+     */
+    private boolean isEmailRegistered(String email) {
+        return userMapper.selectCount(Wrappers.<UserInfo>lambdaQuery()
+                .eq(UserInfo::getEmail, email)) > 0;
     }
 
     /**
