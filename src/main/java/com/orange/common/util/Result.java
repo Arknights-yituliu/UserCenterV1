@@ -69,6 +69,20 @@ public class Result<T> {
     }
 
     /**
+     * 失败返回（自定义错误码、消息与附加数据）
+     *
+     * <p>用于错误响应仍需携带结构化数据的场景，例如限流返回等待秒数。</p>
+     *
+     * @param code 错误码
+     * @param msg  错误消息
+     * @param data 附加数据
+     * @return 失败结果
+     */
+    public static <T> Result<T> error(int code, String msg, T data) {
+        return new Result<>(code, msg, data);
+    }
+
+    /**
      * 判断结果是否成功
      *
      * @return 是否成功

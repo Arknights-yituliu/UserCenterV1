@@ -187,3 +187,61 @@ CREATE TABLE `oauth_grant` (
     KEY `idx_oauth_grant_uid` (`uid`, `revoked`, `expire_time`)
 ) ENGINE = InnoDB COMMENT = 'OAuth refresh_token 授权台账';
 
+-- -------------------------------------------------------------
+-- 10. 游戏账号与用户中心账号的多对多绑定关系
+--
+-- 一个 uid 可绑定多个 ak_uid，一个 ak_uid 也可被多个 uid 绑定；
+-- 干员数据只按 ak_uid 存一份，绑定表只存授权关系。
+-- 已有库请改用 db/migrate_ak_operator.sql 增量迁移。
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `ak_account_binding`;
+CREATE TABLE `ak_account_binding` (
+    `ak_uid`    VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '游戏账号UID，一套干员数据的归属键',
+    `owner_uid` BIGINT      NOT NULL COMMENT '绑定此游戏账号的用户中心UID，同一游戏账号可有多个用户',
+    `client_id` VARCHAR(64) NOT NULL COMMENT '绑定时的接入客户端ID，供鉴权隔离',
+    PRIMARY KEY (`ak_uid`, `owner_uid`, `client_id`),
+    KEY `idx_owner_accounts` (`owner_uid`, `client_id`, `ak_uid`) COMMENT '按当前用户和客户端查询已绑定游戏账号'
+) ENGINE = InnoDB COMMENT = '游戏账号与用户中心账号多对多绑定关系，按三字段去重';
+
+-- -------------------------------------------------------------
+-- 11. 按游戏账号 UID 去重的共享角色信息
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `ak_player_info`;
+CREATE TABLE `ak_player_info` (
+    `id`                BIGINT       NOT NULL AUTO_INCREMENT COMMENT '游戏角色数据库行ID，用于更新角色信息',
+    `ak_nick_name`      VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '游戏角色昵称',
+    `ak_uid`            VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '游戏角色UID，与绑定表及干员表采用相同类型和排序规则',
+    `channel_name`      VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '渠道名称，可为空',
+    `channel_master_id` INT          DEFAULT NULL COMMENT '渠道主ID，可为空',
+    `delete_flag`       BIT(1)       NOT NULL DEFAULT b'0' COMMENT '角色信息是否已逻辑删除，0为有效、1为删除',
+    `update_time`       BIGINT       DEFAULT NULL COMMENT '角色信息最后一次实际变更的Unix毫秒时间戳，服务端生成',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_role_ak_uid` (`ak_uid`) COMMENT '每个游戏角色UID只保存一份角色信息'
+) ENGINE = InnoDB COMMENT = '按游戏角色UID去重的共享游戏角色信息';
+
+-- -------------------------------------------------------------
+-- 12. 游戏账号干员数据（一行一个干员，按 ak_uid 归属）
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `operator_progression_data`;
+CREATE TABLE `operator_progression_data` (
+    `id`               BIGINT      NOT NULL AUTO_INCREMENT COMMENT '数据库自增行ID，响应中称recordId',
+    `ak_uid`           VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '游戏账号UID，按此账号读取与更新',
+    `operator_id`      VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '稳定干员编码，对应JSON中的id',
+    `rarity`           TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '干员星级，0表示未提供；业务代码筛选',
+    `level`            SMALLINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '干员等级',
+    `evolve_phase`     TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '精英化阶段',
+    `main_skill_level` TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '基础技能等级',
+    `skill1`           TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '技能1等级或状态，具体业务含义待确认',
+    `skill2`           TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '技能2等级或状态，具体业务含义待确认',
+    `skill3`           TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '技能3等级或状态，具体业务含义待确认',
+    `equip_x`          TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'X模组数值，具体业务含义待确认',
+    `equip_y`          TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Y模组数值，具体业务含义待确认',
+    `equip_d`          TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'D模组数值，具体业务含义待确认',
+    `equip_a`          TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'A模组数值，具体业务含义待确认',
+    `equip_b`          TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'B模组数值，具体业务含义待确认',
+    `potential_rank`   TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '潜能等级，不是星级',
+    `updated_at`       DATETIME(3) NOT NULL COMMENT '该干员最后一次实际变更时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_ak_operator` (`ak_uid`, `operator_id`) COMMENT '一个游戏账号下每个干员编码仅一条记录，支持全量读取'
+) ENGINE = InnoDB COMMENT = '游戏账号干员数据';
+
