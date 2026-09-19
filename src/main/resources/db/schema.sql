@@ -208,13 +208,9 @@ CREATE TABLE `ak_account_binding` (
 -- -------------------------------------------------------------
 DROP TABLE IF EXISTS `ak_player_info`;
 CREATE TABLE `ak_player_info` (
-    `id`                BIGINT       NOT NULL AUTO_INCREMENT COMMENT '游戏角色数据库行ID，用于更新角色信息',
-    `ak_nick_name`      VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '游戏角色昵称',
-    `ak_uid`            VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '游戏角色UID，与绑定表及干员表采用相同类型和排序规则',
-    `channel_name`      VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '渠道名称，可为空',
-    `channel_master_id` INT          DEFAULT NULL COMMENT '渠道主ID，可为空',
-    `delete_flag`       BIT(1)       NOT NULL DEFAULT b'0' COMMENT '角色信息是否已逻辑删除，0为有效、1为删除',
-    `update_time`       BIGINT       DEFAULT NULL COMMENT '角色信息最后一次实际变更的Unix毫秒时间戳，服务端生成',
+    `id`          BIGINT      NOT NULL AUTO_INCREMENT COMMENT '游戏角色数据库行ID',
+    `ak_uid`      VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '游戏角色UID，与绑定表及干员表采用相同类型和排序规则',
+    `create_time` BIGINT      NOT NULL COMMENT '记录创建时间的Unix毫秒时间戳，服务端生成',
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_role_ak_uid` (`ak_uid`) COMMENT '每个游戏角色UID只保存一份角色信息'
 ) ENGINE = InnoDB COMMENT = '按游戏角色UID去重的共享游戏角色信息';

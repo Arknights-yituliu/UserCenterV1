@@ -110,8 +110,8 @@ public class AkAccountServiceImpl implements AkAccountService {
         List<AkAccountVO> accounts = new ArrayList<>(akUids.size());
         for (String akUid : akUids) {
             AkPlayerInfo info = infoMap.get(akUid);
-            // 角色信息缺失或已逻辑删除时不展示，但保留绑定关系本身
-            if (info == null || Boolean.TRUE.equals(info.getDeleteFlag())) {
+            // 角色信息缺失时不展示，但保留绑定关系本身
+            if (info == null) {
                 continue;
             }
             accounts.add(toAccountVO(info));
@@ -161,8 +161,7 @@ public class AkAccountServiceImpl implements AkAccountService {
         // 参数校验通过后占用该 ak_uid 的限流名额；首次上传不做凭据校验，绑定关系由写事务建立
         acquireSaveQuota(akUid);
 
-        AkPlayerInfo playerInfo = toPlayerInfo(akUid, playerInfoRequest);
-        return saveWithRetry(akUid, uid, clientId, playerInfo, operators);
+        return saveWithRetry(akUid, uid, clientId, operators);
     }
 
     /**
@@ -170,21 +169,19 @@ public class AkAccountServiceImpl implements AkAccountService {
      *
      * <p>限流名额只在首次执行前占用一次，内部重试不重复占用。</p>
      *
-     * @param akUid      游戏账号 UID
-     * @param uid        用户中心 UID
-     * @param clientId   客户端标识
-     * @param playerInfo 本次提交的角色信息
-     * @param operators  本次提交的干员记录（已归一化）
+     * @param akUid     游戏账号 UID
+     * @param uid       用户中心 UID
+     * @param clientId  客户端标识
+     * @param operators 本次提交的干员记录（已归一化）
      * @return 新增/更新/未变更条数统计
      */
     private OperatorSaveResultVO saveWithRetry(String akUid,
                                               Long uid,
                                               String clientId,
-                                              AkPlayerInfo playerInfo,
                                               List<OperatorProgressionData> operators) {
         for (int attempt = 0; ; attempt++) {
             try {
-                return saveExecutor.save(akUid, uid, clientId, playerInfo, operators);
+                return saveExecutor.save(akUid, uid, clientId, operators);
             } catch (DuplicateKeyException | PessimisticLockingFailureException e) {
                 if (attempt >= SAVE_MAX_RETRY) {
                     log.warn("干员数据保存冲突重试耗尽, akUidHash={}, attempts={}",
@@ -282,23 +279,6 @@ public class AkAccountServiceImpl implements AkAccountService {
     }
 
     /**
-     * 将角色信息请求转换为落库实体（id、deleteFlag、updateTime 由服务端维护）
-     *
-     * @param akUid    游戏账号 UID
-     * @param request  客户端提交的角色信息（完整状态）
-     * @return 角色信息落库实体
-     */
-    private AkPlayerInfo toPlayerInfo(String akUid, AkPlayerInfoRequest request) {
-        AkPlayerInfo info = new AkPlayerInfo();
-        info.setAkUid(akUid);
-        info.setAkNickName(request.getAkNickName());
-        // 可空渠道字段保持 null，表示清空该字段而不是沿用旧值
-        info.setChannelName(request.getChannelName());
-        info.setChannelMasterId(request.getChannelMasterId());
-        return info;
-    }
-
-    /**
      * 批量读取角色信息并按 ak_uid 建立映射
      *
      * @param akUids 游戏账号 UID 列表，调用方保证非空
@@ -322,9 +302,6 @@ public class AkAccountServiceImpl implements AkAccountService {
     private AkAccountVO toAccountVO(AkPlayerInfo info) {
         AkAccountVO vo = new AkAccountVO();
         vo.setAkUid(info.getAkUid());
-        vo.setAkNickName(info.getAkNickName());
-        vo.setChannelName(info.getChannelName());
-        vo.setChannelMasterId(info.getChannelMasterId());
         return vo;
     }
 

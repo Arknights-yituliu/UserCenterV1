@@ -14,7 +14,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 /**
  * 干员数据保存写事务执行器
@@ -60,7 +59,6 @@ public class AkOperatorSaveExecutor {
      * @param akUid              游戏账号 UID
      * @param uid                用户中心 UID
      * @param clientId           客户端标识
-     * @param submittedPlayerInfo 本次提交的角色信息（已归一化，id/deleteFlag/updateTime 由服务端维护）
      * @param submittedOperators 本次提交的干员记录（已归一化，数值字段非空）
      * @return 新增/更新/未变更条数统计
      */
@@ -68,12 +66,9 @@ public class AkOperatorSaveExecutor {
     public OperatorSaveResultVO save(String akUid,
                                      Long uid,
                                      String clientId,
-                                     AkPlayerInfo submittedPlayerInfo,
                                      List<OperatorProgressionData> submittedOperators) {
-        // 重试场景下清除上一次尝试可能回填的行 ID，保证插入仍走数据库自增
-        submittedPlayerInfo.setId(null);
         ensureBinding(akUid, uid, clientId);
-        savePlayerInfo(akUid, submittedPlayerInfo);
+        savePlayerInfo(akUid);
         return saveOperators(akUid, submittedOperators);
     }
 
@@ -91,38 +86,18 @@ public class AkOperatorSaveExecutor {
     }
 
     /**
-     * 保存角色信息：无则插入完整角色信息，有则仅在昵称/渠道元数据实际变化时按行 ID 更新
+     * 保存角色信息：该 ak_uid 无记录时插入一条仅含 ak_uid 与创建时间的行，已有记录则不再变动
      *
-     * @param akUid     游戏账号 UID
-     * @param submitted 本次提交的角色信息（完整状态，null 表示清空可空渠道字段）
+     * @param akUid 游戏账号 UID
      */
-    private void savePlayerInfo(String akUid, AkPlayerInfo submitted) {
-        long now = System.currentTimeMillis();
-        AkPlayerInfo existing = playerInfoMapper.selectByAkUid(akUid);
-        if (existing == null) {
-            submitted.setDeleteFlag(false);
-            submitted.setUpdateTime(now);
-            playerInfoMapper.insert(submitted);
+    private void savePlayerInfo(String akUid) {
+        if (playerInfoMapper.selectByAkUid(akUid) != null) {
             return;
         }
-        if (isSameMeta(existing, submitted)) {
-            return;
-        }
-        playerInfoMapper.updateMetaById(existing.getId(), submitted.getAkNickName(),
-                submitted.getChannelName(), submitted.getChannelMasterId(), now);
-    }
-
-    /**
-     * 比较角色信息元数据是否完全相同（本次提交视为完整状态）
-     *
-     * @param existing  数据库当前值
-     * @param submitted 本次提交值
-     * @return 是否无需更新
-     */
-    private boolean isSameMeta(AkPlayerInfo existing, AkPlayerInfo submitted) {
-        return Objects.equals(existing.getAkNickName(), submitted.getAkNickName())
-                && Objects.equals(existing.getChannelName(), submitted.getChannelName())
-                && Objects.equals(existing.getChannelMasterId(), submitted.getChannelMasterId());
+        AkPlayerInfo info = new AkPlayerInfo();
+        info.setAkUid(akUid);
+        info.setCreateTime(System.currentTimeMillis());
+        playerInfoMapper.insert(info);
     }
 
     /**

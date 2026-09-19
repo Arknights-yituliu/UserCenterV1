@@ -5,7 +5,6 @@ import com.orange.entity.po.AkPlayerInfo;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
-import org.apache.ibatis.annotations.Update;
 
 import java.util.Collection;
 import java.util.List;
@@ -37,22 +36,4 @@ public interface AkPlayerInfoMapper extends BaseMapper<AkPlayerInfo> {
             + "<foreach collection='akUids' item='item' open='(' separator=',' close=')'>#{item}</foreach>"
             + "</script>")
     List<AkPlayerInfo> selectByAkUids(@Param("akUids") Collection<String> akUids);
-
-    /**
-     * 按行 ID 更新角色元数据（昵称与可空渠道字段），null 表示清空该字段
-     *
-     * @param id              角色信息行 ID
-     * @param akNickName      游戏角色昵称
-     * @param channelName     渠道名称，可为 null
-     * @param channelMasterId 渠道主 ID，可为 null
-     * @param updateTime      服务端生成的变更时间戳（Unix 毫秒）
-     * @return 影响行数
-     */
-    @Update("UPDATE ak_player_info SET ak_nick_name = #{akNickName}, channel_name = #{channelName}, "
-            + "channel_master_id = #{channelMasterId}, update_time = #{updateTime} WHERE id = #{id}")
-    int updateMetaById(@Param("id") Long id,
-                       @Param("akNickName") String akNickName,
-                       @Param("channelName") String channelName,
-                       @Param("channelMasterId") Integer channelMasterId,
-                       @Param("updateTime") Long updateTime);
 }
