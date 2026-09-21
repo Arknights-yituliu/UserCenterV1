@@ -109,7 +109,30 @@ UC-Token: <UC_SESSION_TOKEN>
 
 未登记 `refresh_token` 时，授权码兑换成功后不会签发 refresh token，也不能调用刷新流程。
 
-### 4.2 地址规则
+`scopes` 只能从平台支持的范围中选择。客户端管理页应先调用下方的 scope 元数据接口获取可选项，不能自行拼接新的 scope 标识。
+
+### 4.2 可配置授权范围
+
+```http
+GET /user/oauth/client/scopes
+Authorization: Bearer <UC_SESSION_TOKEN>
+```
+
+响应中的每一项包含 `code`、`name`、`description` 和 `sensitive`。其中 `sensitive=true` 表示该范围可读取或操作敏感用户数据，前端应在客户端配置与用户授权确认时突出展示。
+
+当前支持：
+
+| scope | 用途 |
+| --- | --- |
+| `user.read` | 读取用户 ID、昵称和头像；调用 `/oauth2/userinfo` 必需 |
+| `user.email` | 在 `/oauth2/userinfo` 中读取绑定邮箱 |
+| `user.profile` | 预留给个人资料读写能力 |
+| `config.read` | 读取当前客户端名下的用户配置与配置配额 |
+| `config.write` | 创建、修改或删除当前客户端名下的用户配置 |
+
+客户端登记的 scopes 是其可申请范围上限；授权请求未携带 `scope` 时，服务端会签发该客户端登记的全部范围。
+
+### 4.3 地址规则
 
 `redirectUris` 规则：
 

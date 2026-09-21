@@ -1,5 +1,6 @@
 package com.orange.common.context;
 
+import com.orange.common.enums.OAuthScope;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.enums.ResultCode;
 
@@ -74,6 +75,24 @@ public final class UserContext {
      */
     public static String getScope() {
         return SCOPE_HOLDER.get();
+    }
+
+    /**
+     * 校验当前 OAuth 令牌已获得指定 scope。
+     *
+     * @param required 所需授权范围
+     */
+    public static void requireScope(OAuthScope required) {
+        String currentScope = SCOPE_HOLDER.get();
+        if (currentScope == null || currentScope.isBlank()) {
+            throw new BusinessException(ResultCode.FORBIDDEN, "缺少授权范围: " + required.getCode());
+        }
+        boolean granted = java.util.Arrays.stream(currentScope.split(","))
+                .map(String::trim)
+                .anyMatch(required.getCode()::equals);
+        if (!granted) {
+            throw new BusinessException(ResultCode.FORBIDDEN, "缺少授权范围: " + required.getCode());
+        }
     }
 
     /**

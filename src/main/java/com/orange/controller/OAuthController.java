@@ -1,6 +1,7 @@
 package com.orange.controller;
 
 import com.orange.common.context.UserContext;
+import com.orange.common.enums.OAuthScope;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.util.LogUtil;
@@ -248,6 +249,7 @@ public class OAuthController {
     @Operation(summary = "OAuth 用户信息")
     @GetMapping("/userinfo")
     public Result<UserInfoVO> userinfo() {
+        UserContext.requireScope(OAuthScope.USER_READ);
         return Result.success(oauthTokenService.getUserInfo(
                 UserContext.requireUid(), UserContext.getClientId(), UserContext.getScope()));
     }

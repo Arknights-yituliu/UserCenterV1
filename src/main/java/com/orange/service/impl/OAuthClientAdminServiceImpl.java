@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.orange.common.enums.OAuthClientAuthMethod;
 import com.orange.common.enums.OAuthGrantType;
+import com.orange.common.enums.OAuthScope;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.util.RedisKeyUtil;
@@ -346,6 +347,9 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
             String value = scope.trim();
             if (value.contains(",")) {
                 throw new BusinessException(ResultCode.PARAM_ERROR, "单个授权范围不能包含英文逗号: " + value);
+            }
+            if (OAuthScope.findByCode(value).isEmpty()) {
+                throw new BusinessException(ResultCode.PARAM_ERROR, "不支持的授权范围: " + value);
             }
             normalized.add(value);
         }

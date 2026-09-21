@@ -1,6 +1,7 @@
 package com.orange.controller;
 
 import com.orange.common.context.UserContext;
+import com.orange.common.enums.OAuthScope;
 import com.orange.common.util.Result;
 import com.orange.entity.dto.userconfig.UserConfigDeleteRequest;
 import com.orange.entity.dto.userconfig.UserConfigSaveRequest;
@@ -53,6 +54,7 @@ public class OAuthConfigController {
     @Operation(summary = "保存用户配置（OAuth，创建 / 覆盖更新）")
     @PostMapping("/save")
     public Result<UserConfigSaveVO> saveConfig(@Valid @RequestBody UserConfigSaveRequest request) {
+        UserContext.requireScope(OAuthScope.CONFIG_WRITE);
         return Result.success(userConfigService.saveConfig(UserContext.requireUid(), request));
     }
 
@@ -65,6 +67,7 @@ public class OAuthConfigController {
     @Operation(summary = "条件更新用户配置（OAuth，save-if-match，防并发覆盖）")
     @PostMapping("/save-if-match")
     public Result<UserConfigSaveVO> saveConfigIfMatch(@Valid @RequestBody UserConfigSaveRequest request) {
+        UserContext.requireScope(OAuthScope.CONFIG_WRITE);
         return Result.success(userConfigService.saveConfigIfMatch(UserContext.requireUid(), request));
     }
 
@@ -76,6 +79,7 @@ public class OAuthConfigController {
     @Operation(summary = "查询用户配置配额（OAuth）")
     @GetMapping("/quota")
     public Result<UserConfigQuotaVO> getQuota() {
+        UserContext.requireScope(OAuthScope.CONFIG_READ);
         return Result.success(userConfigService.getQuota(UserContext.requireUid()));
     }
 
@@ -92,6 +96,7 @@ public class OAuthConfigController {
     public Result<List<UserConfigVO>> listConfigs(@RequestParam("category") String category,
                                                   @RequestParam(value = "version", required = false) String version,
                                                   @RequestParam(value = "name", required = false) String name) {
+        UserContext.requireScope(OAuthScope.CONFIG_READ);
         return Result.success(userConfigService.listConfigs(
                 UserContext.requireUid(), UserContext.getClientId(), category, version, name));
     }
@@ -105,6 +110,7 @@ public class OAuthConfigController {
     @Operation(summary = "删除用户配置（OAuth）")
     @PostMapping("/delete")
     public Result<Void> deleteConfig(@Valid @RequestBody UserConfigDeleteRequest request) {
+        UserContext.requireScope(OAuthScope.CONFIG_WRITE);
         userConfigService.deleteConfig(UserContext.requireUid(), request.getId());
         return Result.success();
     }

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.orange.common.enums.OAuthClientAuthMethod;
 import com.orange.common.enums.OAuthGrantType;
+import com.orange.common.enums.OAuthScope;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.util.LogUtil;
@@ -44,6 +45,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -88,12 +90,6 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
 
     /** 反向索引单次惰性清理最多检查的成员数，避免一次性拉取整表造成长尾 */
     private static final int GRANT_INDEX_CLEANUP_CHECK_LIMIT = 200;
-
-    /** 已知 scope 的中文描述映射（未知 scope 直接展示原始标识） */
-    private static final Map<String, String> SCOPE_DESCRIPTIONS = Map.of(
-            "user.read", "查看你的账号基础资料（昵称、头像）",
-            "user.email", "读取你的绑定邮箱",
-            "user.profile", "查看并修改你的个人资料");
 
     private final OAuthClientMapper oauthClientMapper;
     private final OAuthGrantMapper oauthGrantMapper;
@@ -428,7 +424,9 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      * @return 中文描述
      */
     private String describeScope(String scope) {
-        return SCOPE_DESCRIPTIONS.getOrDefault(scope, scope);
+        return OAuthScope.findByCode(scope)
+                .map(OAuthScope::getDescription)
+                .orElse(scope);
     }
 
     @Override
@@ -971,12 +969,16 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      * @return 最终授权的 scope（逗号分隔）
      */
     private String normalizeScope(OAuthClient client, String scope) {
-        Set<String> allowed = new HashSet<>(Arrays.asList(client.getScopes().split(",")));
+        Set<String> allowed = new LinkedHashSet<>(Arrays.asList(client.getScopes().split(",")));
+        if (allowed.stream().anyMatch(value -> OAuthScope.findByCode(value).isEmpty())) {
+            throw new BusinessException(ResultCode.OAUTH_SCOPE_INVALID, "客户端存在不支持的授权范围");
+        }
         if (!StringUtils.hasText(scope)) {
             return String.join(",", allowed);
         }
         for (String s : scope.split(",")) {
-            if (!allowed.contains(s.trim())) {
+            String value = s.trim();
+            if (OAuthScope.findByCode(value).isEmpty() || !allowed.contains(value)) {
                 throw new BusinessException(ResultCode.OAUTH_SCOPE_INVALID, "scope 不在授权范围内: " + s.trim());
             }
         }

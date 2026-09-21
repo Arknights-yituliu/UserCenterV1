@@ -112,6 +112,18 @@ class OAuthClientAdminServiceImplTest {
     }
 
     @Test
+    void registrationRejectsScopeOutsidePlatformRegistry() {
+        OAuthClientRegisterRequest request = validRequest();
+        request.setScopes(Collections.singletonList("user.export"));
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.register(7L, request));
+
+        assertEquals(ResultCode.PARAM_ERROR.getCode(), exception.getCode());
+        verify(oauthClientMapper, never()).insert(any());
+    }
+
+    @Test
     void explicitlyDeclaredConfidentialClientGeneratesHashedSecret() {
         OAuthClientCredentialVO credential = service.register(7L, validRequest());
 

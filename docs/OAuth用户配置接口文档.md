@@ -14,6 +14,15 @@ Authorization: Bearer <access_token>
 
 服务端从令牌中取得用户 `uid` 和 OAuth 客户端 `client_id`。接入方不能通过请求参数指定这两个值，也只能读写当前 OAuth 客户端名下的配置。
 
+令牌还必须包含与操作匹配的 scope：
+
+| 操作 | 必需 scope |
+| --- | --- |
+| 读取配置列表、查询配额 | `config.read` |
+| 创建、覆盖更新、条件更新、删除配置 | `config.write` |
+
+缺少所需 scope 时响应 `code=80008`。客户端必须在注册时登记相应 scope，并在授权请求中申请它。
+
 ### 1.2 响应格式
 
 成功和业务错误均使用统一 JSON 结构：

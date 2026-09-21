@@ -1,11 +1,13 @@
 package com.orange.controller;
 
 import com.orange.common.context.UserContext;
+import com.orange.common.enums.OAuthScope;
 import com.orange.common.util.Result;
 import com.orange.entity.dto.oauthclient.OAuthClientRegisterRequest;
 import com.orange.entity.dto.oauthclient.OAuthClientUpdateRequest;
 import com.orange.entity.vo.oauth.OAuthClientCredentialVO;
 import com.orange.entity.vo.oauth.OAuthClientVO;
+import com.orange.entity.vo.oauth.OAuthScopeVO;
 import com.orange.service.OAuthClientAdminService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -18,6 +20,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Arrays;
+import java.util.stream.Collectors;
 
 /**
  * OAuth 客户端自助管理接口（需 UC 会话 token，/user/** 由 UserAuthInterceptor 统一校验）
@@ -42,6 +46,19 @@ public class OAuthClientAdminController {
      */
     public OAuthClientAdminController(OAuthClientAdminService oauthClientAdminService) {
         this.oauthClientAdminService = oauthClientAdminService;
+    }
+
+    /**
+     * 查询平台支持的 OAuth 授权范围，供客户端注册、编辑页展示与选择。
+     *
+     * @return scope 标识及其展示元数据
+     */
+    @Operation(summary = "查询可配置的 OAuth 授权范围")
+    @GetMapping("/scopes")
+    public Result<List<OAuthScopeVO>> scopes() {
+        return Result.success(Arrays.stream(OAuthScope.values())
+                .map(OAuthScopeVO::of)
+                .collect(Collectors.toList()));
     }
 
     /**
