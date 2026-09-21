@@ -1,4 +1,4 @@
-package com.orange.controller;
+package com.orange.controller.user;
 
 import com.orange.common.context.UserContext;
 import com.orange.common.enums.OAuthScope;

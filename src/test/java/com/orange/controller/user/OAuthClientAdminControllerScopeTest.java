@@ -1,4 +1,4 @@
-package com.orange.controller;
+package com.orange.controller.user;
 
 import com.orange.entity.vo.oauth.OAuthScopeVO;
 import com.orange.service.OAuthClientAdminService;

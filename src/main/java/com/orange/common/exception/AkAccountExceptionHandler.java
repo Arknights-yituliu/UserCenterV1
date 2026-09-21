@@ -2,7 +2,7 @@ package com.orange.common.exception;
 
 import com.orange.common.enums.ResultCode;
 import com.orange.common.util.Result;
-import com.orange.controller.AkAccountController;
+import com.orange.controller.user.AkAccountController;
 import com.orange.entity.vo.akoperator.RetryAfterVO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

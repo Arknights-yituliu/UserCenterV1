@@ -1,4 +1,4 @@
-package com.orange.controller;
+package com.orange.controller.user;
 
 import com.orange.common.util.RequestUtil;
 import com.orange.common.util.Result;

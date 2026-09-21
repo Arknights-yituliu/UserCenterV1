@@ -1,4 +1,4 @@
-package com.orange.controller;
+package com.orange.controller.oauth;
 
 import com.orange.common.config.CorsConfig;
 import com.orange.common.enums.ResultCode;
