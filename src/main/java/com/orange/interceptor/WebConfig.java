@@ -50,8 +50,9 @@ public class WebConfig implements WebMvcConfigurer {
         registry.addInterceptor(userAuthInterceptor)
                 .addPathPatterns("/user/**", "/auth/logout");
         // OAuth 资源接口：需要 access_token 的接口统一走此拦截器
-        // （/oauth2/userinfo 为 OAuthController 的用户信息端点，/oauth2/config/** 为 OAuth 令牌版用户配置）
+        // （/oauth2/userinfo 为 OAuthController 的用户信息端点，/oauth2/config/** 为 OAuth 令牌版用户配置，
+        //  /oauth2/schedules/** 与 /oauth2/ak-accounts/** 为 OAuth 游戏数据资源）
         registry.addInterceptor(oauthAuthInterceptor)
-                .addPathPatterns("/oauth2/userinfo", "/oauth2/config/**");
+                .addPathPatterns("/oauth2/userinfo", "/oauth2/config/**", "/oauth2/schedules/**", "/oauth2/ak-accounts/**");
     }
 }
