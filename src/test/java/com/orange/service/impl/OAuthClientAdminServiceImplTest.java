@@ -76,7 +76,7 @@ class OAuthClientAdminServiceImplTest {
         OAuthClientRegisterRequest request = validRequest();
         request.setAuthMethod("none");
         request.setGrantTypes(Arrays.asList("refresh_token", "authorization_code", "refresh_token"));
-        request.setScopes(Arrays.asList(" user.read ", "user.read", "user.email"));
+        request.setScopes(Arrays.asList(" user.read ", "user.read", "user.profile"));
 
         OAuthClientCredentialVO credential = service.register(7L, request);
 
@@ -86,7 +86,7 @@ class OAuthClientAdminServiceImplTest {
         assertNull(stored.getClientSecret());
         assertEquals("none", stored.getAuthMethods());
         assertEquals("authorization_code,refresh_token", stored.getGrantTypes());
-        assertEquals("user.read,user.email", stored.getScopes());
+        assertEquals("user.read,user.profile", stored.getScopes());
         assertEquals(1, stored.getOwnerEnabled());
         assertEquals(0, stored.getAdminApproved());
         assertEquals(0, stored.getDirectAuthEnabled());

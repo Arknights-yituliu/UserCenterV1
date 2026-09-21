@@ -4,7 +4,7 @@ package com.orange.entity.vo.auth;
  * 直连登录兑换用户信息响应（POST /oauth2/direct-user，供旧系统服务端调用）
  *
  * <p>旧系统凭一次性登录票据兑换用户信息做本地缓存。
- * 仅返回公开资料（不签发 UC 会话 token），邮箱为脱敏值，供展示不做账号关联。</p>
+ * 仅返回公开资料（不签发 UC 会话 token）。</p>
  *
  * @author UserCenter
  */
@@ -18,9 +18,6 @@ public class ServerLoginVO {
 
     /** 头像 */
     private String avatar;
-
-    /** 邮箱（脱敏展示） */
-    private String email;
 
     /** 用户状态：1=正常 -1=封禁 */
     private Integer status;
@@ -47,14 +44,6 @@ public class ServerLoginVO {
 
     public void setAvatar(String avatar) {
         this.avatar = avatar;
-    }
-
-    public String getEmail() {
-        return email;
-    }
-
-    public void setEmail(String email) {
-        this.email = email;
     }
 
     public Integer getStatus() {

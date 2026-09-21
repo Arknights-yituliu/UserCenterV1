@@ -125,7 +125,6 @@ Authorization: Bearer <UC_SESSION_TOKEN>
 | scope | 用途 |
 | --- | --- |
 | `user.read` | 读取用户 ID、昵称和头像；调用 `/oauth2/userinfo` 必需 |
-| `user.email` | 在 `/oauth2/userinfo` 中读取绑定邮箱 |
 | `user.profile` | 预留给个人资料读写能力 |
 | `config.read` | 读取当前客户端名下的用户配置与配置配额 |
 | `config.write` | 创建、修改或删除当前客户端名下的用户配置 |
@@ -193,7 +192,7 @@ Content-Type: application/json
     "https://spa.example.com/oauth/callback",
     "http://localhost:5173/oauth/callback"
   ],
-  "scopes": ["user.read", "user.email"],
+  "scopes": ["user.read"],
   "grantTypes": ["authorization_code", "refresh_token"],
   "authMethod": "none",
   "websiteOrigin": "https://spa.example.com",
@@ -228,7 +227,7 @@ Content-Type: application/json
 {
   "clientName": "Example Backend",
   "redirectUris": ["https://backend.example.com/oauth/callback"],
-  "scopes": ["user.read", "user.email"],
+  "scopes": ["user.read"],
   "grantTypes": ["authorization_code", "refresh_token"],
   "authMethod": "client_secret_post",
   "websiteOrigin": "https://backend.example.com"
@@ -299,7 +298,7 @@ Authorization: Bearer <UC_SESSION_TOKEN>
       "authMethod": "none",
       "grantTypes": ["authorization_code", "refresh_token"],
       "redirectUris": ["https://spa.example.com/oauth/callback"],
-      "scopes": ["user.read", "user.email"],
+      "scopes": ["user.read"],
       "requirePkce": true,
       "requireAuthConsent": true,
       "websiteOrigin": "https://spa.example.com",
@@ -349,7 +348,7 @@ Content-Type: application/json
     "https://spa.example.com/oauth/callback",
     "http://localhost:5173/oauth/callback"
   ],
-  "scopes": ["user.read", "user.email"],
+  "scopes": ["user.read"],
   "websiteOrigin": "https://spa.example.com",
   "accessTokenTtl": 7200,
   "refreshTokenTtl": 7776000

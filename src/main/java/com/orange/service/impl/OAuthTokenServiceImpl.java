@@ -646,8 +646,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     }
 
     /**
-     * 查询 OAuth 用户信息：查库补齐用户基础资料，按 scope 组装响应
-     * （邮箱仅授权 user.email 时返回明文，否则不下发）
+     * 查询 OAuth 用户信息：查库补齐用户基础资料并组装响应。
      *
      * @param uid      用户 uid
      * @param clientId 签发令牌的客户端 ID

@@ -244,7 +244,7 @@ public class OAuthController {
      * 获取当前授权用户信息：access_token 由 OAuthAuthInterceptor 统一校验并注入上下文，
      * 查库与按 scope 组装由 Service 完成（便于无自有账户体系的接入方直接以 UC 用户作为登录账号）
      *
-     * @return 用户信息（uid、邮箱、用户名、昵称、头像）
+     * @return 用户信息（uid、用户名、昵称、头像）
      */
     @Operation(summary = "OAuth 用户信息")
     @GetMapping("/userinfo")

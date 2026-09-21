@@ -132,7 +132,7 @@ public class OAuthLegacyLoginController {
      * @param clientId     OAuth 客户端 ID
      * @param clientSecret 客户端密钥
      * @param ticket       一次性登录票据
-     * @return 用户信息（uid/昵称/头像/脱敏邮箱/状态）
+     * @return 用户信息（uid/昵称/头像/状态）
      */
     @Operation(summary = "直连登录-兑换用户信息（旧系统后端调用）")
     @PostMapping("/direct-user")

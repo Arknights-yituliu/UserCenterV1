@@ -726,7 +726,7 @@ public class AuthServiceImpl implements AuthService {
         if (!(uid instanceof Number)) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "登录票据无效");
         }
-        // 5. 组装响应：邮箱脱敏
+        // 5. 组装公开响应
         UserInfo user = userMapper.selectById(((Number) uid).longValue());
         if (user == null) {
             throw new BusinessException(ResultCode.USER_NOT_FOUND);
@@ -735,7 +735,6 @@ public class AuthServiceImpl implements AuthService {
         vo.setUid(user.getUid());
         vo.setNickname(user.getNickname());
         vo.setAvatar(user.getAvatar());
-        vo.setEmail(DesensitizeUtil.maskEmail(user.getEmail()));
         vo.setStatus(user.getStatus());
         LogUtil.debug(AuthServiceImpl.class, "[Auth] 直连登录兑换成功: clientId={}, uid={}", clientId, user.getUid());
         return vo;

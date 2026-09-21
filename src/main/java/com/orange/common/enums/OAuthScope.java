@@ -16,9 +16,6 @@ public enum OAuthScope {
     /** 读取用户基础资料。 */
     USER_READ("user.read", "基础资料", "读取你的用户 ID、昵称和头像", false),
 
-    /** 读取用户绑定邮箱。 */
-    USER_EMAIL("user.email", "绑定邮箱", "读取你的绑定邮箱", true),
-
     /** 读取并修改用户个人资料。 */
     USER_PROFILE("user.profile", "个人资料", "读取并修改你的个人资料", true),
 

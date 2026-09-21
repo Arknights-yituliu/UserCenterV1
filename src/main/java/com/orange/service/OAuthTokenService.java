@@ -155,12 +155,12 @@ public interface OAuthTokenService {
 
     /**
      * 查询 OAuth 用户信息：根据令牌主体（uid + 客户端 + 授权范围）
-     * 查库补齐用户基础资料并按 scope 组装响应（邮箱仅授权 user.email 时返回）
+     * 查库补齐用户基础资料并组装响应。
      *
      * @param uid      用户 uid
      * @param clientId 签发令牌的客户端 ID
      * @param scope    授权范围
-     * @return 用户信息（uid、邮箱、用户名、昵称、头像）
+     * @return 用户信息（uid、用户名、昵称、头像）
      */
     UserInfoVO getUserInfo(Long uid, String clientId, String scope);
 

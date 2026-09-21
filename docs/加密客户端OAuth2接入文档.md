@@ -10,7 +10,7 @@
 - 加密客户端 ID：`{CLIENT_ID}`
 - 客户端密钥：`{CLIENT_SECRET}`
 - 已登记的回调地址：`{REDIRECT_URI}`
-- 已批准的权限范围，例如 `user.read,user.email`
+- 已批准的权限范围，例如 `user.read`
 
 客户端必须满足：
 
@@ -88,7 +88,7 @@ GET {UC_BASE_URL}/oauth2/authorize
     ?response_type=code
     &client_id={CLIENT_ID}
     &redirect_uri={URL_ENCODED_REDIRECT_URI}
-    &scope=user.read,user.email
+    &scope=user.read
     &state={STATE}
     &code_challenge={CODE_CHALLENGE}
     &code_challenge_method=S256
@@ -162,7 +162,7 @@ grant_type=authorization_code
     "token_type": "Bearer",
     "expires_in": 7200,
     "refresh_token": "refresh_token_value",
-    "scope": "user.read,user.email"
+    "scope": "user.read"
   }
 }
 ```
@@ -188,7 +188,6 @@ Authorization: Bearer {ACCESS_TOKEN}
   "msg": "操作成功",
   "data": {
     "uid": 10001,
-    "email": "user@example.com",
     "userName": "orange-user",
     "nickname": "Orange",
     "avatar": "https://example.com/avatar.png"
@@ -201,7 +200,6 @@ Authorization: Bearer {ACCESS_TOKEN}
 | 字段 | 说明 |
 | --- | --- |
 | `uid` | UserCenter 全局用户 ID，接入方应使用它关联本地用户 |
-| `email` | 仅授权范围包含 `user.email` 时返回，否则为 `null` 或省略 |
 | `userName` | 用户名，可能为 `null` |
 | `nickname` | 用户昵称，可能为 `null` |
 | `avatar` | 头像地址，可能为 `null` |

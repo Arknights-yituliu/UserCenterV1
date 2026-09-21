@@ -251,7 +251,7 @@ class OAuthTokenServiceImplTest {
 
     @Test
     void listUserRefreshTokensGroupsByClient() {
-        RefreshGrantVO client1New = grant("client-1", "应用甲", "user.read,user.email", 7200L);
+        RefreshGrantVO client1New = grant("client-1", "应用甲", "user.read,user.profile", 7200L);
         client1New.setCreatedAt(LocalDateTime.of(2026, 9, 2, 10, 0));
         RefreshGrantVO client1Old = grant("client-1", "应用甲", "user.read", 3600L);
         client1Old.setCreatedAt(LocalDateTime.of(2026, 9, 1, 10, 0));
@@ -276,7 +276,7 @@ class OAuthTokenServiceImplTest {
         assertEquals(2, secondGroup.getGrants().size());
         // 组内条目保持时间倒序，且不再重复携带 client 维度字段
         OAuthGrantItemVO newest = secondGroup.getGrants().get(0);
-        assertEquals("user.read,user.email", newest.getScope());
+        assertEquals("user.read,user.profile", newest.getScope());
         assertEquals(LocalDateTime.of(2026, 9, 2, 10, 0), newest.getCreatedAt());
         assertEquals(7200L, newest.getExpiresInSeconds());
         OAuthGrantItemVO oldest = secondGroup.getGrants().get(1);

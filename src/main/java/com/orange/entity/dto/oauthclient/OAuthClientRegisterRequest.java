@@ -24,7 +24,7 @@ public class OAuthClientRegisterRequest {
     @Size(max = 10, message = "回调地址最多 10 个")
     private List<@NotBlank(message = "回调地址不能为空") String> redirectUris;
 
-    /** 可授权范围（如 user.read、user.email） */
+    /** 可授权范围（如 user.read、user.profile） */
     @NotEmpty(message = "授权范围不能为空")
     private List<@NotBlank(message = "授权范围不能为空") String> scopes;
 
