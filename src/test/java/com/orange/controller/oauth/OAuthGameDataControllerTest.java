@@ -2,12 +2,18 @@ package com.orange.controller.oauth;
 
 import com.orange.common.context.UserContext;
 import com.orange.common.exception.BusinessException;
+import com.orange.controller.user.AkAccountController;
 import com.orange.entity.dto.akoperator.OperatorSaveRequest;
 import com.orange.entity.vo.UserScheduleVO;
 import com.orange.service.AkAccountService;
 import com.orange.service.UserScheduleService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+
+import java.lang.reflect.Method;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -62,5 +68,21 @@ class OAuthGameDataControllerTest {
         assertDoesNotThrow(() -> controller.saveOperators("ak-1", new OperatorSaveRequest()));
 
         verify(accountService).saveOperators(eq(7L), eq("ak-1"), any(OperatorSaveRequest.class));
+    }
+
+    @Test
+    void userAndOauthAccountRoutesUseAkUidQueryParameter() throws NoSuchMethodException {
+        assertAccountRoutes(AkAccountController.class);
+        assertAccountRoutes(OAuthAkAccountController.class);
+    }
+
+    private void assertAccountRoutes(Class<?> controllerClass) throws NoSuchMethodException {
+        Method read = controllerClass.getDeclaredMethod("listOperators", String.class);
+        Method save = controllerClass.getDeclaredMethod("saveOperators", String.class, OperatorSaveRequest.class);
+
+        assertEquals("/operators", read.getAnnotation(GetMapping.class).value()[0]);
+        assertEquals("/operators/save", save.getAnnotation(PostMapping.class).value()[0]);
+        assertEquals("akUid", read.getParameters()[0].getAnnotation(RequestParam.class).value());
+        assertEquals("akUid", save.getParameters()[0].getAnnotation(RequestParam.class).value());
     }
 }

@@ -143,7 +143,7 @@ public class AkAccountServiceImpl implements AkAccountService {
      * 批量保存某游戏账号的角色信息与干员数据
      *
      * @param uid     用户中心 UID
-     * @param akUid   请求路径中的游戏账号 UID
+     * @param akUid   请求参数中的游戏账号 UID
      * @param request 保存参数（角色信息 + 干员数组）
      * @return 新增/更新/未变更条数统计，三项之和等于传入记录数
      */
@@ -153,7 +153,7 @@ public class AkAccountServiceImpl implements AkAccountService {
         validateAkUid(akUid);
         AkPlayerInfoRequest playerInfoRequest = request.getPlayerInfo();
         if (!akUid.equals(playerInfoRequest.getAkUid())) {
-            throw new BusinessException(ResultCode.PARAM_VALID_ERROR, "路径中的游戏账号UID与playerInfo.akUid不一致");
+            throw new BusinessException(ResultCode.PARAM_VALID_ERROR, "请求参数中的游戏账号UID与playerInfo.akUid不一致");
         }
         // 先归一化（缺省/null/空字符串补 0）再校验重复 ID，保证比较语义与落库值一致
         List<OperatorProgressionData> operators = normalizeOperators(akUid, request.getOperators());

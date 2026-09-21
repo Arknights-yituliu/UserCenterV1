@@ -13,10 +13,10 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -25,7 +25,7 @@ import java.util.List;
  * 游戏账号与干员数据接口（需登录态，路径由 /user/** 会话拦截器保护）
  *
  * <p>本接口由应用处理的成功与失败统一返回 HTTP 200，客户端只看 JSON 的 code 字段；
- * 参数校验、请求体超限与登录鉴权失败的转换由
+ * 参数校验与登录鉴权失败的转换由
  * {@link com.orange.common.exception.AkAccountExceptionHandler} 限定在本控制器内完成。</p>
  *
  * @author UserCenter
@@ -67,8 +67,8 @@ public class AkAccountController {
      * @return 干员全量数据，响应仅允许私人缓存
      */
     @Operation(summary = "全量读取游戏账号的干员数据")
-    @GetMapping("/{akUid}/operators")
-    public ResponseEntity<Result<OperatorListVO>> listOperators(@PathVariable("akUid") String akUid) {
+    @GetMapping("/operators")
+    public ResponseEntity<Result<OperatorListVO>> listOperators(@RequestParam("akUid") String akUid) {
         OperatorListVO data = akAccountService.listOperators(UserContext.requireUid(), akUid);
         return ResponseEntity.ok()
                 .header(HttpHeaders.CACHE_CONTROL, OPERATOR_CACHE_CONTROL)
@@ -83,8 +83,8 @@ public class AkAccountController {
      * @return 新增/更新/未变更条数统计
      */
     @Operation(summary = "批量保存角色信息与干员数据")
-    @PostMapping("/{akUid}/operators/save")
-    public Result<OperatorSaveResultVO> saveOperators(@PathVariable("akUid") String akUid,
+    @PostMapping("/operators/save")
+    public Result<OperatorSaveResultVO> saveOperators(@RequestParam("akUid") String akUid,
                                                      @Valid @RequestBody OperatorSaveRequest request) {
         return Result.success(akAccountService.saveOperators(UserContext.requireUid(), akUid, request));
     }

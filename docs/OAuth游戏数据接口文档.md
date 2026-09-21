@@ -30,16 +30,16 @@ Authorization: Bearer <access_token>
 
 ```http
 GET /oauth2/ak-accounts
-GET /oauth2/ak-accounts/{akUid}/operators
+GET /oauth2/ak-accounts/operators?akUid={akUid}
 Authorization: Bearer <access_token>
 ```
 
 以上读取接口需要 `gama-data.read`，返回结构与用户侧对应接口一致。干员读取响应包含 `Cache-Control: private, no-cache`。
 
 ```http
-POST /oauth2/ak-accounts/{akUid}/operators/save
+POST /oauth2/ak-accounts/operators/save?akUid={akUid}
 Content-Type: application/json
 Authorization: Bearer <access_token>
 ```
 
-保存接口需要 `gama-data.write`，请求体和响应结构与 `POST /user/ak-accounts/{akUid}/operators/save` 完全一致。
+保存接口需要 `gama-data.write`，请求体和响应结构与 `POST /user/ak-accounts/operators/save?akUid={akUid}` 完全一致。
