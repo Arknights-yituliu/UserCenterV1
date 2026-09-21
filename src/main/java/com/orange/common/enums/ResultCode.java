@@ -24,9 +24,6 @@ public enum ResultCode {
     CONFIG_TOO_LARGE(10004, "配置存储总量超过大小限制（500KB）"),
     /** 用户配置内容版本冲突 */
     CONFIG_HASH_CONFLICT(10005, "配置已被更新"),
-    /** 单次请求体超过大小预算 */
-    REQUEST_BODY_TOO_LARGE(10006, "请求体超过大小限制（1MB）"),
-
     // ---------- 2xxxx 账号错误 ----------
     /** 用户不存在 */
     USER_NOT_FOUND(20001, "用户不存在"),
