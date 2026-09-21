@@ -241,3 +241,17 @@ CREATE TABLE `operator_progression_data` (
     UNIQUE KEY `uk_ak_operator` (`ak_uid`, `operator_id`) COMMENT '一个游戏账号下每个干员编码仅一条记录，支持全量读取'
 ) ENGINE = InnoDB COMMENT = '游戏账号干员数据';
 
+-- -------------------------------------------------------------
+-- 13. 用户排班表
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `user_schedule`;
+CREATE TABLE `user_schedule` (
+    `id`          BIGINT   NOT NULL COMMENT '排班表 ID（自制雪花 ID）',
+    `uid`         BIGINT   NOT NULL COMMENT '所属用户 uid',
+    `schedule`    LONGTEXT NOT NULL COMMENT '排班表内容（JSON 字符串）',
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_user_schedule_uid_update_time` (`uid`, `update_time`)
+) ENGINE = InnoDB COMMENT = '用户排班表，每个用户最多 5 条由业务层控制';
+
