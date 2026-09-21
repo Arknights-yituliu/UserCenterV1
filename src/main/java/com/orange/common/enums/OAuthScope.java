@@ -26,7 +26,13 @@ public enum OAuthScope {
     CONFIG_READ("config.read", "读取应用配置", "读取该应用名下的用户配置", false),
 
     /** 写入或删除当前客户端名下的用户配置。 */
-    CONFIG_WRITE("config.write", "管理应用配置", "创建、修改或删除该应用名下的用户配置", false);
+    CONFIG_WRITE("config.write", "管理应用配置", "创建、修改或删除该应用名下的用户配置", false),
+
+    /** 读取用户游戏数据。 */
+    GAMA_DATA_READ("gama-data.read", "游戏数据", "读取用户游戏数据", true),
+
+    /** 写入用户游戏数据。 */
+    GAMA_DATA_WRITE("gama-data.write", "游戏数据", "写入用户游戏数据", true);
 
     private final String code;
     private final String name;

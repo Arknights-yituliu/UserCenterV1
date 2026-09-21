@@ -19,12 +19,14 @@ class OAuthClientAdminControllerScopeTest {
 
         List<OAuthScopeVO> scopes = controller.scopes().getData();
 
-        assertEquals(5, scopes.size());
+        assertEquals(7, scopes.size());
         OAuthScopeVO email = scopes.stream()
                 .filter(scope -> "user.email".equals(scope.getCode()))
                 .findFirst()
                 .orElseThrow();
         assertEquals("绑定邮箱", email.getName());
         assertTrue(email.isSensitive());
+        assertTrue(scopes.stream().anyMatch(scope -> "gama-data.read".equals(scope.getCode())));
+        assertTrue(scopes.stream().anyMatch(scope -> "gama-data.write".equals(scope.getCode())));
     }
 }

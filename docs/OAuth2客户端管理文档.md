@@ -129,6 +129,8 @@ Authorization: Bearer <UC_SESSION_TOKEN>
 | `user.profile` | 预留给个人资料读写能力 |
 | `config.read` | 读取当前客户端名下的用户配置与配置配额 |
 | `config.write` | 创建、修改或删除当前客户端名下的用户配置 |
+| `gama-data.read` | 读取用户游戏数据 |
+| `gama-data.write` | 写入用户游戏数据 |
 
 客户端登记的 scopes 是其可申请范围上限；授权请求未携带 `scope` 时，服务端会签发该客户端登记的全部范围。
 
