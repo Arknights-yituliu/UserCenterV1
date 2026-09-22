@@ -96,13 +96,13 @@ public interface AuthService {
     DirectLoginTicketVO directRegister(String channel, RegisterRequest request, String ip);
 
     /**
-     * 直连登录-兑换用户信息（旧系统后端调用）：凭一次性票据兑换用户信息，
+     * 直连登录-兑换用户信息（旧系统后端调用）：凭一次性票据兑换用户信息并签发 OAuth 令牌，
      * 校验票据归属该 client 且未被消费
      *
      * @param clientId     OAuth 客户端 ID
      * @param clientSecret 客户端密钥
      * @param ticket       一次性登录票据
-     * @return 用户信息（uid/昵称/头像/脱敏邮箱/状态）
+     * @return 用户信息（uid/昵称/头像/状态）+ OAuth 令牌（access_token / refresh_token）
      */
     ServerLoginVO directUser(String clientId, String clientSecret, String ticket);
 

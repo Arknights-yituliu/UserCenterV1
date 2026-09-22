@@ -24,11 +24,13 @@ import com.orange.entity.vo.auth.LoginVO;
 import com.orange.entity.vo.auth.ServerLoginVO;
 import com.orange.entity.vo.oauth.DirectLoginSessionVO;
 import com.orange.entity.vo.oauth.DirectLoginTicketVO;
+import com.orange.entity.vo.oauth.OAuthTokenVO;
 import com.orange.mapper.LoginLogMapper;
 import com.orange.mapper.OAuthClientMapper;
 import com.orange.mapper.UserInfoMapper;
 import com.orange.service.AuthService;
 import com.orange.service.EmailCodeService;
+import com.orange.service.OAuthTokenService;
 import com.orange.service.RevokeService;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
@@ -67,6 +69,7 @@ public class AuthServiceImpl implements AuthService {
     private final OAuthClientMapper oauthClientMapper;
     private final EmailCodeService emailCodeService;
     private final RevokeService revokeService;
+    private final OAuthTokenService oauthTokenService;
     private final StringRedisTemplate stringRedisTemplate;
     private final ObjectMapper objectMapper;
     private final PasswordEncoder passwordEncoder;
@@ -158,12 +161,14 @@ public class AuthServiceImpl implements AuthService {
      * @param oauthClientMapper   OAuth 客户端 Mapper（服务端登录的 client 认证）
      * @param emailCodeService    验证码服务
      * @param revokeService       吊销服务（重设密码后踢全部会话）
+     * @param oauthTokenService   OAuth 令牌服务（直连登录兑换令牌）
      * @param stringRedisTemplate Redis 客户端
      * @param objectMapper        JSON 序列化器
      * @param validator           Bean Validation 校验器（直连注册散参手动校验）
      */
     public AuthServiceImpl(UserInfoMapper userMapper, LoginLogMapper loginLogMapper, OAuthClientMapper oauthClientMapper,
                            EmailCodeService emailCodeService, RevokeService revokeService,
+                           OAuthTokenService oauthTokenService,
                            StringRedisTemplate stringRedisTemplate, ObjectMapper objectMapper,
                            Validator validator) {
         this.userMapper = userMapper;
@@ -171,6 +176,7 @@ public class AuthServiceImpl implements AuthService {
         this.oauthClientMapper = oauthClientMapper;
         this.emailCodeService = emailCodeService;
         this.revokeService = revokeService;
+        this.oauthTokenService = oauthTokenService;
         this.stringRedisTemplate = stringRedisTemplate;
         this.objectMapper = objectMapper;
         this.passwordEncoder = new BCryptPasswordEncoder();
@@ -689,17 +695,22 @@ public class AuthServiceImpl implements AuthService {
     }
 
     /**
-     * 直连登录-兑换用户信息（旧系统后端调用）：凭一次性票据兑换用户信息，
+     * 直连登录-兑换用户信息（旧系统后端调用）：凭一次性票据兑换用户信息并签发 OAuth 令牌，
      * 校验票据归属该 client 且未被消费（并发/重放下仅一次成功）
+     *
+     * <p>签发的令牌与授权码流程签发的令牌完全等价，可调用 /oauth2/userinfo、
+     * /oauth2/config/**；每次兑换无条件签发 access_token 与 refresh_token，
+     * 授权范围取客户端登记 scopes 全量（直连流程没有 scope 协商环节）。</p>
      *
      * @param clientId     OAuth 客户端 ID
      * @param clientSecret 客户端密钥
      * @param ticket       一次性登录票据
-     * @return 用户信息（uid/昵称/头像/脱敏邮箱/状态）
+     * @return 用户信息（uid/昵称/头像/状态）+ OAuth 令牌
      */
     @Override
     public ServerLoginVO directUser(String clientId, String clientSecret, String ticket) {
-        // 1. 客户端认证并重新检查直连权限，使已签发但未兑换的 ticket 可被立即禁用
+        // 1. 客户端认证并重新检查直连权限，使已签发但未兑换的 ticket 可被立即禁用。
+        //    权限校验必须先于票据消费，否则客户端未开通直连认证时会白白烧毁票据
         OAuthClient client = requireEnabledOAuthClient(clientId);
         authenticateOAuthClient(client, clientSecret);
         requireDirectAuthEnabled(client);
@@ -726,16 +737,24 @@ public class AuthServiceImpl implements AuthService {
         if (!(uid instanceof Number)) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "登录票据无效");
         }
-        // 5. 组装公开响应
+        // 5. 查库补齐用户信息
         UserInfo user = userMapper.selectById(((Number) uid).longValue());
         if (user == null) {
             throw new BusinessException(ResultCode.USER_NOT_FOUND);
         }
+        // 6. 签发 OAuth 令牌（access_token + refresh_token），范围取客户端登记全量
+        OAuthTokenVO token = oauthTokenService.issueDirectToken(clientId, user.getUid());
+        // 7. 组装响应：用户公开资料 + OAuth 令牌
         ServerLoginVO vo = new ServerLoginVO();
         vo.setUid(user.getUid());
         vo.setNickname(user.getNickname());
         vo.setAvatar(user.getAvatar());
         vo.setStatus(user.getStatus());
+        vo.setAccessToken(token.getAccessToken());
+        vo.setTokenType(token.getTokenType());
+        vo.setExpiresIn(token.getExpiresIn());
+        vo.setRefreshToken(token.getRefreshToken());
+        vo.setScope(token.getScope());
         LogUtil.debug(AuthServiceImpl.class, "[Auth] 直连登录兑换成功: clientId={}, uid={}", clientId, user.getUid());
         return vo;
     }

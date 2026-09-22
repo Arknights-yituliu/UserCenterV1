@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
  * 旧系统登录对接端点（基于 OAuth client 认证体系）
  *
  * <ul>
- *   <li>POST /oauth2/direct-*：直连登录四接口（发起会话/提交凭证/注册/兑换用户信息），
+ *   <li>POST /oauth2/direct-*：直连登录四接口（发起会话/提交凭证/注册/兑换用户信息并签发令牌），
  *       登录/注册凭证由浏览器直接提交 UC，不经过旧系统后端</li>
  * </ul>
  *
@@ -126,13 +126,15 @@ public class OAuthLegacyLoginController {
     }
 
     /**
-     * 直连登录-兑换用户信息（旧系统后端调用）：凭一次性登录票据兑换用户信息，
+     * 直连登录-兑换用户信息（旧系统后端调用）：凭一次性登录票据兑换用户信息并签发 OAuth 令牌，
      * 校验票据归属该 client 且未被消费
+     *
+     * <p>权限沿用直连认证开关（direct_auth_enabled=1），未开通返回 90014 且不会消费票据。</p>
      *
      * @param clientId     OAuth 客户端 ID
      * @param clientSecret 客户端密钥
      * @param ticket       一次性登录票据
-     * @return 用户信息（uid/昵称/头像/状态）
+     * @return 用户信息（uid/昵称/头像/状态）+ OAuth 令牌（access_token / refresh_token）
      */
     @Operation(summary = "直连登录-兑换用户信息（旧系统后端调用）")
     @PostMapping("/direct-user")

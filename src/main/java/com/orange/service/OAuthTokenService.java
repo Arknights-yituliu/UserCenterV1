@@ -135,6 +135,25 @@ public interface OAuthTokenService {
                             String code, String redirectUri, String codeVerifier, String refreshToken);
 
     /**
+     * 直连登录兑换令牌：为已完成客户端认证与直连权限校验的用户无条件签发
+     * access_token 与 refresh_token。
+     *
+     * <p>该入口专供 /oauth2/direct-user 兑换时调用，与授权码流程的区别：
+     * <ul>
+     *   <li>不校验 grant_types——调用方权限由直连认证开关在 AuthService 侧完成校验；</li>
+     *   <li>refresh_token 无条件签发，不因客户端未登记 refresh_token grant 而缺失；</li>
+     *   <li>授权范围取客户端登记范围全量，不接受请求侧收窄。</li>
+     * </ul>
+     * 签发的令牌与授权码流程签发的令牌完全等价，可访问 /oauth2/userinfo 等资源端点，
+     * 并同样写入反向索引与授权台账。</p>
+     *
+     * @param clientId 客户端 ID
+     * @param uid      用户 uid
+     * @return 令牌响应（access_token + refresh_token）
+     */
+    OAuthTokenVO issueDirectToken(String clientId, Long uid);
+
+    /**
      * 吊销令牌（RFC 7009）：客户端携带自己名下的 access_token / refresh_token 调用，
      * 使其立即失效。吊销 refresh_token 只使其本身失效（派生 access 由各自 TTL 自然过期，
      * 反向索引概率性惰性清理收敛）；令牌不存在或已失效同样视为成功（幂等，不泄露令牌是否有效）

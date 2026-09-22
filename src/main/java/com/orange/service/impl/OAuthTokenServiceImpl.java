@@ -563,6 +563,46 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         throw new BusinessException(ResultCode.OAUTH_GRANT_INVALID);
     }
 
+    /**
+     * 直连登录兑换令牌：无条件签发 access_token 与 refresh_token。
+     *
+     * <p>与授权码流程的差异见接口注释。这里刻意不调用 {@code isGrantAllowed}：
+     * 调用方权限已由直连认证开关（direct_auth_enabled）在 AuthService 侧校验，
+     * 若仍要求客户端登记 refresh_token grant，会出现"已开通直连却拿不到刷新凭证"
+     * 的配置陷阱。授权范围取客户端登记全量（直连流程没有 scope 协商环节）。</p>
+     *
+     * @param clientId 客户端 ID
+     * @param uid      用户 uid
+     * @return 令牌响应（access_token + refresh_token）
+     */
+    @Override
+    public OAuthTokenVO issueDirectToken(String clientId, Long uid) {
+        // 1. 重新加载客户端：兑换瞬间客户端可能已被停用或封禁
+        OAuthClient client = requireEnabledClient(clientId);
+        String scope = normalizeScope(client, null);
+        long accessTtl = resolveAccessTokenTtl(client);
+        long refreshTtl = resolveRefreshTokenTtl(client);
+
+        // 2. 签发 access_token：写令牌记录并登记反向索引
+        String accessToken = OAuthUtil.generateToken();
+        writeJson(RedisKeyUtil.oauthAccess(accessToken), createAccessRecord(client, uid, scope), accessTtl);
+        stringRedisTemplate.opsForSet().add(
+                RedisKeyUtil.uidOauth(uid), OAUTH_ACCESS_MEMBER_PREFIX + accessToken);
+
+        // 3. 无条件签发 refresh_token：固定凭证，有效期内可反复刷新
+        String refreshToken = OAuthUtil.generateToken();
+        writeJson(RedisKeyUtil.oauthRefresh(refreshToken),
+                createRefreshRecord(client, uid, scope), refreshTtl);
+        stringRedisTemplate.opsForSet().add(
+                RedisKeyUtil.uidOauth(uid), OAUTH_REFRESH_MEMBER_PREFIX + refreshToken);
+        // 授权台账：持久化查询与审计，失败不阻断签发
+        recordGrant(client, uid, scope, refreshToken, refreshTtl);
+
+        maybeCleanupExpiredGrantMembers(uid);
+        LogUtil.debug(OAuthTokenServiceImpl.class, "[OAuth] 直连登录签发令牌: clientId={}, uid={}", clientId, uid);
+        return buildTokenResponse(accessToken, refreshToken, accessTtl, scope);
+    }
+
     @Override
     public void revokeToken(String clientId, String clientSecret, String token) {
         // 1. 参数必填校验
