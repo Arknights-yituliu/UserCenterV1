@@ -85,6 +85,27 @@
 - **userinfo 自定义结构**：无 OIDC `sub`、`id_token`、Discovery/JWKS。仅当接入方要求标准 OIDC 时才构成差距。
 - **授权确认 API 化**：consent 采用「服务端返回回跳 URL，前端执行跳转」的接口化模型。
 
+### 3.5 内部令牌迁移端点（非标准扩展，非差距但需登记）
+
+- **端点**：`POST /oauth2/internal/migrate-token`，完整定义见 [BackEndV3与UC令牌统一方案](./BackEndV3与UC令牌统一方案.md) 第 5 节。
+- **性质**：非标准扩展，不属于 RFC 6749 的任何 grant type，也不面向标准 OAuth 客户端；它是 BackEndV3 → UC 的服务端间内部接口，用于把「旧自签 token 对应的 uid」按需兑换为一对 UC 令牌。因此 3.1 中「响应包裹 envelope」「错误统一 200 + `{code,msg}`」的偏差对本端点**不构成互操作问题**（无标准客户端调用）。
+- **认证方式**：HTTP 层不使用任何 OAuth 凭证（无 Bearer、无 client\_secret），改用 **Ed25519 非对称签名**——BackEndV3 持私钥签名，UC 只存公钥验签。签名原文（canonical 串）为：
+
+  ```
+  POST\n/oauth2/internal/migrate-token\n{kid}\n{client_id}\n{uid}\n{ts}\n{nonce}
+  ```
+
+  配套防护：`ts` 时间窗（默认 ±120s）+ `nonce` 一次性占用（`SET NX EX`，TTL 为时间窗的 2 倍）+ `kid` 公钥标识以支持轮换。**不采用共享密钥（HMAC）**：跨公网场景下任一侧泄漏即可伪造请求、冒充任意用户。
+- **公网可达这一事实**：BackEndV3 与 UC 分属两台服务器，无法只走内网，该路径**跨公网可达**；UC 亦未对该路径注册任何拦截器（`interceptor/WebConfig.java` 仅覆盖 `/user/**`、`/auth/logout`、`/oauth2/userinfo` 等），认证完全由端点自带。
+- **加固要求**（网络层是加固、不是屏障；**认证层是唯一准入屏障**）：
+  1. 认证层：Ed25519 验签必须始终开启，公钥经 `user-center.oauth.migrate.verify-keys` 按 `kid` 配置，支持轮换；
+  2. 传输层：强制 HTTPS（含反代终止 TLS 时按 `X-Forwarded-Proto` 判定）；
+  3. 来源层：`ip-allowlist` 仅放行 BackEndV3 固定出网 IP；
+  4. 限流层：网关按 IP + 应用层按 `uid`/`client_id` 三维限流；
+  5. 准入层：复用客户端直连开关（`direct_auth_enabled`）作为客户端准入，且**必须校验用户存在且未被封禁**，否则该端点会沦为绕过封禁的后门；
+  6. 开关：`user-center.oauth.migrate.enabled` 默认关闭，且**开关校验先于认证校验**，迁移结束后立即关闭；
+  7. 审计：只记录 `client_id`/`uid`/`origin`/旧 token 摘要/请求 IP/`kid`/结果，私钥、签名原文、令牌明文一律不入日志与审计。
+
 ## 4. 已确认的合规/加分项（避免改造时误伤）
 
 - response\_type 仅支持 `code`（更安全，RFC 推荐）。
