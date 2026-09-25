@@ -104,6 +104,26 @@ user-center:
     origin-cache-refresh-ms: 60000
     # 单个开发者账号可注册的 OAuth 客户端数量上限（默认 10）
     max-clients-per-owner: 5
+    # ===== 迁移兑换端点（POST /oauth2/internal/migrate-token）=====
+    # 该端点跨公网可达，认证层（Ed25519 验签）是唯一屏障，其余为加固项
+    migrate:
+      # 总开关：默认关闭，上线时显式打开，存量迁移结束后立即关闭
+      enabled: false
+      # 强制 HTTPS：非 HTTPS 直接拒绝；仅本地联调可临时置 false
+      require-https: true
+      # 认证方式：本期固定 ed25519
+      auth-mode: ed25519
+      # 允许的时间偏移（秒）：公网暴露下取小值，同时决定 nonce 的 TTL（该值 ×2）
+      clock-skew-seconds: 120
+      # 来源 IP 白名单（逗号分隔）：公网暴露下必配，只放行 BackEndV3 固定出口 IP；留空表示不限制
+      ip-allowlist: ""
+      # 限流：应用层按 IP / uid / client 三个维度（网关层另有按 IP 限流）
+      per-ip-per-minute: 600
+      per-uid-per-minute: 5
+      per-client-per-minute: 3000
+      # kid → Ed25519 公钥（Base64 的 X.509 SubjectPublicKeyInfo）映射，格式：k1=base64,k2=base64
+      # UC 侧只存公钥，从环境变量注入，绝不写进仓库；轮换期可同时配置新旧多把公钥
+      verify-keys: ""
 
 springdoc:
   api-docs:

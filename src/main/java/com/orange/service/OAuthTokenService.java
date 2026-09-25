@@ -154,6 +154,24 @@ public interface OAuthTokenService {
     OAuthTokenVO issueDirectToken(String clientId, Long uid);
 
     /**
+     * 迁移兑换签发：为一个 uid 现场签发一对全新的 UC 令牌，并替换上一轮迁移凭证。
+     *
+     * <p>与 {@link #issueDirectToken} 的差异在于「先撤旧、再签新、后写映射」由 Lua 脚本
+     * 一次性原子完成：签发前先撤销同一 (uid, clientId) 上上一轮迁移签发的 refresh_token，
+     * 并把新 refresh_token 记入“当前迁移凭证”映射。因此多标签页并发兑换时，该组合上
+     * 恒只保留最新一条迁移凭证，反向索引与台账都不会堆积。</p>
+     *
+     * <p>只替换迁移专用的那一条：不影响该用户通过 /oauth2/direct-user 正常登录产生的
+     * 授权记录。scope 与 TTL 规则与直连签发一致（scope 取客户端登记全量、TTL 取客户端
+     * 覆盖值或全局默认），并同样写入授权台账。</p>
+     *
+     * @param clientId 客户端 ID
+     * @param uid      用户 uid
+     * @return 令牌响应（access_token + refresh_token）
+     */
+    OAuthTokenVO issueMigratedToken(String clientId, Long uid);
+
+    /**
      * 吊销令牌（RFC 7009）：客户端携带自己名下的 access_token / refresh_token 调用，
      * 使其立即失效。吊销 refresh_token 只使其本身失效（派生 access 由各自 TTL 自然过期，
      * 反向索引概率性惰性清理收敛）；令牌不存在或已失效同样视为成功（幂等，不泄露令牌是否有效）

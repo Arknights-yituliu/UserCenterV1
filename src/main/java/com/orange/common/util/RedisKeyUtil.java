@@ -63,6 +63,12 @@ public final class RedisKeyUtil {
     /** 直连登录票据已使用标记 key 前缀：uc:oauth:direct:used:{ticket} */
     private static final String PREFIX_DIRECT_USED = "uc:oauth:direct:used:";
 
+    /** 迁移兑换请求防重放 key 前缀：uc:oauth:migrate:nonce:{nonce} */
+    private static final String PREFIX_OAUTH_MIGRATE_NONCE = "uc:oauth:migrate:nonce:";
+
+    /** 迁移凭证当前映射 key 前缀：uc:oauth:migrate:current:{clientId}:{uid}（值为上一轮迁移签发的 refresh_token） */
+    private static final String PREFIX_OAUTH_MIGRATE_CURRENT = "uc:oauth:migrate:current:";
+
     private RedisKeyUtil() {
     }
 
@@ -263,5 +269,26 @@ public final class RedisKeyUtil {
      */
     public static String directUsed(String ticket) {
         return PREFIX_DIRECT_USED + ticket;
+    }
+
+    /**
+     * 迁移兑换请求防重放 key（一次性 nonce）
+     *
+     * @param nonce 请求随机串
+     * @return Redis key
+     */
+    public static String oauthMigrateNonce(String nonce) {
+        return PREFIX_OAUTH_MIGRATE_NONCE + nonce;
+    }
+
+    /**
+     * 迁移凭证当前映射 key（值为上一轮迁移签发的 refresh_token，供下一轮替换时撤销）
+     *
+     * @param clientId 客户端 ID
+     * @param uid      用户 uid
+     * @return Redis key
+     */
+    public static String oauthMigrateCurrent(String clientId, Long uid) {
+        return PREFIX_OAUTH_MIGRATE_CURRENT + clientId + ":" + uid;
     }
 }

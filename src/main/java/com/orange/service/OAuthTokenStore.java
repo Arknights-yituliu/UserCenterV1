@@ -55,6 +55,19 @@ public interface OAuthTokenStore {
     boolean issueAccessFromRefresh(RefreshAccessRequest request);
 
     /**
+     * 原子签发迁移凭证。一次调用完成三件事：撤销上一轮迁移签发的 refresh_token
+     * （Redis 记录与反向索引成员）、写入新 access/refresh 令牌记录与索引成员、
+     * 更新“当前迁移凭证”映射，使同一 (uid, clientId) 上恒只保留最新一条迁移凭证。
+     *
+     * <p>只替换迁移专用的那一条凭证：映射不存在时不触碰该用户通过
+     * {@code /oauth2/direct-user} 正常登录产生的授权记录。</p>
+     *
+     * @param request 已序列化的迁移签发参数
+     * @return 签发结果；success=false 表示预校验未通过，此时未做任何写入
+     */
+    MigrateIssueResult issueMigratedToken(MigrateIssueRequest request);
+
+    /**
      * refresh token 换取 access token 所需的完整参数。
      *
      * <p>使用不可变 record 把参数作为一个整体传递，避免多个字符串/TTL 参数在调用处
@@ -67,5 +80,32 @@ public interface OAuthTokenStore {
             String newAccessJson,
             long accessTtlSeconds,
             Long uid) {
+    }
+
+    /**
+     * 迁移凭证签发参数。
+     *
+     * <p>JSON 在进入存储层前已经生成，Lua 只负责原子状态转换；映射 key 由
+     * clientId + uid 在存储层内部拼装，调用方无需关心 key 结构。</p>
+     */
+    record MigrateIssueRequest(
+            String clientId,
+            Long uid,
+            String newAccessToken,
+            String newAccessJson,
+            long accessTtlSeconds,
+            String newRefreshToken,
+            String newRefreshJson,
+            long refreshTtlSeconds) {
+    }
+
+    /**
+     * 迁移凭证签发结果。
+     *
+     * @param success             是否签发成功
+     * @param revokedRefreshToken 本次被替换撤销的上一轮迁移 refresh_token；
+     *                            首次兑换（映射不存在）时为 null
+     */
+    record MigrateIssueResult(boolean success, String revokedRefreshToken) {
     }
 }

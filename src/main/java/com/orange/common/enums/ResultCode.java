@@ -100,7 +100,13 @@ public enum ResultCode {
     /** 客户端待管理员审批或已被封禁 */
     OAUTH_CLIENT_BANNED(90013, "OAuth 客户端待管理员审批或已被封禁"),
     /** 客户端未开通直连认证能力 */
-    OAUTH_DIRECT_AUTH_NOT_ALLOWED(90014, "OAuth 客户端未开通直连认证能力");
+    OAUTH_DIRECT_AUTH_NOT_ALLOWED(90014, "OAuth 客户端未开通直连认证能力"),
+    /** 迁移兑换接口未开启 */
+    OAUTH_MIGRATE_DISABLED(90015, "迁移兑换接口未开启"),
+    /** 迁移请求签名校验失败 */
+    OAUTH_MIGRATE_SIGN_INVALID(90016, "迁移请求签名校验失败"),
+    /** 迁移请求已过期或已被使用 */
+    OAUTH_MIGRATE_REPLAY(90017, "迁移请求已过期或已被使用");
 
     /** 状态码 */
     private final int code;

@@ -603,6 +603,53 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         return buildTokenResponse(accessToken, refreshToken, accessTtl, scope);
     }
 
+    /**
+     * 迁移兑换签发：现场签发一对全新令牌，并原子替换上一轮迁移凭证。
+     *
+     * <p>与直连签发的差异：access/refresh 记录写入、反向索引登记、上一轮迁移凭证的
+     * 撤销与“当前迁移凭证”映射的更新，全部由 Lua 脚本一次完成
+     * （见 {@link OAuthTokenStore#issueMigratedToken}），故并发重复兑换不会堆积凭证。</p>
+     *
+     * @param clientId 客户端 ID
+     * @param uid      用户 uid
+     * @return 令牌响应（access_token + refresh_token）
+     */
+    @Override
+    public OAuthTokenVO issueMigratedToken(String clientId, Long uid) {
+        // 1. 重新加载客户端：兑换瞬间客户端可能已被停用或封禁
+        OAuthClient client = requireEnabledClient(clientId);
+        String scope = normalizeScope(client, null);
+        long accessTtl = resolveAccessTokenTtl(client);
+        long refreshTtl = resolveRefreshTokenTtl(client);
+
+        // 2. 生成令牌并先序列化记录文本，交由 Lua 原子完成「撤旧 + 写新 + 写映射」
+        String accessToken = OAuthUtil.generateToken();
+        String refreshToken = OAuthUtil.generateToken();
+        OAuthTokenStore.MigrateIssueRequest request = new OAuthTokenStore.MigrateIssueRequest(
+                clientId, uid,
+                accessToken, writeJsonValue(createAccessRecord(client, uid, scope)), accessTtl,
+                refreshToken, writeJsonValue(createRefreshRecord(client, uid, scope)), refreshTtl);
+        OAuthTokenStore.MigrateIssueResult result = oauthTokenStore.issueMigratedToken(request);
+        if (!result.success()) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR, "迁移令牌签发失败");
+        }
+
+        // 3. 台账：先把被本次替换撤销的上一轮迁移凭证置为已吊销，再登记本次授权
+        if (result.revokedRefreshToken() != null) {
+            try {
+                oauthGrantMapper.markRevokedByTokenHash(sha256Hex(result.revokedRefreshToken()));
+            } catch (Exception e) {
+                LogUtil.warn(OAuthTokenServiceImpl.class,
+                        "[OAuth] 更新被替换迁移凭证的台账状态失败: clientId={}, uid={}", clientId, uid, e);
+            }
+        }
+        recordGrant(client, uid, scope, refreshToken, refreshTtl);
+
+        maybeCleanupExpiredGrantMembers(uid);
+        LogUtil.debug(OAuthTokenServiceImpl.class, "[OAuth] 迁移兑换签发令牌: clientId={}, uid={}", clientId, uid);
+        return buildTokenResponse(accessToken, refreshToken, accessTtl, scope);
+    }
+
     @Override
     public void revokeToken(String clientId, String clientSecret, String token) {
         // 1. 参数必填校验
