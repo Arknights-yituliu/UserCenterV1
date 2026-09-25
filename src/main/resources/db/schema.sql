@@ -27,7 +27,8 @@ CREATE TABLE `user_info` (
     PRIMARY KEY (`uid`),
     UNIQUE KEY `uk_email` (`email`),
     UNIQUE KEY `uk_user_name` (`user_name`)
-) ENGINE = InnoDB COMMENT = '全局用户主表';
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '全局用户主表';
 
 -- -------------------------------------------------------------
 -- 2. 登录日志表
@@ -45,7 +46,8 @@ CREATE TABLE `login_log` (
     PRIMARY KEY (`id`),
     KEY `idx_uid` (`uid`),
     KEY `idx_login_time` (`login_time`)
-) ENGINE = InnoDB COMMENT = '登录日志表';
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '登录日志表';
 
 -- -------------------------------------------------------------
 -- 3. 操作审计日志表
@@ -62,7 +64,8 @@ CREATE TABLE `audit_log` (
     PRIMARY KEY (`id`),
     KEY `idx_operator` (`operator_type`, `operator_id`),
     KEY `idx_create_time` (`create_time`)
-) ENGINE = InnoDB COMMENT = '操作审计日志表';
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '操作审计日志表';
 
 -- -------------------------------------------------------------
 -- 4. OAuth2 客户端注册表（第三方 Web 网站接入登记）
@@ -88,7 +91,8 @@ CREATE TABLE `oauth_client` (
     PRIMARY KEY (`id`),
     KEY `idx_owner_enabled` (`owner_enabled`),
     KEY `idx_owner_uid` (`owner_uid`)
-) ENGINE = InnoDB COMMENT = 'OAuth2 客户端注册表';
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = 'OAuth2 客户端注册表';
 
 -- -------------------------------------------------------------
 -- 5. OAuth2 客户端 CORS Origin 表（独立审核和动态缓存）
@@ -104,7 +108,8 @@ CREATE TABLE `oauth_client_origin` (
     `update_time`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`client_id`),
     KEY `idx_cors_status` (`enabled`, `admin_approved`, `origin`)
-) ENGINE = InnoDB COMMENT = 'OAuth2客户端CORS Origin白名单';
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = 'OAuth2客户端CORS Origin白名单';
 
 -- -------------------------------------------------------------
 -- 6. SMTP 邮件渠道配置表（多渠道降级发送，配置存数据库可动态调整）
@@ -125,7 +130,8 @@ CREATE TABLE `smtp_config` (
     `update_time`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_account_key` (`account_key`)
-) ENGINE = InnoDB COMMENT = 'SMTP 邮件渠道配置表';
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = 'SMTP 邮件渠道配置表';
 
 -- -------------------------------------------------------------
 -- 7. 用户配置表
@@ -141,13 +147,14 @@ CREATE TABLE `user_config` (
     `source`      VARCHAR(32)  DEFAULT NULL COMMENT '来源：web/mini_app 等',
     `note`        VARCHAR(32)  DEFAULT NULL COMMENT '备注',
     `config`      LONGTEXT     NOT NULL COMMENT '配置内容（JSON 字符串）',
-    `content_hash` CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT 'config 内容 SHA-256',
+    `content_hash` CHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL COMMENT 'config 内容 SHA-256',
     `config_bytes` BIGINT UNSIGNED NOT NULL COMMENT 'config 的 UTF-8 字节数',
     `create_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `update_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_user_config_identity` (`uid`, `client_id`, `category`, `version`, `name`)
-) ENGINE = InnoDB COMMENT = '用户配置表';
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '用户配置表';
 -- -------------------------------------------------------------
 -- 8. 用户配置容量配额表
 -- -------------------------------------------------------------
@@ -160,7 +167,8 @@ CREATE TABLE `user_config_quota` (
     `update_time` DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`uid`),
     CONSTRAINT `chk_user_config_quota_used` CHECK (`used_bytes` <= `limit_bytes`)
-) ENGINE = InnoDB COMMENT = '用户配置容量配额';
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '用户配置容量配额';
 
 -- -------------------------------------------------------------
 -- 9. OAuth refresh_token 授权台账表
@@ -176,7 +184,7 @@ CREATE TABLE `oauth_grant` (
     `uid`         BIGINT          NOT NULL COMMENT '授权用户 uid',
     `client_id`   VARCHAR(128)    NOT NULL COMMENT '被授权的 OAuth 客户端 ID',
     `scope`       VARCHAR(256)    NOT NULL COMMENT '授权范围（逗号分隔）',
-    `token_hash`  CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT 'refresh_token 的 SHA-256（不落明文）',
+    `token_hash`  CHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL COMMENT 'refresh_token 的 SHA-256（不落明文）',
     `issue_time`  DATETIME        NOT NULL COMMENT '授权（签发）时间',
     `expire_time` DATETIME        NOT NULL COMMENT '过期时间',
     `revoked`     TINYINT         NOT NULL DEFAULT 0 COMMENT '是否已吊销：1=已吊销 0=有效',
@@ -185,7 +193,8 @@ CREATE TABLE `oauth_grant` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_oauth_grant_token_hash` (`token_hash`),
     KEY `idx_oauth_grant_uid` (`uid`, `revoked`, `expire_time`)
-) ENGINE = InnoDB COMMENT = 'OAuth refresh_token 授权台账';
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = 'OAuth refresh_token 授权台账';
 
 -- -------------------------------------------------------------
 -- 10. 游戏账号与用户中心账号的多对多绑定关系
@@ -196,12 +205,12 @@ CREATE TABLE `oauth_grant` (
 -- -------------------------------------------------------------
 DROP TABLE IF EXISTS `ak_account_binding`;
 CREATE TABLE `ak_account_binding` (
-    `ak_uid`    VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '游戏账号UID，一套干员数据的归属键',
+    `ak_uid`    VARCHAR(32) NOT NULL COMMENT '游戏账号UID，一套干员数据的归属键',
     `owner_uid` BIGINT      NOT NULL COMMENT '绑定此游戏账号的用户中心UID，同一游戏账号可有多个用户',
-    `client_id` VARCHAR(64) NOT NULL COMMENT '绑定时的接入客户端ID，供鉴权隔离',
-    PRIMARY KEY (`ak_uid`, `owner_uid`, `client_id`),
-    KEY `idx_owner_accounts` (`owner_uid`, `client_id`, `ak_uid`) COMMENT '按当前用户和客户端查询已绑定游戏账号'
-) ENGINE = InnoDB COMMENT = '游戏账号与用户中心账号多对多绑定关系，按三字段去重';
+    PRIMARY KEY (`ak_uid`, `owner_uid`),
+    KEY `idx_owner_accounts` (`owner_uid`, `ak_uid`) COMMENT '按当前用户查询已绑定游戏账号'
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '游戏账号与用户中心账号多对多绑定关系，按用户和游戏账号去重';
 
 -- -------------------------------------------------------------
 -- 11. 按游戏账号 UID 去重的共享角色信息
@@ -209,11 +218,12 @@ CREATE TABLE `ak_account_binding` (
 DROP TABLE IF EXISTS `ak_player_info`;
 CREATE TABLE `ak_player_info` (
     `id`          BIGINT      NOT NULL AUTO_INCREMENT COMMENT '游戏角色数据库行ID',
-    `ak_uid`      VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '游戏角色UID，与绑定表及干员表采用相同类型和排序规则',
+    `ak_uid`      VARCHAR(32) NOT NULL COMMENT '游戏角色UID，与绑定表及干员表采用相同类型和排序规则',
     `create_time` BIGINT      NOT NULL COMMENT '记录创建时间的Unix毫秒时间戳，服务端生成',
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_role_ak_uid` (`ak_uid`) COMMENT '每个游戏角色UID只保存一份角色信息'
-) ENGINE = InnoDB COMMENT = '按游戏角色UID去重的共享游戏角色信息';
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '按游戏角色UID去重的共享游戏角色信息';
 
 -- -------------------------------------------------------------
 -- 12. 游戏账号干员数据（一行一个干员，按 ak_uid 归属）
@@ -221,8 +231,8 @@ CREATE TABLE `ak_player_info` (
 DROP TABLE IF EXISTS `operator_progression_data`;
 CREATE TABLE `operator_progression_data` (
     `id`               BIGINT      NOT NULL AUTO_INCREMENT COMMENT '数据库自增行ID，响应中称recordId',
-    `ak_uid`           VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '游戏账号UID，按此账号读取与更新',
-    `operator_id`      VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '稳定干员编码，对应JSON中的id',
+    `ak_uid`           VARCHAR(32) NOT NULL COMMENT '游戏账号UID，按此账号读取与更新',
+    `operator_id`      VARCHAR(64) NOT NULL COMMENT '稳定干员编码，对应JSON中的id',
     `rarity`           TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '干员星级，0表示未提供；业务代码筛选',
     `level`            SMALLINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '干员等级',
     `evolve_phase`     TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '精英化阶段',
@@ -239,7 +249,8 @@ CREATE TABLE `operator_progression_data` (
     `updated_at`       DATETIME(3) NOT NULL COMMENT '该干员最后一次实际变更时间',
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_ak_operator` (`ak_uid`, `operator_id`) COMMENT '一个游戏账号下每个干员编码仅一条记录，支持全量读取'
-) ENGINE = InnoDB COMMENT = '游戏账号干员数据';
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '游戏账号干员数据';
 
 -- -------------------------------------------------------------
 -- 13. 用户排班表
@@ -253,5 +264,6 @@ CREATE TABLE `user_schedule` (
     `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`id`),
     KEY `idx_user_schedule_uid_update_time` (`uid`, `update_time`)
-) ENGINE = InnoDB COMMENT = '用户排班表，每个用户最多 5 条由业务层控制';
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '用户排班表，每个用户最多 5 条由业务层控制';
 
