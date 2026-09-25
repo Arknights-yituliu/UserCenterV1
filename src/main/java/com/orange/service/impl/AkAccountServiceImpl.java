@@ -1,12 +1,10 @@
 package com.orange.service.impl;
 
-import com.orange.common.context.UserContext;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.exception.RateLimitedException;
 import com.orange.common.util.RedisKeyUtil;
 import com.orange.common.util.SignUtil;
-import com.orange.entity.dto.akoperator.AkPlayerInfoRequest;
 import com.orange.entity.dto.akoperator.OperatorItemRequest;
 import com.orange.entity.dto.akoperator.OperatorSaveRequest;
 import com.orange.entity.po.AkPlayerInfo;
@@ -40,10 +38,10 @@ import java.util.regex.Pattern;
 /**
  * 游戏账号与干员数据服务实现
  *
- * <p>鉴权与归属：uid 取自登录上下文，client_id 取自登录上下文；读取前必须核对本人的绑定关系，
+ * <p>鉴权与归属：uid 取自可信登录上下文；读取前必须核对本人的绑定关系，
  * 未绑定统一返回业务码 80008，不通过错误消息暴露账号是否存在。</p>
  *
- * <p>保存顺序：登录鉴权（拦截器）→ 路径与角色信息校验 → 归一化干员数据 →
+ * <p>保存顺序：登录鉴权（拦截器）→ 目标账号与角色信息校验 → 归一化干员数据 →
  * 占用该 ak_uid 的上传限流名额 → 开启写事务，避免非法请求占用别人的名额。
  * 首次上传该 ak_uid 时不做额外凭据校验，绑定关系在写事务中直接建立。</p>
  *
@@ -54,7 +52,7 @@ public class AkAccountServiceImpl implements AkAccountService {
 
     private static final Logger log = LoggerFactory.getLogger(AkAccountServiceImpl.class);
 
-    /** 游戏账号 UID 合法格式：不超过 32 位可见 ASCII 字符（与列定义 VARCHAR(32) ascii_bin 一致） */
+    /** 游戏账号 UID 合法格式：不超过 32 位可见 ASCII 字符（与列定义 VARCHAR(32) utf8mb4_bin 一致，保持大小写敏感） */
     private static final Pattern AK_UID_PATTERN = Pattern.compile("^[\\x21-\\x7E]{1,32}$");
 
     /** 上传限流业务标识，构成 Redis key 的中间段 */
@@ -94,15 +92,14 @@ public class AkAccountServiceImpl implements AkAccountService {
     }
 
     /**
-     * 查询当前用户在当前客户端下已绑定的游戏账号列表
+     * 查询当前用户已绑定的游戏账号列表
      *
      * @param uid 用户中心 UID
      * @return 已绑定游戏账号列表，无绑定时返回空列表
      */
     @Override
     public List<AkAccountVO> listBoundAccounts(Long uid) {
-        String clientId = requireClientId();
-        List<String> akUids = bindingMapper.selectAkUidsByOwner(uid, clientId);
+        List<String> akUids = bindingMapper.selectAkUidsByOwner(uid);
         if (akUids.isEmpty()) {
             return Collections.emptyList();
         }
@@ -128,9 +125,8 @@ public class AkAccountServiceImpl implements AkAccountService {
      */
     @Override
     public OperatorListVO listOperators(Long uid, String akUid) {
-        String clientId = requireClientId();
         validateAkUid(akUid);
-        requireBinding(akUid, uid, clientId);
+        requireBinding(akUid, uid);
         List<OperatorProgressionData> rows = operatorMapper.selectByAkUid(akUid);
         List<OperatorVO> items = new ArrayList<>(rows.size());
         for (OperatorProgressionData row : rows) {
@@ -143,25 +139,20 @@ public class AkAccountServiceImpl implements AkAccountService {
      * 批量保存某游戏账号的角色信息与干员数据
      *
      * @param uid     用户中心 UID
-     * @param akUid   请求参数中的游戏账号 UID
-     * @param request 保存参数（角色信息 + 干员数组）
+     * @param request 保存参数（角色信息 + 干员数组），目标游戏账号取自 request.playerInfo.akUid
      * @return 新增/更新/未变更条数统计，三项之和等于传入记录数
      */
     @Override
-    public OperatorSaveResultVO saveOperators(Long uid, String akUid, OperatorSaveRequest request) {
-        String clientId = requireClientId();
+    public OperatorSaveResultVO saveOperators(Long uid, OperatorSaveRequest request) {
+        String akUid = request.getPlayerInfo().getAkUid();
         validateAkUid(akUid);
-        AkPlayerInfoRequest playerInfoRequest = request.getPlayerInfo();
-        if (!akUid.equals(playerInfoRequest.getAkUid())) {
-            throw new BusinessException(ResultCode.PARAM_VALID_ERROR, "请求参数中的游戏账号UID与playerInfo.akUid不一致");
-        }
         // 先归一化（缺省/null/空字符串补 0）再校验重复 ID，保证比较语义与落库值一致
         List<OperatorProgressionData> operators = normalizeOperators(akUid, request.getOperators());
 
         // 参数校验通过后占用该 ak_uid 的限流名额；首次上传不做凭据校验，绑定关系由写事务建立
         acquireSaveQuota(akUid);
 
-        return saveWithRetry(akUid, uid, clientId, operators);
+        return saveWithRetry(akUid, uid, operators);
     }
 
     /**
@@ -171,17 +162,15 @@ public class AkAccountServiceImpl implements AkAccountService {
      *
      * @param akUid     游戏账号 UID
      * @param uid       用户中心 UID
-     * @param clientId  客户端标识
      * @param operators 本次提交的干员记录（已归一化）
      * @return 新增/更新/未变更条数统计
      */
     private OperatorSaveResultVO saveWithRetry(String akUid,
-                                              Long uid,
-                                              String clientId,
-                                              List<OperatorProgressionData> operators) {
+                                               Long uid,
+                                               List<OperatorProgressionData> operators) {
         for (int attempt = 0; ; attempt++) {
             try {
-                return saveExecutor.save(akUid, uid, clientId, operators);
+                return saveExecutor.save(akUid, uid, operators);
             } catch (DuplicateKeyException | PessimisticLockingFailureException e) {
                 if (attempt >= SAVE_MAX_RETRY) {
                     log.warn("干员数据保存冲突重试耗尽, akUidHash={}, attempts={}",
@@ -224,10 +213,9 @@ public class AkAccountServiceImpl implements AkAccountService {
      *
      * @param akUid    游戏账号 UID
      * @param uid      用户中心 UID
-     * @param clientId 客户端标识
      */
-    private void requireBinding(String akUid, Long uid, String clientId) {
-        if (bindingMapper.countBinding(akUid, uid, clientId) == 0) {
+    private void requireBinding(String akUid, Long uid) {
+        if (bindingMapper.countBinding(akUid, uid) == 0) {
             throw new BusinessException(ResultCode.FORBIDDEN);
         }
     }
@@ -352,16 +340,4 @@ public class AkAccountServiceImpl implements AkAccountService {
         return value == null ? 0 : value;
     }
 
-    /**
-     * 获取登录上下文中的来源客户端标识，缺失时拒绝请求
-     *
-     * @return 客户端标识
-     */
-    private String requireClientId() {
-        String clientId = UserContext.getClientId();
-        if (!StringUtils.hasText(clientId)) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "缺少来源客户端标识，请重新登录");
-        }
-        return clientId;
-    }
 }

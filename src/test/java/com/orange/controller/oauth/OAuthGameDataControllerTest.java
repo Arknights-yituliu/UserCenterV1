@@ -65,24 +65,23 @@ class OAuthGameDataControllerTest {
         UserContext.setUid(7L);
         UserContext.setScope("gama-data.write");
 
-        assertDoesNotThrow(() -> controller.saveOperators("ak-1", new OperatorSaveRequest()));
+        assertDoesNotThrow(() -> controller.saveOperators(new OperatorSaveRequest()));
 
-        verify(accountService).saveOperators(eq(7L), eq("ak-1"), any(OperatorSaveRequest.class));
+        verify(accountService).saveOperators(eq(7L), any(OperatorSaveRequest.class));
     }
 
     @Test
-    void userAndOauthAccountRoutesUseAkUidQueryParameter() throws NoSuchMethodException {
+    void userAndOauthOperatorReadRoutesUseAkUidQueryParameter() throws NoSuchMethodException {
         assertAccountRoutes(AkAccountController.class);
         assertAccountRoutes(OAuthAkAccountController.class);
     }
 
     private void assertAccountRoutes(Class<?> controllerClass) throws NoSuchMethodException {
         Method read = controllerClass.getDeclaredMethod("listOperators", String.class);
-        Method save = controllerClass.getDeclaredMethod("saveOperators", String.class, OperatorSaveRequest.class);
+        Method save = controllerClass.getDeclaredMethod("saveOperators", OperatorSaveRequest.class);
 
         assertEquals("/operators", read.getAnnotation(GetMapping.class).value()[0]);
         assertEquals("/operators/save", save.getAnnotation(PostMapping.class).value()[0]);
         assertEquals("akUid", read.getParameters()[0].getAnnotation(RequestParam.class).value());
-        assertEquals("akUid", save.getParameters()[0].getAnnotation(RequestParam.class).value());
     }
 }

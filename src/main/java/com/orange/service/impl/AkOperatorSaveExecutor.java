@@ -58,16 +58,14 @@ public class AkOperatorSaveExecutor {
      *
      * @param akUid              游戏账号 UID
      * @param uid                用户中心 UID
-     * @param clientId           客户端标识
      * @param submittedOperators 本次提交的干员记录（已归一化，数值字段非空）
      * @return 新增/更新/未变更条数统计
      */
     @Transactional(rollbackFor = Exception.class)
     public OperatorSaveResultVO save(String akUid,
                                      Long uid,
-                                     String clientId,
                                      List<OperatorProgressionData> submittedOperators) {
-        ensureBinding(akUid, uid, clientId);
+        ensureBinding(akUid, uid);
         savePlayerInfo(akUid);
         return saveOperators(akUid, submittedOperators);
     }
@@ -77,11 +75,10 @@ public class AkOperatorSaveExecutor {
      *
      * @param akUid    游戏账号 UID
      * @param uid      用户中心 UID
-     * @param clientId 客户端标识
      */
-    private void ensureBinding(String akUid, Long uid, String clientId) {
-        if (bindingMapper.countBinding(akUid, uid, clientId) == 0) {
-            bindingMapper.insertBinding(akUid, uid, clientId);
+    private void ensureBinding(String akUid, Long uid) {
+        if (bindingMapper.countBinding(akUid, uid) == 0) {
+            bindingMapper.insertBinding(akUid, uid);
         }
     }
 

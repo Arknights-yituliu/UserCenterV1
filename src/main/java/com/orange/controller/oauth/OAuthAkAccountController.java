@@ -66,17 +66,15 @@ public class OAuthAkAccountController {
     }
 
     /**
-     * 批量保存某游戏账号的角色信息与干员数据。
+     * 批量保存某游戏账号的角色信息与干员数据，目标账号取自请求体 playerInfo.akUid。
      *
-     * @param akUid 游戏账号 UID
      * @param request 保存参数
      * @return 新增、更新与未变更数量
      */
     @Operation(summary = "批量保存角色信息与干员数据（OAuth）")
     @PostMapping("/operators/save")
-    public Result<OperatorSaveResultVO> saveOperators(@RequestParam("akUid") String akUid,
-                                                     @Valid @RequestBody OperatorSaveRequest request) {
+    public Result<OperatorSaveResultVO> saveOperators(@Valid @RequestBody OperatorSaveRequest request) {
         UserContext.requireScope(OAuthScope.GAMA_DATA_WRITE);
-        return Result.success(akAccountService.saveOperators(UserContext.requireUid(), akUid, request));
+        return Result.success(akAccountService.saveOperators(UserContext.requireUid(), request));
     }
 }

@@ -15,7 +15,7 @@ Authorization: Bearer <access_token>
 | `gama-data.read` | 读取排班表、已绑定游戏账号和干员数据 |
 | `gama-data.write` | 保存游戏账号角色信息和干员数据 |
 
-缺少所需 scope 时响应 `code=80008`。OAuth Token 同时绑定用户与客户端；游戏账号查询和保存仍按该 `uid + client_id` 的既有归属规则校验。
+缺少所需 scope 时响应 `code=80008`。OAuth Token 仍同时绑定用户与客户端，用于客户端认证和 scope 校验；游戏账号绑定关系只按 Token 中的用户 `uid` 校验，不按 `client_id` 拆分。
 
 ## 2. 排班表
 
@@ -37,9 +37,9 @@ Authorization: Bearer <access_token>
 以上读取接口需要 `gama-data.read`，返回结构与用户侧对应接口一致。干员读取响应包含 `Cache-Control: private, no-cache`。
 
 ```http
-POST /oauth2/ak-accounts/operators/save?akUid={akUid}
+POST /oauth2/ak-accounts/operators/save
 Content-Type: application/json
 Authorization: Bearer <access_token>
 ```
 
-保存接口需要 `gama-data.write`，请求体和响应结构与 `POST /user/ak-accounts/operators/save?akUid={akUid}` 完全一致。
+保存接口需要 `gama-data.write`，目标游戏账号取自请求体 `playerInfo.akUid`；请求体和响应结构与 `POST /user/ak-accounts/operators/save` 完全一致。

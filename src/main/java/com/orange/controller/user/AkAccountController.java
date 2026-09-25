@@ -50,7 +50,7 @@ public class AkAccountController {
     }
 
     /**
-     * 查询当前用户在当前客户端下已绑定的游戏账号列表（不含干员正文）
+     * 查询当前用户已绑定的游戏账号列表（不含干员正文）
      *
      * @return 已绑定游戏账号列表
      */
@@ -78,14 +78,12 @@ public class AkAccountController {
     /**
      * 批量保存某游戏账号的角色信息与干员数据：传入的干员 ID 有则按属性比较后更新，无则新增，未传入的记录不处理
      *
-     * @param akUid   游戏账号 UID，必须与请求体 playerInfo.akUid 一致
-     * @param request 保存参数（角色信息 + 非空干员数组）
+     * @param request 保存参数（角色信息 + 非空干员数组），目标游戏账号取自 playerInfo.akUid
      * @return 新增/更新/未变更条数统计
      */
     @Operation(summary = "批量保存角色信息与干员数据")
     @PostMapping("/operators/save")
-    public Result<OperatorSaveResultVO> saveOperators(@RequestParam("akUid") String akUid,
-                                                     @Valid @RequestBody OperatorSaveRequest request) {
-        return Result.success(akAccountService.saveOperators(UserContext.requireUid(), akUid, request));
+    public Result<OperatorSaveResultVO> saveOperators(@Valid @RequestBody OperatorSaveRequest request) {
+        return Result.success(akAccountService.saveOperators(UserContext.requireUid(), request));
     }
 }
