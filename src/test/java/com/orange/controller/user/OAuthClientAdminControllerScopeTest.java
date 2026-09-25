@@ -22,6 +22,8 @@ class OAuthClientAdminControllerScopeTest {
 
         assertEquals(6, scopes.size());
         assertFalse(scopes.stream().anyMatch(scope -> "user.email".equals(scope.getCode())));
+        // all 是仅限管理员手工写库授予的元范围，不能作为自助配置项暴露
+        assertFalse(scopes.stream().anyMatch(scope -> "all".equals(scope.getCode())));
         assertTrue(scopes.stream().anyMatch(scope -> "gama-data.read".equals(scope.getCode())));
         assertTrue(scopes.stream().anyMatch(scope -> "gama-data.write".equals(scope.getCode())));
     }

@@ -348,8 +348,12 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
             if (value.contains(",")) {
                 throw new BusinessException(ResultCode.PARAM_ERROR, "单个授权范围不能包含英文逗号: " + value);
             }
-            if (OAuthScope.findByCode(value).isEmpty()) {
-                throw new BusinessException(ResultCode.PARAM_ERROR, "不支持的授权范围: " + value);
+            OAuthScope found = OAuthScope.findByCode(value).orElseThrow(() ->
+                    new BusinessException(ResultCode.PARAM_ERROR, "不支持的授权范围: " + value));
+            // 元范围（如 all）只能由管理员直接写库授予，注册 / 编辑接口一律拒绝
+            if (found.isManualOnly()) {
+                throw new BusinessException(ResultCode.PARAM_ERROR,
+                        "该授权范围仅支持管理员手工授予，不能通过注册 / 编辑提交: " + value);
             }
             normalized.add(value);
         }

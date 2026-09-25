@@ -1050,6 +1050,9 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     /**
      * 归一化并校验 scope：请求的 scope 必须是客户端已授权范围的子集
      *
+     * <p>元范围 {@code all} 只可能由管理员手工写库授予，且仅对机密客户端生效；登记了 all
+     * 的客户端视为可申请任意具体范围，未显式申请范围时签发通配令牌（scope=all）。</p>
+     *
      * @param client 客户端实体
      * @param scope  请求的 scope（可空）
      * @return 最终授权的 scope（逗号分隔）
@@ -1059,12 +1062,27 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         if (allowed.stream().anyMatch(value -> OAuthScope.findByCode(value).isEmpty())) {
             throw new BusinessException(ResultCode.OAUTH_SCOPE_INVALID, "客户端存在不支持的授权范围");
         }
+        boolean hasAll = allowed.contains(OAuthScope.ALL.getCode());
+        // 公共客户端的 redirect_uri 一旦被劫持，all 等于交出全部接口权限，因此即使被手工写库也直接拒绝
+        if (hasAll && !OAuthClientAuthMethod.CLIENT_SECRET_POST.matches(client.getAuthMethods())) {
+            throw new BusinessException(ResultCode.OAUTH_SCOPE_INVALID, "all 仅限机密客户端使用");
+        }
+        // 登记 all 时把可申请集合展开为「全部具体范围 + all 本身」，其余客户端保持原语义
+        Set<String> effectiveAllowed = allowed;
+        if (hasAll) {
+            Set<String> expanded = new LinkedHashSet<>();
+            for (OAuthScope item : OAuthScope.selectable()) {
+                expanded.add(item.getCode());
+            }
+            expanded.add(OAuthScope.ALL.getCode());
+            effectiveAllowed = expanded;
+        }
         if (!StringUtils.hasText(scope)) {
-            return String.join(",", allowed);
+            return hasAll ? OAuthScope.ALL.getCode() : String.join(",", effectiveAllowed);
         }
         for (String s : scope.split(",")) {
             String value = s.trim();
-            if (OAuthScope.findByCode(value).isEmpty() || !allowed.contains(value)) {
+            if (OAuthScope.findByCode(value).isEmpty() || !effectiveAllowed.contains(value)) {
                 throw new BusinessException(ResultCode.OAUTH_SCOPE_INVALID, "scope 不在授权范围内: " + s.trim());
             }
         }

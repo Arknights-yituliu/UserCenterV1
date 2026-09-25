@@ -20,7 +20,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
-import java.util.Arrays;
 import java.util.stream.Collectors;
 
 /**
@@ -51,12 +50,14 @@ public class OAuthClientAdminController {
     /**
      * 查询平台支持的 OAuth 授权范围，供客户端注册、编辑页展示与选择。
      *
+     * <p>仅返回可自助配置的范围；管理员手工授予的元范围（all）不会出现在这里。</p>
+     *
      * @return scope 标识及其展示元数据
      */
     @Operation(summary = "查询可配置的 OAuth 授权范围")
     @GetMapping("/scopes")
     public Result<List<OAuthScopeVO>> scopes() {
-        return Result.success(Arrays.stream(OAuthScope.values())
+        return Result.success(OAuthScope.selectable().stream()
                 .map(OAuthScopeVO::of)
                 .collect(Collectors.toList()));
     }

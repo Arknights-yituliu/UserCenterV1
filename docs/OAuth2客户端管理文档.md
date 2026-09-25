@@ -133,6 +133,16 @@ Authorization: Bearer <UC_SESSION_TOKEN>
 
 客户端登记的 scopes 是其可申请范围上限；授权请求未携带 `scope` 时，服务端会签发该客户端登记的全部范围。
 
+#### 4.2.1 元范围 `all`（仅限管理员手工授予）
+
+`all` 是通配范围：令牌 scope 为 `all` 时，所有 `UserContext.requireScope` 校验一律放行。它有以下约束：
+
+- **不可自助配置**：上述 scope 元数据接口不返回它，注册 / 更新接口提交即报参数错误（`10001`），只能由管理员直接写 `oauth_client.scopes`。
+- **仅限机密客户端**：`auth_methods=client_secret_post` 才生效；公共客户端即使被手工写库，签发令牌时也会被拒绝（`90003`），避免 `redirect_uri` 被劫持后拿到全权限。
+- **可申请任意子集**：登记 `all` 的客户端申请任意具体 scope 子集都合法；请求未携带 `scope` 时签发通配令牌（`scope=all`）。该逻辑在 `OAuthTokenServiceImpl.normalizeScope` 统一把关，授权码、直连登录、迁移兑换三条签发路径都生效。
+
+**注意**：`all` 会绕过所有 scope 校验，等同全部接口权限，泄密后果等同于客户端凭据泄漏，请只授予受信的第一方服务端应用，并在撤销授权时按普通令牌一并吊销。
+
 ### 4.3 地址规则
 
 `redirectUris` 规则：

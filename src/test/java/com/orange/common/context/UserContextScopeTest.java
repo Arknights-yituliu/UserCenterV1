@@ -33,4 +33,13 @@ class UserContextScopeTest {
 
         assertEquals(80008, exception.getCode());
     }
+
+    @Test
+    void requireScopeAllowsEverythingWhenAllGranted() {
+        // 元范围 all 视为已获得全部范围
+        UserContext.setScope(OAuthScope.ALL.getCode());
+
+        assertDoesNotThrow(() -> UserContext.requireScope(OAuthScope.CONFIG_WRITE));
+        assertDoesNotThrow(() -> UserContext.requireScope(OAuthScope.GAMA_DATA_WRITE));
+    }
 }

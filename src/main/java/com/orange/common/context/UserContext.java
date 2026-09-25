@@ -80,6 +80,9 @@ public final class UserContext {
     /**
      * 校验当前 OAuth 令牌已获得指定 scope。
      *
+     * <p>令牌 scope 含元范围 {@link OAuthScope#ALL}（由管理员手工写库授予的机密客户端）时，
+     * 视为已获得全部范围，直接放行。</p>
+     *
      * @param required 所需授权范围
      */
     public static void requireScope(OAuthScope required) {
@@ -87,9 +90,10 @@ public final class UserContext {
         if (currentScope == null || currentScope.isBlank()) {
             throw new BusinessException(ResultCode.FORBIDDEN, "缺少授权范围: " + required.getCode());
         }
+        String allCode = OAuthScope.ALL.getCode();
         boolean granted = java.util.Arrays.stream(currentScope.split(","))
                 .map(String::trim)
-                .anyMatch(required.getCode()::equals);
+                .anyMatch(value -> required.getCode().equals(value) || allCode.equals(value));
         if (!granted) {
             throw new BusinessException(ResultCode.FORBIDDEN, "缺少授权范围: " + required.getCode());
         }

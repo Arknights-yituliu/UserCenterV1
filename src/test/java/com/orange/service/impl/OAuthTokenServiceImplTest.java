@@ -315,6 +315,32 @@ class OAuthTokenServiceImplTest {
     }
 
     @Test
+    void confidentialClientWithAllScopeCanRequestAnySubset() {
+        // 管理员手工写库授予 all 后，机密客户端可申请任意具体范围
+        OAuthClient client = client("client_secret_post", "authorization_code", "secret", 0);
+        client.setScopes("all");
+        when(oauthClientMapper.selectById("client-1")).thenReturn(client);
+
+        String code = service.createAuthorizationCode(
+                "client-1", REDIRECT_URI, "gama-data.write", null, null, 9L);
+
+        assertNotNull(code);
+    }
+
+    @Test
+    void allScopeIsRejectedForPublicClient() {
+        // 公共客户端即使被手工写库授予 all 也必须拒绝，避免 redirect_uri 被劫持后拿到全权限
+        OAuthClient client = client("none", "authorization_code", null, 1);
+        client.setScopes("all");
+        when(oauthClientMapper.selectById("client-1")).thenReturn(client);
+
+        BusinessException exception = assertThrows(BusinessException.class, () -> service.createAuthorizationCode(
+                "client-1", REDIRECT_URI, null, OAuthUtil.pkceS256(VERIFIER), "S256", 9L));
+
+        assertEquals(ResultCode.OAUTH_SCOPE_INVALID.getCode(), exception.getCode());
+    }
+
+    @Test
     void revokeClientAuthorizationDeletesOnlyMatchingClientTokens() throws Exception {
         Long uid = 9L;
         String indexKey = RedisKeyUtil.uidOauth(uid);
