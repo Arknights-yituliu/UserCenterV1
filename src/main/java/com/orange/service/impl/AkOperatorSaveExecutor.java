@@ -71,15 +71,16 @@ public class AkOperatorSaveExecutor {
     }
 
     /**
-     * 在事务中复核本人绑定关系，缺失则补建（并发重复插入由组合主键去重）
+     * 在事务中保证本人绑定存在，并把“最近导入时间”推进到本次导入
+     *
+     * <p>首次导入建立绑定（create_time 与 update_time 由数据库默认值写入），此后每次导入
+     * 只刷新 update_time，使账号列表能按最近导入时间倒序。并发重复插入由组合主键兜底。</p>
      *
      * @param akUid    游戏账号 UID
      * @param uid      用户中心 UID
      */
     private void ensureBinding(String akUid, Long uid) {
-        if (bindingMapper.countBinding(akUid, uid) == 0) {
-            bindingMapper.insertBinding(akUid, uid);
-        }
+        bindingMapper.upsertBinding(akUid, uid);
     }
 
     /**

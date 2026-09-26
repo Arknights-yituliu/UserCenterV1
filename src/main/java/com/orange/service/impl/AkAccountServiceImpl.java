@@ -7,6 +7,7 @@ import com.orange.common.util.RedisKeyUtil;
 import com.orange.common.util.SignUtil;
 import com.orange.entity.dto.akoperator.OperatorItemRequest;
 import com.orange.entity.dto.akoperator.OperatorSaveRequest;
+import com.orange.entity.po.AkAccountBinding;
 import com.orange.entity.po.AkPlayerInfo;
 import com.orange.entity.po.OperatorProgressionData;
 import com.orange.entity.vo.akoperator.AkAccountVO;
@@ -92,26 +93,31 @@ public class AkAccountServiceImpl implements AkAccountService {
     }
 
     /**
-     * 查询当前用户已绑定的游戏账号列表
+     * 查询当前用户已绑定的游戏账号列表，按最近导入时间倒序
+     *
+     * <p>倒序由 Mapper 的 SQL 保证，前端取首条即可默认展示最新导入的账号数据。</p>
      *
      * @param uid 用户中心 UID
-     * @return 已绑定游戏账号列表，无绑定时返回空列表
+     * @return 已绑定游戏账号列表（含创建时间与最近导入时间），最近的在前，无绑定时返回空列表
      */
     @Override
     public List<AkAccountVO> listBoundAccounts(Long uid) {
-        List<String> akUids = bindingMapper.selectAkUidsByOwner(uid);
-        if (akUids.isEmpty()) {
+        List<AkAccountBinding> bindings = bindingMapper.selectByOwnerOrderByUpdateTime(uid);
+        if (bindings.isEmpty()) {
             return Collections.emptyList();
         }
+        List<String> akUids = new ArrayList<>(bindings.size());
+        for (AkAccountBinding binding : bindings) {
+            akUids.add(binding.getAkUid());
+        }
         Map<String, AkPlayerInfo> infoMap = loadPlayerInfoMap(akUids);
-        List<AkAccountVO> accounts = new ArrayList<>(akUids.size());
-        for (String akUid : akUids) {
-            AkPlayerInfo info = infoMap.get(akUid);
+        List<AkAccountVO> accounts = new ArrayList<>(bindings.size());
+        for (AkAccountBinding binding : bindings) {
             // 角色信息缺失时不展示，但保留绑定关系本身
-            if (info == null) {
+            if (!infoMap.containsKey(binding.getAkUid())) {
                 continue;
             }
-            accounts.add(toAccountVO(info));
+            accounts.add(toAccountVO(binding));
         }
         return accounts;
     }
@@ -282,14 +288,18 @@ public class AkAccountServiceImpl implements AkAccountService {
     }
 
     /**
-     * 角色信息实体转已绑定账号视图对象
+     * 绑定关系实体转已绑定账号视图对象
      *
-     * @param info 角色信息实体
+     * <p>账号 UID 取自绑定表，创建时间与最近导入时间一并返回，供前端排序与展示。</p>
+     *
+     * @param binding 绑定关系实体
      * @return 账号视图对象
      */
-    private AkAccountVO toAccountVO(AkPlayerInfo info) {
+    private AkAccountVO toAccountVO(AkAccountBinding binding) {
         AkAccountVO vo = new AkAccountVO();
-        vo.setAkUid(info.getAkUid());
+        vo.setAkUid(binding.getAkUid());
+        vo.setCreateTime(binding.getCreateTime());
+        vo.setUpdateTime(binding.getUpdateTime());
         return vo;
     }
 

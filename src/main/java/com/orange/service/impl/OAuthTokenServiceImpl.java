@@ -235,11 +235,30 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         return vo;
     }
 
+    /**
+     * 构建授权端点（/oauth/authorize）的 302 跳转地址。
+     *
+     * <p>整体流程：校验 response_type → 校验客户端状态与授权能力 → 解析登录用户
+     * （未登录则跳登录页）→ 客户端要求授权确认时跳确认页 → 否则直接签发一次性授权码并回跳。</p>
+     *
+     * <p>本方法只做“决定跳到哪里”，真正的授权码/确认单落库在内部方法中完成，
+     * 且所有校验（客户端、回调地址、scope、PKCE）都在跳转前执行，避免非法请求进入登录流程。</p>
+     *
+     * @param responseType       OAuth 响应类型，仅支持 code
+     * @param clientId           OAuth 客户端 ID
+     * @param redirectUri        授权成功后的回跳地址，必须命中客户端白名单（精确匹配）
+     * @param scope              申请的权限范围，逗号分隔（可空，空则取客户端登记的全部范围）
+     * @param state              客户端透传的防 CSRF 随机串，会原样回传
+     * @param codeChallenge      PKCE code_challenge（可空，公共客户端必填）
+     * @param codeChallengeMethod PKCE 摘要算法，仅支持 S256
+     * @param request            HTTP 请求，用于解析登录态与拼装回跳参数
+     * @return 需要 302 跳转的地址：UC 登录页 / 授权确认页 / 客户端回调地址（携带 code）
+     */
     @Override
     public String buildAuthorizeRedirectUrl(String responseType, String clientId, String redirectUri, String scope,
                                             String state, String codeChallenge, String codeChallengeMethod,
                                             HttpServletRequest request) {
-        // 1. 仅支持授权码模式
+        // 1. 仅支持授权码模式（OAuth2 中唯一会返回临时 code 的流程）
         if (!"code".equals(responseType)) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "response_type 仅支持 code");
         }
@@ -256,15 +275,19 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
             }
             // 未登录：302 到 UC 登录页，登录成功后携带 uc_ticket 回跳当前 authorize 地址（走跨站登录票据）
             // 回跳地址拼入请求全部参数（GET query 与 POST form 统一处理），避免登录后丢失参数
+            // TreeMap 对参数名排序，保证同一请求多次生成的回跳地址完全一致（便于排查与去重）
             Map<String, String[]> params = new TreeMap<>(request.getParameterMap());
             StringBuilder back = new StringBuilder(request.getRequestURL().toString()).append('?');
+            // 逐参数做 URL 编码，既防止特殊字符破坏 query 结构，也避免参数值注入到登录页地址
             for (Map.Entry<String, String[]> entry : params.entrySet()) {
                 for (String value : entry.getValue()) {
                     back.append(URLEncoder.encode(entry.getKey(), StandardCharsets.UTF_8))
                             .append('=').append(URLEncoder.encode(value, StandardCharsets.UTF_8)).append('&');
                 }
             }
+            // 去掉末尾多余的 '&'
             back.setLength(back.length() - 1);
+            // 登录页地址自身可能已带 query，需要按情况选择 ? 或 & 拼接
             return loginPageUrl + (loginPageUrl.contains("?") ? "&" : "?")
                     + "redirect=" + URLEncoder.encode(back.toString(), StandardCharsets.UTF_8);
         }
@@ -278,30 +301,46 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         }
         // 5. 签发一次性授权码（内部再次完成 client/redirect_uri/scope/PKCE 校验）
         String code = createAuthorizationCode(clientId, redirectUri, scope, codeChallenge, codeChallengeMethod, uid);
-        // 6. 拼装 302 跳转地址，附带 code 与 state
+        // 6. 拼装 302 跳转地址，附带 code 与 state（回调地址自带 query 时用 & 拼接）
         StringBuilder target = new StringBuilder(redirectUri)
                 .append(redirectUri.contains("?") ? "&" : "?")
                 .append("code=").append(code);
         if (state != null && !state.isBlank()) {
+            // state 原样回传前做 URL 编码，防止客户端传入的 state 破坏回调地址结构
             target.append("&state=").append(URLEncoder.encode(state, StandardCharsets.UTF_8));
         }
         return target.toString();
     }
 
+    /**
+     * 签发一次性授权码并写入 Redis。
+     *
+     * <p>授权码是“客户端 ↔ 用户 ↔ 回调地址 ↔ PKCE”四元绑定关系的载体：兑换时必须全部匹配，
+     * 因此这里把 clientId、uid、scope、redirectUri、codeChallenge 一并存入记录。
+     * 授权码短时有效且一次性使用，兑换成功后由 Lua 原子消费。</p>
+     *
+     * @param clientId           OAuth 客户端 ID
+     * @param redirectUri        授权时绑定的回调地址，兑换时必须原样一致
+     * @param scope              申请范围（可空，空则归一化为客户端登记范围）
+     * @param codeChallenge      PKCE code_challenge（可空）
+     * @param codeChallengeMethod PKCE 摘要算法，仅支持 S256
+     * @param uid                授权用户 uid
+     * @return 新生成的授权码明文
+     */
     @Override
     public String createAuthorizationCode(String clientId, String redirectUri, String scope,
                                           String codeChallenge, String codeChallengeMethod, Long uid) {
-        // 1. 校验客户端状态
+        // 1. 校验客户端状态（存在、启用、管理员审核通过）
         OAuthClient client = requireEnabledClient(clientId);
         // 2. 客户端必须显式登记 authorization_code；数据库字段不能再只是展示信息。
         requireGrantAllowed(client, OAuthGrantType.AUTHORIZATION_CODE);
-        // 3. 校验回调地址白名单
+        // 3. 校验回调地址白名单（精确匹配，防开放重定向）
         checkRedirectUri(client, redirectUri);
         // 4. 归一化并校验 scope（空则按客户端全部范围）
         String finalScope = normalizeScope(client, scope);
         // 5. PKCE 预校验：携带 challenge 时必须为 S256；公共客户端始终必须带 challenge。
         validatePkce(client, codeChallenge, codeChallengeMethod);
-        // 6. 生成一次性授权码并存储
+        // 6. 生成一次性授权码并存储（值绑定 client/uid/scope/redirectUri/PKCE challenge）
         String code = OAuthUtil.generateToken();
         Map<String, Object> record = new HashMap<>();
         record.put("clientId", clientId);
@@ -313,6 +352,24 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         return code;
     }
 
+    /**
+     * 生成授权确认单并返回确认页跳转地址。
+     *
+     * <p>仅用于 requireAuthConsent=1 的客户端：授权参数不直接生成 code，而是先转成一次性
+     * 确认单（pending_id）落 Redis，用户在确认页点击“同意”后才签发授权码。这样既满足
+     * “显式授权”的合规要求，又避免确认页直接信任前端回传的授权参数。</p>
+     *
+     * <p>注意：确认单同样不成为绕过 grant type 的入口，前置校验与直接签发授权码完全一致。</p>
+     *
+     * @param clientId           OAuth 客户端 ID
+     * @param redirectUri        授权回跳地址
+     * @param scope              申请范围（可空）
+     * @param state              客户端透传参数，随确认单暂存
+     * @param codeChallenge      PKCE code_challenge（可空）
+     * @param codeChallengeMethod PKCE 摘要算法
+     * @param uid                授权用户 uid
+     * @return 确认页跳转地址（携带 pending_id）
+     */
     @Override
     public String buildConsentRedirectUrl(String clientId, String redirectUri, String scope,
                                           String state, String codeChallenge, String codeChallengeMethod, Long uid) {
@@ -325,12 +382,14 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         String finalScope = normalizeScope(client, scope);
         validatePkce(client, codeChallenge, codeChallengeMethod);
         // 4. 生成一次性确认单 ID，把待确认参数存入 Redis（TTL=确认单有效期）
+        //    确认单只保存服务端校验后的最终参数，确认页/{confirm} 接口不接收任何授权参数回传
         String pendingId = OAuthUtil.generateToken();
         Map<String, Object> record = new HashMap<>();
         record.put("uid", uid);
         record.put("clientId", client.getId());
         record.put("redirectUri", redirectUri);
         record.put("scope", finalScope);
+        // state / PKCE 字段统一用空串占位，避免反序列化时出现 null 分支
         record.put("state", state == null ? "" : state);
         record.put("codeChallenge", codeChallenge == null ? "" : codeChallenge);
         record.put("codeChallengeMethod", codeChallengeMethod == null ? "" : codeChallengeMethod);
@@ -339,14 +398,26 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         return consentPageUrl + (consentPageUrl.contains("?") ? "&" : "?") + "pending_id=" + pendingId;
     }
 
+    /**
+     * 查询授权确认单详情，供确认页展示“哪个应用申请了哪些权限”。
+     *
+     * <p>除确认单有效性外，还要求当前登录人与发起授权的用户一致，
+     * 防止授权链接被转发后由他人替原用户确认。</p>
+     *
+     * @param pendingId 确认单 ID
+     * @param request   HTTP 请求（解析当前登录用户）
+     * @return 确认页展示信息（用户名下客户端名称 + 权限中文描述列表）
+     */
     @Override
     public ConsentInfoVO getConsentInfo(String pendingId, HttpServletRequest request) {
         // 1. 确认单必须存在，且确认人必须是发起授权的用户本人
         Map<String, Object> record = readJsonMap(RedisKeyUtil.oauthConsent(pendingId));
         if (record == null) {
+            // 确认单不存在：已被确认消费、已过期或 ID 非法
             throw new BusinessException(ResultCode.OAUTH_CONSENT_INVALID);
         }
         Long uid = resolveLoginUid(request);
+        // uid 不一致时按“未登录”处理：既不泄露确认单内容，也引导用户切换回原账号
         if (uid == null || !uid.equals(((Number) record.get("uid")).longValue())) {
             throw new BusinessException(ResultCode.NOT_LOGIN, "请以发起授权的账号确认");
         }
@@ -360,6 +431,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         vo.setClientId(client.getId());
         vo.setClientName(client.getClientName());
         vo.setRedirectUri((String) record.get("redirectUri"));
+        // 逐项把 scope 标识翻译为中文描述，未识别的 scope 原样展示（见 describeScope）
         List<ConsentInfoVO.ScopeItem> items = new ArrayList<>();
         for (String scope : ((String) record.get("scope")).split(",")) {
             items.add(new ConsentInfoVO.ScopeItem(scope.trim(), describeScope(scope.trim())));
@@ -368,6 +440,17 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         return vo;
     }
 
+    /**
+     * 处理授权确认页的“同意 / 拒绝”提交。
+     *
+     * <p>确认单为一次性凭证：先用 setIfAbsent 抢占 used 标记，保证并发/重复提交只有一个请求生效；
+     * 同意则签发授权码回跳，拒绝则按 OAuth 规范以 error=access_denied 回跳，两种结果都带上 state。</p>
+     *
+     * @param pendingId 确认单 ID
+     * @param approve   true=同意授权，false=拒绝授权
+     * @param request   HTTP 请求（校验确认人身份）
+     * @return 客户端回调地址（携带 code 或 error，必要时带 state）
+     */
     @Override
     public String confirmAuthorization(String pendingId, boolean approve, HttpServletRequest request) {
         // 1. 一次性占用确认单：并发/重复提交只有第一次能进入
@@ -398,7 +481,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
                     (String) record.get("codeChallengeMethod"), uid);
             target.append("code=").append(code);
         } else {
-            // 4b. 拒绝：按 OAuth 规范回跳 error=access_denied
+            // 4b. 拒绝：按 OAuth 规范回跳 error=access_denied（不签发授权码）
             target.append("error=access_denied");
         }
         if (state != null && !state.isBlank()) {
@@ -429,6 +512,22 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
                 .orElse(scope);
     }
 
+    /**
+     * 授权码兑换令牌（grant_type=authorization_code）。
+     *
+     * <p>核心安全设计：<b>先只读校验，全部通过后才原子消费授权码</b>。
+     * 客户端归属、回调地址、客户端认证、grant 配置、PKCE 任意一项失败都不会改动 Redis 状态，
+     * 否则攻击者可用错误的 code_verifier 反复请求，把合法客户端尚未兑换的 code 提前烧毁（拒绝服务）。</p>
+     *
+     * <p>并发兑换由 Lua 的 compare-and-delete 保证只有一个请求成功，其余按“授权码已被使用”拒绝。</p>
+     *
+     * @param clientId     客户端 ID，必须与签发授权码时一致
+     * @param clientSecret 客户端密钥（机密客户端必填，公共客户端传空）
+     * @param code         授权码明文
+     * @param redirectUri  回调地址，必须与授权时绑定的值完全一致
+     * @param codeVerifier PKCE code_verifier，用于校验 code_challenge
+     * @return 令牌响应（是否含 refresh_token 取决于客户端是否登记 refresh_token grant）
+     */
     @Override
     public OAuthTokenVO exchangeToken(String clientId, String clientSecret, String code,
                                       String redirectUri, String codeVerifier) {
@@ -440,6 +539,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         // 任何失败请求都不能改变 Redis 状态，否则攻击者可用错误 verifier 提前烧毁 code。
         String rawRecord = oauthTokenStore.readAuthorizationCode(code);
         if (rawRecord == null) {
+            // 区分“已使用”与“不存在/已过期”，便于客户端判断是否遭到重放
             if (oauthTokenStore.isAuthorizationCodeUsed(code)) {
                 throw new BusinessException(ResultCode.OAUTH_CODE_REUSED);
             }
@@ -448,6 +548,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         Map<String, Object> record = readJsonMapValue(rawRecord);
 
         // 2. 授权码只能由原客户端、在授权时绑定的完整 redirect_uri 下兑换。
+        //    redirect_uri 做全等比较（不允许拼接参数或部分匹配），防止授权码被转发到其他地址。
         if (!Objects.equals(clientId, record.get("clientId"))) {
             throw new BusinessException(ResultCode.OAUTH_CODE_INVALID, "授权码与客户端不匹配");
         }
@@ -457,6 +558,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
 
         // 3. 即使签发 code 时已经检查过，也必须在兑换时重新检查客户端状态与 grant。
         // 两个步骤之间客户端可能被停用，或数据库配置可能已被管理员调整。
+        // authenticateClient 按 auth_methods 严格认证，公共客户端不接受 client_secret。
         OAuthClient client = requireEnabledClient(clientId);
         requireGrantAllowed(client, OAuthGrantType.AUTHORIZATION_CODE);
         authenticateClient(client, clientSecret);
@@ -465,6 +567,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         // 后才允许进入原子消费步骤。
         String storedChallenge = (String) record.get("codeChallenge");
         if (StringUtils.hasText(storedChallenge)) {
+            // 用 S256 重新计算 code_verifier 摘要，与签发时保存的 challenge 全等比较
             if (!StringUtils.hasText(codeVerifier) || !storedChallenge.equals(OAuthUtil.pkceS256(codeVerifier))) {
                 throw new BusinessException(ResultCode.OAUTH_PKCE_INVALID);
             }
@@ -476,6 +579,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
 
         // 5. compare-and-delete 由 Lua 原子完成。并发请求可能同时完成上述只读校验，
         // 但最终只有一个请求能删除匹配记录并写入 used 标记。
+        // 传入 rawRecord 是为了让脚本比较“业务层校验过的正是即将删除的记录”，避免中间被替换。
         if (!oauthTokenStore.consumeAuthorizationCode(code, rawRecord, authorizationCodeTtlSeconds)) {
             throw new BusinessException(ResultCode.OAUTH_CODE_REUSED);
         }
@@ -486,6 +590,21 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         return issueTokens(client, uid, scope);
     }
 
+    /**
+     * 刷新令牌（grant_type=refresh_token）。
+     *
+     * <p>refresh_token 采用“固定凭证”模型：有效期内可反复刷新，刷新只签发新的 access_token，
+     * 既不改写也不换发 refresh_token；吊销 refresh_token 只让自身失效，此前派生的 access
+     * 由各自 TTL 与反向索引惰性清理自然收敛。</p>
+     *
+     * <p>安全顺序同样是“先只读校验，再原子写入”：客户端归属、状态、认证、grant 全部通过后，
+     * 才由 Lua 以“校验 refresh 仍有效 + 写新 access + 更新反向索引”作为一次原子状态转换。</p>
+     *
+     * @param clientId     客户端 ID，必须与 refresh_token 的归属一致
+     * @param clientSecret 客户端密钥（机密客户端必填）
+     * @param refreshToken refresh_token 明文
+     * @return 令牌响应（只含新的 access_token，不回传 refresh_token 与 scope）
+     */
     @Override
     public OAuthTokenVO refreshToken(String clientId, String clientSecret, String refreshToken) {
         if (!StringUtils.hasText(refreshToken)) {
@@ -496,6 +615,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         // 正是即将消费的记录，而不是并发期间被替换过的值。
         String rawRecord = oauthTokenStore.readRefreshToken(refreshToken);
         if (rawRecord == null) {
+            // 不存在或已过期：统一按无效令牌处理，避免暴露令牌是否存在
             throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID);
         }
         Map<String, Object> record = readJsonMapValue(rawRecord);
@@ -579,17 +699,18 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     public OAuthTokenVO issueDirectToken(String clientId, Long uid) {
         // 1. 重新加载客户端：兑换瞬间客户端可能已被停用或封禁
         OAuthClient client = requireEnabledClient(clientId);
+        // 直连流程没有 scope 协商环节，传 null 即取客户端登记的全部范围
         String scope = normalizeScope(client, null);
         long accessTtl = resolveAccessTokenTtl(client);
         long refreshTtl = resolveRefreshTokenTtl(client);
 
-        // 2. 签发 access_token：写令牌记录并登记反向索引
+        // 2. 签发 access_token：写令牌记录并登记反向索引（供整体撤销定位）
         String accessToken = OAuthUtil.generateToken();
         writeJson(RedisKeyUtil.oauthAccess(accessToken), createAccessRecord(client, uid, scope), accessTtl);
         stringRedisTemplate.opsForSet().add(
                 RedisKeyUtil.uidOauth(uid), OAUTH_ACCESS_MEMBER_PREFIX + accessToken);
 
-        // 3. 无条件签发 refresh_token：固定凭证，有效期内可反复刷新
+        // 3. 无条件签发 refresh_token：固定凭证，有效期内可反复刷新，不受 grant_types 登记限制
         String refreshToken = OAuthUtil.generateToken();
         writeJson(RedisKeyUtil.oauthRefresh(refreshToken),
                 createRefreshRecord(client, uid, scope), refreshTtl);
@@ -650,6 +771,19 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         return buildTokenResponse(accessToken, refreshToken, accessTtl, scope);
     }
 
+    /**
+     * 吊销令牌（RFC 7009 语义，grant_type 之外的 /oauth/revoke 接口）。
+     *
+     * <p>支持 access_token 与 refresh_token 两种令牌，由方法内部自动识别类型。
+     * 关键约束：令牌必须属于已完成认证的调用客户端，否则不执行任何删除，
+     * 避免任何知道令牌字符串的一方越权中断他人会话。</p>
+     *
+     * <p>接口幂等：令牌不存在、已失效、或不属于当前客户端，都返回成功，防止被用来探测令牌有效性。</p>
+     *
+     * @param clientId     客户端 ID（调用方身份）
+     * @param clientSecret 客户端密钥
+     * @param token        待吊销的令牌（access_token 或 refresh_token）
+     */
     @Override
     public void revokeToken(String clientId, String clientSecret, String token) {
         // 1. 参数必填校验
@@ -661,6 +795,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         authenticateClient(client, clientSecret);
         // 3. 自动识别令牌类型，并把已认证的 clientId 传入底层归属检查。
         // 不属于当前客户端的 token 必须保持原样，不能因调用方知道 token 字符串就允许越权吊销。
+        // 先试 access 再试 refresh：两类 token 都是随机串，只有 Redis 中存在的那个能命中。
         boolean revoked = revokeAccessToken(token, clientId) || revokeRefreshToken(token, clientId);
         // 4. 幂等：不存在、已失效或属于其他客户端都对外表现为成功，避免令牌探测。
         LogUtil.debug(OAuthTokenServiceImpl.class, "[OAuth] 吊销令牌完成: clientId={}, revoked={}", clientId, revoked);
@@ -719,6 +854,15 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         return true;
     }
 
+    /**
+     * 校验 access_token 并解析其携带的身份信息（资源服务器鉴权入口）。
+     *
+     * <p>令牌记录本身带有 TTL，Redis 中读不到即视为无效（未签发 / 已过期 / 已吊销），
+     * 因此无需额外维护黑名单。</p>
+     *
+     * @param accessToken access_token 明文
+     * @return 令牌主体信息（uid、签发客户端、授权范围）
+     */
     @Override
     public OAuthTokenPrincipal resolveAccessToken(String accessToken) {
         if (!StringUtils.hasText(accessToken)) {
@@ -726,6 +870,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         }
         Map<String, Object> record = readJsonMap(RedisKeyUtil.oauthAccess(accessToken));
         if (record == null) {
+            // key 不存在：令牌未签发、已过期或已被吊销（如 revokeClientAuthorization）
             throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID);
         }
         Long uid = ((Number) record.get("uid")).longValue();
@@ -760,15 +905,18 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     public List<OAuthClientGrantGroupVO> listUserRefreshTokens(Long uid) {
         // 扁平查询结果已按授权时间倒序：分组后每组/组内条目天然保持该顺序
         List<RefreshGrantVO> grants = oauthGrantMapper.selectValidGrants(uid);
+        // LinkedHashMap 保证应用分组顺序与查询结果一致（按最近一次授权时间倒序）
         Map<String, OAuthClientGrantGroupVO> groups = new LinkedHashMap<>();
         for (RefreshGrantVO grant : grants) {
             OAuthClientGrantGroupVO group = groups.get(grant.getClientId());
             if (group == null) {
+                // 首次遇到该客户端：新建分组，后续同客户端的授权记录直接追加
                 group = new OAuthClientGrantGroupVO();
                 group.setClientId(grant.getClientId());
                 group.setClientName(grant.getClientName());
                 groups.put(grant.getClientId(), group);
             }
+            // 组内条目只暴露前端需要的字段（scope/授权时间/剩余有效期），不泄露令牌摘要
             OAuthGrantItemVO item = new OAuthGrantItemVO();
             item.setScope(grant.getScope());
             item.setCreatedAt(grant.getCreatedAt());
@@ -797,11 +945,13 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         String indexKey = RedisKeyUtil.uidOauth(uid);
         Set<String> members = stringRedisTemplate.opsForSet().members(indexKey);
         if (members == null) {
+            // 无反向索引：该用户可能从未签发过令牌，属正常情况，直接结束
             return;
         }
         for (String member : members) {
             String tokenKey = resolveTokenKeyByMember(member);
             if (tokenKey == null) {
+                // 无法识别的成员（历史格式/脏数据）：跳过，不做删除以免误删他键
                 continue;
             }
             String raw = stringRedisTemplate.opsForValue().get(tokenKey);
@@ -811,6 +961,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
                 continue;
             }
             Map<String, Object> record = readJsonMapValue(raw);
+            // 只删除归属该 clientId 的令牌，其他应用的授权不受影响
             if (!Objects.equals(clientId, record.get("clientId"))) {
                 continue;
             }
@@ -907,11 +1058,14 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     private OAuthTokenVO issueTokens(OAuthClient client, Long uid, String scope) {
         long accessTtl = resolveAccessTokenTtl(client);
 
+        // 1. access_token：写令牌记录（uid/clientId/scope，TTL 由客户端或全局默认决定）
         String accessToken = OAuthUtil.generateToken();
         writeJson(RedisKeyUtil.oauthAccess(accessToken), createAccessRecord(client, uid, scope), accessTtl);
+        // 同步登记 uid 反向索引，供“按用户整体撤销某应用”时定位令牌
         stringRedisTemplate.opsForSet().add(
                 RedisKeyUtil.uidOauth(uid), OAUTH_ACCESS_MEMBER_PREFIX + accessToken);
 
+        // 2. refresh_token 按客户端登记能力决定是否签发（grant_types 参与实际判断，而非仅展示）
         String refreshToken = null;
         if (isGrantAllowed(client, OAuthGrantType.REFRESH_TOKEN)) {
             long refreshTtl = resolveRefreshTokenTtl(client);
@@ -924,6 +1078,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
             recordGrant(client, uid, scope, refreshToken, refreshTtl);
         }
 
+        // 3. 低频触发反向索引清理，控制 Set 体积；失败不影响本次签发结果
         maybeCleanupExpiredGrantMembers(uid);
         return buildTokenResponse(accessToken, refreshToken, accessTtl, scope);
     }
@@ -939,21 +1094,25 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      * @param uid 用户 uid
      */
     private void maybeCleanupExpiredGrantMembers(Long uid) {
+        // 概率闸门：1/100 的签发请求才会继续往下走，把清理开销摊薄到大量正常请求上
         if (ThreadLocalRandom.current().nextInt(GRANT_INDEX_CLEANUP_PROBABILITY) != 0) {
             return;
         }
         String indexKey = RedisKeyUtil.uidOauth(uid);
         try {
             Set<String> members = stringRedisTemplate.opsForSet().members(indexKey);
+            // 集合太小说明残留成员有限，清理收益低于一次 SMEMBERS 的网络开销，直接跳过
             if (members == null || members.size() < GRANT_INDEX_CLEANUP_MIN_SIZE) {
                 return;
             }
             int checked = 0;
             for (String member : members) {
+                // 单次最多检查 200 个成员，避免大集合一次性遍历造成请求长尾
                 if (checked >= GRANT_INDEX_CLEANUP_CHECK_LIMIT) {
                     break;
                 }
                 checked++;
+                // 按成员前缀还原出对应的令牌 key（access:/refresh:）
                 String tokenKey = null;
                 if (member.startsWith(OAUTH_ACCESS_MEMBER_PREFIX)) {
                     String token = member.substring(OAUTH_ACCESS_MEMBER_PREFIX.length());
@@ -968,11 +1127,22 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
                 }
             }
         } catch (Exception e) {
+            // 清理属旁路优化，任何异常只告警，绝不阻断令牌签发主流程
             LogUtil.warn(OAuthTokenServiceImpl.class, "[OAuth] 反向索引惰性清理失败: uid={}", uid, e);
         }
     }
 
-    /** 创建持久化到 Redis 的 access token 记录。 */
+    /**
+     * 创建持久化到 Redis 的 access token 记录。
+     *
+     * <p>记录内容刻意保持精简：uid（资源归属）、clientId（签发方，用于归属校验与整体撤销）、
+     * scope（授权范围，供资源服务器鉴权）。令牌明文即 Redis key，记录内不再冗余保存。</p>
+     *
+     * @param client 签发该令牌的客户端
+     * @param uid    用户 uid
+     * @param scope  授权范围
+     * @return 可直接序列化写入 Redis 的记录
+     */
     private Map<String, Object> createAccessRecord(OAuthClient client, Long uid, String scope) {
         Map<String, Object> record = new HashMap<>();
         record.put("uid", uid);
@@ -981,7 +1151,17 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         return record;
     }
 
-    /** 创建 refresh token 记录（固定凭证，不记录与派生 access 的父子关联）。 */
+    /**
+     * 创建 refresh token 记录（固定凭证，不记录与派生 access 的父子关联）。
+     *
+     * <p>refresh 与 access 之间不维护引用关系，因此 refresh 刷新或吊销都不影响已签发的
+     * access，后者由自身 TTL 与反向索引惰性清理收敛。</p>
+     *
+     * @param client 签发该令牌的客户端
+     * @param uid    用户 uid
+     * @param scope  授权范围
+     * @return 可直接序列化写入 Redis 的记录
+     */
     private Map<String, Object> createRefreshRecord(OAuthClient client, Long uid, String scope) {
         Map<String, Object> record = new HashMap<>();
         record.put("uid", uid);
@@ -990,17 +1170,35 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         return record;
     }
 
-    /** 读取客户端覆盖值或全局默认 access token TTL。 */
+    /**
+     * 读取客户端覆盖值或全局默认 access token TTL
+     *
+     * @param client 客户端实体
+     * @return 有效期（秒）：客户端未单独配置时回退全局默认值
+     */
     private long resolveAccessTokenTtl(OAuthClient client) {
         return client.getAccessTokenTtl() != null ? client.getAccessTokenTtl() : accessTokenTtlSeconds;
     }
 
-    /** 读取客户端覆盖值或全局默认 refresh token TTL。 */
+    /**
+     * 读取客户端覆盖值或全局默认 refresh token TTL
+     *
+     * @param client 客户端实体
+     * @return 有效期（秒）：客户端未单独配置时回退全局默认值
+     */
     private long resolveRefreshTokenTtl(OAuthClient client) {
         return client.getRefreshTokenTtl() != null ? client.getRefreshTokenTtl() : refreshTokenTtlSeconds;
     }
 
-    /** 组装 OAuth 标准字段响应；refreshToken/scope 传 null 时序列化省略（刷新场景仅返回新 access_token） */
+    /**
+     * 组装 OAuth 标准字段响应；refreshToken/scope 传 null 时序列化省略（刷新场景仅返回新 access_token）
+     *
+     * @param accessToken  access_token 明文
+     * @param refreshToken refresh_token 明文（刷新场景传 null）
+     * @param accessTtl    access_token 有效期（秒）
+     * @param scope        授权范围（刷新场景传 null）
+     * @return 令牌响应对象
+     */
     private OAuthTokenVO buildTokenResponse(String accessToken, String refreshToken, long accessTtl, String scope) {
         OAuthTokenVO vo = new OAuthTokenVO();
         vo.setAccessToken(accessToken);
@@ -1058,16 +1256,28 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      * @return 最终授权的 scope（逗号分隔）
      */
     private String normalizeScope(OAuthClient client, String scope) {
+        // 1. 把客户端登记在库中的 scopes（英文逗号分隔）解析为集合。
+        //    使用 LinkedHashSet：一是去重（管理员可能重复登记同一 scope），
+        //    二是保留登记顺序，保证未传 scope 时 String.join 的输出稳定、可复现。
         Set<String> allowed = new LinkedHashSet<>(Arrays.asList(client.getScopes().split(",")));
+        // 2. 配置兜底校验：登记项必须都是系统已知的 scope 标识。
+        //    出现未知值说明数据库配置与代码枚举已发生漂移，此时直接拒绝服务，
+        //    而不是"忽略未知项"继续放行——否则客户端可能带着代码无法解释的权限标签走完授权流程。
         if (allowed.stream().anyMatch(value -> OAuthScope.findByCode(value).isEmpty())) {
             throw new BusinessException(ResultCode.OAUTH_SCOPE_INVALID, "客户端存在不支持的授权范围");
         }
+        // 3. 判断客户端是否登记了元范围 all（通配全部接口权限）
         boolean hasAll = allowed.contains(OAuthScope.ALL.getCode());
-        // 公共客户端的 redirect_uri 一旦被劫持，all 等于交出全部接口权限，因此即使被手工写库也直接拒绝
+        // 公共客户端的 redirect_uri 一旦被劫持，all 等于交出全部接口权限，因此即使被手工写库也直接拒绝。
+        // 判定依据是 auth_methods 是否声明 client_secret_post（机密客户端），而不是 client_secret 是否为空，
+        // 避免公共客户端残留了一个密钥字段就被误判为机密客户端、进而放行 all。
         if (hasAll && !OAuthClientAuthMethod.CLIENT_SECRET_POST.matches(client.getAuthMethods())) {
             throw new BusinessException(ResultCode.OAUTH_SCOPE_INVALID, "all 仅限机密客户端使用");
         }
-        // 登记 all 时把可申请集合展开为「全部具体范围 + all 本身」，其余客户端保持原语义
+        // 4. 计算"本次可申请集合"，两种客户端语义不同：
+        //    - 未登记 all：可申请集合 = 登记集合本身，保持"只能申请登记过的具体 scope"的子集语义；
+        //    - 已登记 all：该客户端被视为可申请任意具体范围，因此把可申请集合展开为
+        //      「全部可选的具体范围 + all 本身」，使请求具体 scope 与请求 all 都能通过校验。
         Set<String> effectiveAllowed = allowed;
         if (hasAll) {
             Set<String> expanded = new LinkedHashSet<>();
@@ -1077,15 +1287,24 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
             expanded.add(OAuthScope.ALL.getCode());
             effectiveAllowed = expanded;
         }
+        // 5. 请求未显式携带 scope（空/null）：按客户端能力给出默认授权范围
+        //    - 登记 all：返回通配标识 all，表示不受具体范围约束；
+        //    - 未登记 all：返回登记范围内全部具体 scope 的逗号串（即默认授予全部已登记权限）。
         if (!StringUtils.hasText(scope)) {
             return hasAll ? OAuthScope.ALL.getCode() : String.join(",", effectiveAllowed);
         }
+        // 6. 请求携带了 scope：逐项做双重校验，两项都通过才允许
+        //    ① 必须是系统已知标识（OAuthScope 可解析），防任意字符串写进令牌；
+        //    ② 必须落在本次可申请集合内，防客户端申请未登记权限（权限提升）。
+        //    逐项校验而非整体字符串比较，避免"部分合法 + 部分越权"的请求被整体放行。
         for (String s : scope.split(",")) {
             String value = s.trim();
             if (OAuthScope.findByCode(value).isEmpty() || !effectiveAllowed.contains(value)) {
                 throw new BusinessException(ResultCode.OAUTH_SCOPE_INVALID, "scope 不在授权范围内: " + s.trim());
             }
         }
+        // 7. 校验通过后原样返回请求值（保留客户端传入的顺序与写法），不再做二次归一化，
+        //    确保授权码中记录的 scope 与用户实际申请、确认页展示的内容完全一致。
         return scope;
     }
 
@@ -1191,6 +1410,9 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     /**
      * 写 JSON 对象到 Redis 并设置过期时间
      *
+     * <p>过期时间由 Redis 自身保证：key 到期即消失，等价于令牌/授权码失效，
+     * 因此无需额外的失效清理任务。</p>
+     *
      * @param key   Redis key
      * @param value 待序列化对象
      * @param ttl   过期秒数
@@ -1202,6 +1424,9 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     /**
      * 将对象序列化为 Redis 使用的 JSON 文本。刷新轮换会先生成文本再交给 Lua，
      * 保证脚本比较和写入的都是确定值。
+     *
+     * @param value 待序列化对象
+     * @return JSON 文本
      */
     private String writeJsonValue(Object value) {
         try {
@@ -1220,6 +1445,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     private Map<String, Object> readJsonMap(String key) {
         String json = stringRedisTemplate.opsForValue().get(key);
         if (json == null) {
+            // key 不存在（未签发/已过期/已吊销）统一返回 null，由调用方决定错误语义
             return null;
         }
         return readJsonMapValue(json);
@@ -1228,6 +1454,9 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     /**
      * 解析已读取的 Redis JSON。调用方保留原始文本时仍使用本方法转换业务字段，
      * 避免二次读取造成校验对象与原子比较对象不一致。
+     *
+     * @param json Redis 中读取到的原始 JSON 文本
+     * @return 反序列化后的字段 Map
      */
     @SuppressWarnings("unchecked")
     private Map<String, Object> readJsonMapValue(String json) {

@@ -1,20 +1,22 @@
-package com.orange.entity.vo.akoperator;
+package com.orange.entity.po;
 
 import java.time.LocalDateTime;
 
 /**
- * 当前用户已绑定的游戏账号视图对象（不含干员正文）
+ * 游戏账号绑定关系实体（ak_account_binding）
  *
- * <p>列表按 {@code updateTime} 倒序返回，前端取首条即可默认展示最新导入的账号数据。</p>
+ * <p>多对多关系：一个 uid 可绑定多个 ak_uid，一个 ak_uid 也可被多个 uid 绑定。
+ * 两个时间列由数据库自动维护，其中 {@code updateTime} 表示该账号干员数据最近一次导入时间，
+ * 账号列表按它倒序，前端可默认展示最新导入的账号数据。</p>
  *
  * @author UserCenter
  */
-public class AkAccountVO {
+public class AkAccountBinding {
 
     /** 游戏账号 UID */
     private String akUid;
 
-    /** 绑定关系创建时间（首次导入该账号数据时） */
+    /** 绑定关系创建时间：首次导入该账号数据时建立绑定并写入 */
     private LocalDateTime createTime;
 
     /** 该账号干员数据最近一次导入时间 */
