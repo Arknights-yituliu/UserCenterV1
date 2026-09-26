@@ -9,14 +9,14 @@ import com.orange.entity.dto.akoperator.OperatorItemRequest;
 import com.orange.entity.dto.akoperator.OperatorSaveRequest;
 import com.orange.entity.po.AkAccountBinding;
 import com.orange.entity.po.AkPlayerInfo;
-import com.orange.entity.po.OperatorProgressionData;
+import com.orange.entity.po.AkOperatorState;
 import com.orange.entity.vo.akoperator.AkAccountVO;
 import com.orange.entity.vo.akoperator.OperatorListVO;
 import com.orange.entity.vo.akoperator.OperatorSaveResultVO;
 import com.orange.entity.vo.akoperator.OperatorVO;
 import com.orange.mapper.AkAccountBindingMapper;
 import com.orange.mapper.AkPlayerInfoMapper;
-import com.orange.mapper.OperatorProgressionDataMapper;
+import com.orange.mapper.AkOperatorStateMapper;
 import com.orange.service.AkAccountService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,7 +67,7 @@ public class AkAccountServiceImpl implements AkAccountService {
 
     private final AkAccountBindingMapper bindingMapper;
     private final AkPlayerInfoMapper playerInfoMapper;
-    private final OperatorProgressionDataMapper operatorMapper;
+    private final AkOperatorStateMapper operatorMapper;
     private final AkOperatorSaveExecutor saveExecutor;
     private final StringRedisTemplate stringRedisTemplate;
 
@@ -82,7 +82,7 @@ public class AkAccountServiceImpl implements AkAccountService {
      */
     public AkAccountServiceImpl(AkAccountBindingMapper bindingMapper,
                                 AkPlayerInfoMapper playerInfoMapper,
-                                OperatorProgressionDataMapper operatorMapper,
+                                AkOperatorStateMapper operatorMapper,
                                 AkOperatorSaveExecutor saveExecutor,
                                 StringRedisTemplate stringRedisTemplate) {
         this.bindingMapper = bindingMapper;
@@ -133,9 +133,9 @@ public class AkAccountServiceImpl implements AkAccountService {
     public OperatorListVO listOperators(Long uid, String akUid) {
         validateAkUid(akUid);
         requireBinding(akUid, uid);
-        List<OperatorProgressionData> rows = operatorMapper.selectByAkUid(akUid);
+        List<AkOperatorState> rows = operatorMapper.selectByAkUid(akUid);
         List<OperatorVO> items = new ArrayList<>(rows.size());
-        for (OperatorProgressionData row : rows) {
+        for (AkOperatorState row : rows) {
             items.add(toOperatorVO(row));
         }
         return new OperatorListVO(akUid, items);
@@ -153,7 +153,7 @@ public class AkAccountServiceImpl implements AkAccountService {
         String akUid = request.getPlayerInfo().getAkUid();
         validateAkUid(akUid);
         // 先归一化（缺省/null/空字符串补 0）再校验重复 ID，保证比较语义与落库值一致
-        List<OperatorProgressionData> operators = normalizeOperators(akUid, request.getOperators());
+        List<AkOperatorState> operators = normalizeOperators(akUid, request.getOperators());
 
         // 参数校验通过后占用该 ak_uid 的限流名额；首次上传不做凭据校验，绑定关系由写事务建立
         acquireSaveQuota(akUid);
@@ -173,7 +173,7 @@ public class AkAccountServiceImpl implements AkAccountService {
      */
     private OperatorSaveResultVO saveWithRetry(String akUid,
                                                Long uid,
-                                               List<OperatorProgressionData> operators) {
+                                               List<AkOperatorState> operators) {
         for (int attempt = 0; ; attempt++) {
             try {
                 return saveExecutor.save(akUid, uid, operators);
@@ -233,14 +233,14 @@ public class AkAccountServiceImpl implements AkAccountService {
      * @param items 客户端提交的干员数组（已通过 Bean Validation 的格式与范围校验）
      * @return 可直接落库的干员记录列表
      */
-    private List<OperatorProgressionData> normalizeOperators(String akUid, List<OperatorItemRequest> items) {
+    private List<AkOperatorState> normalizeOperators(String akUid, List<OperatorItemRequest> items) {
         Set<String> seenIds = new HashSet<>(Math.max(16, items.size() * 2));
-        List<OperatorProgressionData> result = new ArrayList<>(items.size());
+        List<AkOperatorState> result = new ArrayList<>(items.size());
         for (OperatorItemRequest item : items) {
             if (!seenIds.add(item.getId())) {
                 throw new BusinessException(ResultCode.PARAM_VALID_ERROR, "同一请求中干员ID重复：" + item.getId());
             }
-            result.add(toProgressionData(akUid, item));
+            result.add(toStateRecord(akUid, item));
         }
         return result;
     }
@@ -252,8 +252,8 @@ public class AkAccountServiceImpl implements AkAccountService {
      * @param item  客户端提交的干员记录
      * @return 干员落库实体（id 与 updatedAt 由服务端维护）
      */
-    private OperatorProgressionData toProgressionData(String akUid, OperatorItemRequest item) {
-        OperatorProgressionData record = new OperatorProgressionData();
+    private AkOperatorState toStateRecord(String akUid, OperatorItemRequest item) {
+        AkOperatorState record = new AkOperatorState();
         record.setAkUid(akUid);
         record.setOperatorId(item.getId());
         record.setRarity(zeroIfNull(item.getRarity()));
@@ -309,7 +309,7 @@ public class AkAccountServiceImpl implements AkAccountService {
      * @param row 干员实体
      * @return 干员视图对象
      */
-    private OperatorVO toOperatorVO(OperatorProgressionData row) {
+    private OperatorVO toOperatorVO(AkOperatorState row) {
         OperatorVO vo = new OperatorVO();
         vo.setId(row.getOperatorId());
         vo.setRecordId(row.getId());

@@ -7,14 +7,15 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import java.time.LocalDateTime;
 
 /**
- * 干员数据实体（operator_progression_data）：一行一个干员，按 ak_uid 归属
+ * 干员养成状态实体（ak_operator_state）：一行一个干员，按 ak_uid 归属
  *
- * <p>所有数值属性非空，缺省/null/空字符串在保存前统一归一化为 0。</p>
+ * <p>记录某游戏账号下每个干员的当前养成状态（等级、精英化、技能、模组、潜能）。
+ * 所有数值属性非空，缺省/null/空字符串在保存前统一归一化为 0。</p>
  *
  * @author UserCenter
  */
-@TableName("operator_progression_data")
-public class OperatorProgressionData {
+@TableName("ak_operator_state")
+public class AkOperatorState {
 
     /** 数据库自增行 ID，响应中称 recordId */
     @TableId(type = IdType.AUTO)

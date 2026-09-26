@@ -1,11 +1,11 @@
 package com.orange.service.impl;
 
 import com.orange.entity.po.AkPlayerInfo;
-import com.orange.entity.po.OperatorProgressionData;
+import com.orange.entity.po.AkOperatorState;
 import com.orange.entity.vo.akoperator.OperatorSaveResultVO;
 import com.orange.mapper.AkAccountBindingMapper;
 import com.orange.mapper.AkPlayerInfoMapper;
-import com.orange.mapper.OperatorProgressionDataMapper;
+import com.orange.mapper.AkOperatorStateMapper;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,7 +36,7 @@ public class AkOperatorSaveExecutor {
 
     private final AkAccountBindingMapper bindingMapper;
     private final AkPlayerInfoMapper playerInfoMapper;
-    private final OperatorProgressionDataMapper operatorMapper;
+    private final AkOperatorStateMapper operatorMapper;
 
     /**
      * 构造器注入 Mapper
@@ -47,7 +47,7 @@ public class AkOperatorSaveExecutor {
      */
     public AkOperatorSaveExecutor(AkAccountBindingMapper bindingMapper,
                                   AkPlayerInfoMapper playerInfoMapper,
-                                  OperatorProgressionDataMapper operatorMapper) {
+                                  AkOperatorStateMapper operatorMapper) {
         this.bindingMapper = bindingMapper;
         this.playerInfoMapper = playerInfoMapper;
         this.operatorMapper = operatorMapper;
@@ -64,7 +64,7 @@ public class AkOperatorSaveExecutor {
     @Transactional(rollbackFor = Exception.class)
     public OperatorSaveResultVO save(String akUid,
                                      Long uid,
-                                     List<OperatorProgressionData> submittedOperators) {
+                                     List<AkOperatorState> submittedOperators) {
         ensureBinding(akUid, uid);
         savePlayerInfo(akUid);
         return saveOperators(akUid, submittedOperators);
@@ -105,21 +105,21 @@ public class AkOperatorSaveExecutor {
      * @param submitted 本次提交的干员记录（已归一化）
      * @return 新增/更新/未变更条数统计
      */
-    private OperatorSaveResultVO saveOperators(String akUid, List<OperatorProgressionData> submitted) {
-        Map<String, OperatorProgressionData> existingMap = loadExisting(akUid, submitted);
+    private OperatorSaveResultVO saveOperators(String akUid, List<AkOperatorState> submitted) {
+        Map<String, AkOperatorState> existingMap = loadExisting(akUid, submitted);
         LocalDateTime now = LocalDateTime.now();
-        List<OperatorProgressionData> toInsert = new ArrayList<>();
-        List<OperatorProgressionData> toUpdate = new ArrayList<>();
+        List<AkOperatorState> toInsert = new ArrayList<>();
+        List<AkOperatorState> toUpdate = new ArrayList<>();
         int unchangedCount = 0;
 
-        for (OperatorProgressionData item : submitted) {
-            OperatorProgressionData existing = existingMap.get(item.getOperatorId());
+        for (AkOperatorState item : submitted) {
+            AkOperatorState existing = existingMap.get(item.getOperatorId());
             if (existing == null) {
                 item.setUpdatedAt(now);
                 toInsert.add(item);
                 continue;
             }
-            if (isSameProgression(existing, item)) {
+            if (isSameState(existing, item)) {
                 unchangedCount++;
                 continue;
             }
@@ -132,8 +132,8 @@ public class AkOperatorSaveExecutor {
             int to = Math.min(from + INSERT_BATCH_SIZE, toInsert.size());
             operatorMapper.batchInsert(toInsert.subList(from, to));
         }
-        for (OperatorProgressionData record : toUpdate) {
-            operatorMapper.updateProgression(record);
+        for (AkOperatorState record : toUpdate) {
+            operatorMapper.updateState(record);
         }
         return new OperatorSaveResultVO(toInsert.size(), toUpdate.size(), unchangedCount);
     }
@@ -147,20 +147,20 @@ public class AkOperatorSaveExecutor {
      * @param submitted 本次提交的干员记录
      * @return 干员编码到现有记录的映射
      */
-    private Map<String, OperatorProgressionData> loadExisting(String akUid,
-                                                              List<OperatorProgressionData> submitted) {
-        List<OperatorProgressionData> rows;
+    private Map<String, AkOperatorState> loadExisting(String akUid,
+                                                              List<AkOperatorState> submitted) {
+        List<AkOperatorState> rows;
         if (submitted.size() >= FULL_SCAN_THRESHOLD) {
             rows = operatorMapper.selectByAkUid(akUid);
         } else {
             List<String> operatorIds = new ArrayList<>(submitted.size());
-            for (OperatorProgressionData item : submitted) {
+            for (AkOperatorState item : submitted) {
                 operatorIds.add(item.getOperatorId());
             }
             rows = operatorMapper.selectByAkUidAndIds(akUid, operatorIds);
         }
-        Map<String, OperatorProgressionData> existingMap = new HashMap<>(Math.max(16, rows.size() * 2));
-        for (OperatorProgressionData row : rows) {
+        Map<String, AkOperatorState> existingMap = new HashMap<>(Math.max(16, rows.size() * 2));
+        for (AkOperatorState row : rows) {
             existingMap.put(row.getOperatorId(), row);
         }
         return existingMap;
@@ -173,7 +173,7 @@ public class AkOperatorSaveExecutor {
      * @param submitted 本次提交值
      * @return 是否无需更新
      */
-    private boolean isSameProgression(OperatorProgressionData existing, OperatorProgressionData submitted) {
+    private boolean isSameState(AkOperatorState existing, AkOperatorState submitted) {
         return sameValue(existing.getRarity(), submitted.getRarity())
                 && sameValue(existing.getLevel(), submitted.getLevel())
                 && sameValue(existing.getEvolvePhase(), submitted.getEvolvePhase())

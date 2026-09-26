@@ -229,10 +229,10 @@ CREATE TABLE `ak_player_info` (
   DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '按游戏角色UID去重的共享游戏角色信息';
 
 -- -------------------------------------------------------------
--- 12. 游戏账号干员数据（一行一个干员，按 ak_uid 归属）
+-- 12. 游戏账号干员养成状态（一行一个干员，按 ak_uid 归属）
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `operator_progression_data`;
-CREATE TABLE `operator_progression_data` (
+DROP TABLE IF EXISTS `ak_operator_state`;
+CREATE TABLE `ak_operator_state` (
     `id`               BIGINT      NOT NULL AUTO_INCREMENT COMMENT '数据库自增行ID，响应中称recordId',
     `ak_uid`           VARCHAR(32) NOT NULL COMMENT '游戏账号UID，按此账号读取与更新',
     `operator_id`      VARCHAR(64) NOT NULL COMMENT '稳定干员编码，对应JSON中的id',
@@ -253,7 +253,7 @@ CREATE TABLE `operator_progression_data` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_ak_operator` (`ak_uid`, `operator_id`) COMMENT '一个游戏账号下每个干员编码仅一条记录，支持全量读取'
 ) ENGINE = InnoDB
-  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '游戏账号干员数据';
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '游戏账号干员养成状态，一行一个干员';
 
 -- -------------------------------------------------------------
 -- 13. 用户排班表

@@ -3,7 +3,7 @@ package com.orange.service.impl;
 import com.orange.entity.vo.akoperator.OperatorListVO;
 import com.orange.mapper.AkAccountBindingMapper;
 import com.orange.mapper.AkPlayerInfoMapper;
-import com.orange.mapper.OperatorProgressionDataMapper;
+import com.orange.mapper.AkOperatorStateMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -28,7 +28,7 @@ class AkAccountServiceImplTest {
     private AkPlayerInfoMapper playerInfoMapper;
 
     @Mock
-    private OperatorProgressionDataMapper operatorMapper;
+    private AkOperatorStateMapper operatorMapper;
 
     @Mock
     private AkOperatorSaveExecutor saveExecutor;
@@ -38,11 +38,11 @@ class AkAccountServiceImplTest {
 
     @Test
     void listsBindingsByOwnerWithoutClientScope() {
-        when(bindingMapper.selectAkUidsByOwner(UID)).thenReturn(Collections.emptyList());
+        when(bindingMapper.selectByOwnerOrderByUpdateTime(UID)).thenReturn(Collections.emptyList());
 
         assertThat(service().listBoundAccounts(UID)).isEmpty();
 
-        verify(bindingMapper).selectAkUidsByOwner(UID);
+        verify(bindingMapper).selectByOwnerOrderByUpdateTime(UID);
     }
 
     @Test
