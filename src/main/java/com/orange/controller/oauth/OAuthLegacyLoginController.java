@@ -93,8 +93,10 @@ public class OAuthLegacyLoginController {
      * 直接提交到 UC，创建用户后返回一次性登录票据（注册信息不经过旧系统后端），
      * 前端将票据交给旧系统后端，由后端凭票据兑换用户信息（复用 /oauth2/direct-user）
      *
+     * <p>兼容说明：旧的 {@code register_type} 参数在统一注册形态后已无意义，服务端不再声明，
+     * 旧调用方继续携带该参数会被自动忽略，不会报错。</p>
+     *
      * @param channel      发起会话凭证（旧系统后端签发）
-     * @param registerType 注册方式（已废弃：统一注册形态后不再参与校验，保留入参仅为兼容旧调用方，服务端忽略）
      * @param email        邮箱（必填）
      * @param userName     用户名（必填，3-20 位字母数字下划线）
      * @param password     密码（必填，6-32 位）
@@ -106,14 +108,12 @@ public class OAuthLegacyLoginController {
     @Operation(summary = "直连注册（前端直接调用，注册信息不经旧系统后端）")
     @PostMapping("/direct-register")
     public Result<DirectLoginTicketVO> directRegister(@RequestParam("channel") String channel,
-                                                      @RequestParam(value = "register_type", required = false) String registerType,
                                                       @RequestParam(value = "email", required = false) String email,
                                                       @RequestParam(value = "user_name", required = false) String userName,
                                                       @RequestParam(value = "password", required = false) String password,
                                                       @RequestParam(value = "code", required = false) String code,
                                                       @RequestParam(value = "nickname", required = false) String nickname,
                                                       HttpServletRequest request) {
-        // register_type 已废弃：统一注册形态后两种取值行为完全一致，此处刻意不读取该参数
         RegisterRequest req = new RegisterRequest();
         req.setEmail(email);
         req.setUserName(userName);
