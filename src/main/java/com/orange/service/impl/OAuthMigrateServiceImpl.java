@@ -83,10 +83,6 @@ public class OAuthMigrateServiceImpl implements OAuthMigrateService {
     @Value("${user-center.oauth.migrate.clock-skew-seconds:120}")
     private long clockSkewSeconds;
 
-    /** 来源 IP 白名单（逗号分隔）：留空表示不限制 */
-    @Value("${user-center.oauth.migrate.ip-allowlist:}")
-    private String ipAllowlist;
-
     /** 应用层限流：单 IP / 单 uid / 单 client 每分钟上限 */
     @Value("${user-center.oauth.migrate.per-ip-per-minute:600}")
     private long perIpPerMinute;
@@ -150,14 +146,7 @@ public class OAuthMigrateServiceImpl implements OAuthMigrateService {
             throw new BusinessException(ResultCode.SYSTEM_ERROR, "迁移兑换认证方式配置不受支持");
         }
 
-        // 4. 来源校验：请求 IP 必须在白名单内（BackEndV3 出网 IP 已确认固定）
-        if (!isIpAllowed(request.requestIp())) {
-            LogUtil.warn(OAuthMigrateServiceImpl.class,
-                    "[OAuth] 迁移兑换被拒绝（IP 不在白名单）: clientId={}, ip={}", request.clientId(), request.requestIp());
-            throw new BusinessException(ResultCode.FORBIDDEN);
-        }
-
-        // 5. 参数存在性校验 + 时效校验：|now - ts| 必须落在允许窗口内
+        // 4. 参数存在性校验 + 时效校验：|now - ts| 必须落在允许窗口内
         Long uid = parseLongOrNull(request.uidText());
         Long timestamp = parseLongOrNull(request.tsText());
         if (uid == null || timestamp == null
@@ -173,7 +162,7 @@ public class OAuthMigrateServiceImpl implements OAuthMigrateService {
             throw new BusinessException(ResultCode.OAUTH_MIGRATE_REPLAY);
         }
 
-        // 6. 防重放：nonce 一次性占用，TTL 覆盖整个可接受时间窗
+        // 5. 防重放：nonce 一次性占用，TTL 覆盖整个可接受时间窗
         Boolean firstUse = stringRedisTemplate.opsForValue().setIfAbsent(
                 RedisKeyUtil.oauthMigrateNonce(request.nonce()), "1", clockSkewSeconds * 2, TimeUnit.SECONDS);
         if (!Boolean.TRUE.equals(firstUse)) {
@@ -183,7 +172,7 @@ public class OAuthMigrateServiceImpl implements OAuthMigrateService {
             throw new BusinessException(ResultCode.OAUTH_MIGRATE_REPLAY);
         }
 
-        // 7. 认证层校验：kid 定位公钥，对 canonical 串做 Ed25519 验签
+        // 6. 认证层校验：kid 定位公钥，对 canonical 串做 Ed25519 验签
         if (!verifySignature(request, uid, timestamp)) {
             LogUtil.warn(OAuthMigrateServiceImpl.class,
                     "[OAuth] 迁移兑换被拒绝（签名校验失败）: clientId={}, uid={}, ip={}, kid={}",
@@ -191,10 +180,10 @@ public class OAuthMigrateServiceImpl implements OAuthMigrateService {
             throw new BusinessException(ResultCode.OAUTH_MIGRATE_SIGN_INVALID);
         }
 
-        // 8. 客户端校验：存在、启用、审批通过且已开通直连认证能力（迁移复用同一开关）
+        // 7. 客户端校验：存在、启用、审批通过且已开通直连认证能力（迁移复用同一开关）
         requireMigratableClient(request.clientId());
 
-        // 9. 用户校验：必须存在且未被封禁。此步不可省，否则该端点就是绕过封禁的后门
+        // 8. 用户校验：必须存在且未被封禁。此步不可省，否则该端点就是绕过封禁的后门
         UserInfo user = userInfoMapper.selectById(uid);
         if (user == null) {
             throw new BusinessException(ResultCode.USER_NOT_FOUND);
@@ -203,13 +192,13 @@ public class OAuthMigrateServiceImpl implements OAuthMigrateService {
             throw new BusinessException(ResultCode.USER_BANNED);
         }
 
-        // 10. 限流：应用层按 IP / uid / client 三维度（网关层另有按 IP 限流）
+        // 9. 限流：应用层按 IP / uid / client 三维度（网关层另有按 IP 限流）
         enforceRateLimit(request.requestIp(), uid, request.clientId());
 
-        // 11. 签发：原子替换上一轮迁移凭证并写入新令牌对（见 OAuthTokenService#issueMigratedToken）
+        // 10. 签发：原子替换上一轮迁移凭证并写入新令牌对（见 OAuthTokenService#issueMigratedToken）
         OAuthTokenVO token = oauthTokenService.issueMigratedToken(request.clientId(), uid);
 
-        // 12. 审计与日志：只记可审计字段，签名原文与令牌明文一律不入日志
+        // 11. 审计与日志：只记可审计字段，签名原文与令牌明文一律不入日志
         recordAudit(request, uid);
         long costMillis = (System.nanoTime() - startNanos) / 1_000_000L;
         LogUtil.info(OAuthMigrateServiceImpl.class,
@@ -275,24 +264,6 @@ public class OAuthMigrateServiceImpl implements OAuthMigrateService {
         Map<String, String> resolved = Map.copyOf(parsed);
         publicKeyCache = resolved;
         return resolved;
-    }
-
-    /**
-     * 判断请求来源 IP 是否在白名单内
-     *
-     * @param ip 请求来源 IP
-     * @return 未配置白名单时放行；已配置时要求精确匹配
-     */
-    private boolean isIpAllowed(String ip) {
-        if (!StringUtils.hasText(ipAllowlist)) {
-            return true;
-        }
-        for (String allowed : ipAllowlist.split(",")) {
-            if (allowed.trim().equals(ip)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /**

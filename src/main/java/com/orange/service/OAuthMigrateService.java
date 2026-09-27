@@ -8,14 +8,14 @@ import com.orange.entity.vo.oauth.MigrateTokenVO;
  *
  * <p>供 BackEndV3 在识别出「用户持有旧自签 token」后，凭 uid 现场换取一对全新的
  * UC 令牌。该端点跨公网可达，认证层（Ed25519 验签 + 时间窗 + nonce 防重放）是唯一
- * 准入屏障，IP 白名单、HTTPS、限流仅为加固。</p>
+ * 准入屏障，HTTPS 与限流仅为加固。</p>
  *
  * @author UserCenter
  */
 public interface OAuthMigrateService {
 
     /**
-     * 迁移兑换：依次完成协议、开关、来源、时效、防重放、签名、客户端、用户状态与限流
+     * 迁移兑换：依次完成协议、开关、时效、防重放、签名、客户端、用户状态与限流
      * 校验，通过后为一个 uid 现场签发一对全新 UC 令牌。
      *
      * <p>签发会先撤销同一 (uid, clientId) 上上一轮迁移签发的 refresh_token，使该组合上

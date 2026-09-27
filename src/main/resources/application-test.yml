@@ -115,8 +115,6 @@ user-center:
       auth-mode: ed25519
       # 允许的时间偏移（秒）：公网暴露下取小值，同时决定 nonce 的 TTL（该值 ×2）
       clock-skew-seconds: 120
-      # 来源 IP 白名单（逗号分隔）：公网暴露下必配，只放行 BackEndV3 固定出口 IP；留空表示不限制
-      ip-allowlist: ""
       # 限流：应用层按 IP / uid / client 三个维度（网关层另有按 IP 限流）
       per-ip-per-minute: 600
       per-uid-per-minute: 5
