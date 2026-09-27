@@ -1,9 +1,8 @@
 package com.orange.service.impl;
 
+import com.orange.common.util.LogUtil;
 import com.orange.event.OAuthClientReviewNotificationEvent;
 import com.orange.service.MailService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
@@ -20,8 +19,6 @@ import org.springframework.util.StringUtils;
  */
 @Component
 public class OAuthClientAdminNotificationListener {
-
-    private static final Logger log = LoggerFactory.getLogger(OAuthClientAdminNotificationListener.class);
 
     private final MailService mailService;
     private final String adminEmail;
@@ -42,7 +39,7 @@ public class OAuthClientAdminNotificationListener {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void sendReviewNotification(OAuthClientReviewNotificationEvent event) {
         if (!StringUtils.hasText(adminEmail)) {
-            log.warn("[OAuthClient] 未配置 user-center.oauth.admin-email，跳过管理员审核邮件");
+            LogUtil.warn(OAuthClientAdminNotificationListener.class, "[OAuthClient] 未配置 user-center.oauth.admin-email，跳过管理员审核邮件");
             return;
         }
 
@@ -54,10 +51,10 @@ public class OAuthClientAdminNotificationListener {
                 + "Origin：" + (StringUtils.hasText(event.origin()) ? event.origin() : "未填写") + "\n";
         try {
             mailService.sendText(adminEmail, subject, content);
-            log.info("[OAuthClient] 管理员审核邮件发送成功: action={}, clientId={}",
+            LogUtil.info(OAuthClientAdminNotificationListener.class, "[OAuthClient] 管理员审核邮件发送成功: action={}, clientId={}",
                     event.action(), event.clientId());
         } catch (RuntimeException e) {
-            log.error("[OAuthClient] 管理员审核邮件发送失败: action={}, clientId={}",
+            LogUtil.error(OAuthClientAdminNotificationListener.class, "[OAuthClient] 管理员审核邮件发送失败: action={}, clientId={}",
                     event.action(), event.clientId(), e);
         }
     }

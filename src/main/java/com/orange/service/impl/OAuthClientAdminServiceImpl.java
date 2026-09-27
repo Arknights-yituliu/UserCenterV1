@@ -7,6 +7,7 @@ import com.orange.common.enums.OAuthGrantType;
 import com.orange.common.enums.OAuthScope;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
+import com.orange.common.util.LogUtil;
 import com.orange.common.util.RedisKeyUtil;
 import com.orange.entity.dto.oauthclient.OAuthClientRegisterRequest;
 import com.orange.entity.dto.oauthclient.OAuthClientUpdateRequest;
@@ -19,8 +20,6 @@ import com.orange.event.OAuthClientReviewNotificationEvent;
 import com.orange.mapper.OAuthClientMapper;
 import com.orange.mapper.OAuthClientOriginMapper;
 import com.orange.service.OAuthClientAdminService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.Cursor;
@@ -54,8 +53,6 @@ import java.util.stream.Collectors;
  */
 @Service
 public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
-
-    private static final Logger log = LoggerFactory.getLogger(OAuthClientAdminServiceImpl.class);
 
     /** uidOauth 反向索引中 access_token 成员前缀（与 OAuthTokenServiceImpl 保持一致） */
     private static final String OAUTH_ACCESS_MEMBER_PREFIX = "access:";
@@ -159,7 +156,7 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
             publishOriginChanged();
         }
         publishReviewNotification("注册", client, websiteOrigin);
-        log.info("[OAuthClient] 注册客户端成功: ownerUid={}, clientId={}", uid, clientId);
+        LogUtil.info(OAuthClientAdminServiceImpl.class, "[OAuthClient] 注册客户端成功: ownerUid={}, clientId={}", uid, clientId);
         return credential(client, clientSecret);
     }
 
@@ -222,7 +219,7 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
             publishOriginChanged();
         }
         publishReviewNotification("更新", client, websiteOrigin);
-        log.info("[OAuthClient] 更新客户端成功: ownerUid={}, clientId={}", uid, clientId);
+        LogUtil.info(OAuthClientAdminServiceImpl.class, "[OAuthClient] 更新客户端成功: ownerUid={}, clientId={}", uid, clientId);
     }
 
     /**
@@ -246,7 +243,7 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
         String newSecret = randomToken("sk_", 32);
         client.setClientSecret(passwordEncoder.encode(newSecret));
         oauthClientMapper.updateById(client);
-        log.info("[OAuthClient] 轮换密钥成功: ownerUid={}, clientId={}", uid, clientId);
+        LogUtil.info(OAuthClientAdminServiceImpl.class, "[OAuthClient] 轮换密钥成功: ownerUid={}, clientId={}", uid, clientId);
         return credential(client, newSecret);
     }
 
@@ -273,7 +270,7 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
             oauthClientOriginMapper.updateById(origin);
             publishOriginChanged();
         }
-        log.info("[OAuthClient] {}客户端成功: ownerUid={}, clientId={}",
+        LogUtil.info(OAuthClientAdminServiceImpl.class, "[OAuthClient] {}客户端成功: ownerUid={}, clientId={}",
                 ownerEnabled ? "启用" : "停用", uid, clientId);
     }
 
@@ -291,7 +288,7 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
         oauthClientOriginMapper.deleteById(clientId);
         oauthClientMapper.deleteById(client.getId());
         publishOriginChanged();
-        log.info("[OAuthClient] 删除客户端成功: ownerUid={}, clientId={}", uid, clientId);
+        LogUtil.info(OAuthClientAdminServiceImpl.class, "[OAuthClient] 删除客户端成功: ownerUid={}, clientId={}", uid, clientId);
     }
 
     /**
@@ -518,7 +515,7 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
                                 RedisKeyUtil.uidOauth(((Number) uidObj).longValue()), memberPrefix + token);
                     }
                 } catch (IOException e) {
-                    log.warn("[OAuthClient] 解析令牌记录失败，跳过: key={}", key);
+                    LogUtil.warn(OAuthClientAdminServiceImpl.class, "[OAuthClient] 解析令牌记录失败，跳过: key={}", key);
                 }
             }
         }

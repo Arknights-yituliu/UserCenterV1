@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.util.DesensitizeUtil;
+import com.orange.common.util.LogUtil;
 import com.orange.common.util.RedisKeyUtil;
 import com.orange.entity.dto.SessionInfo;
 import com.orange.entity.dto.user.BindEmailRequest;
@@ -18,8 +19,6 @@ import com.orange.mapper.UserInfoMapper;
 import com.orange.service.EmailCodeService;
 import com.orange.service.RevokeService;
 import com.orange.service.UserService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.Cursor;
 import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -38,8 +37,6 @@ import java.util.List;
  */
 @Service
 public class UserServiceImpl implements UserService {
-
-    private static final Logger log = LoggerFactory.getLogger(UserServiceImpl.class);
 
     /** 会话 key 扫描模式 */
     private static final String TOKEN_PATTERN = "uc:token:*";
@@ -219,7 +216,7 @@ public class UserServiceImpl implements UserService {
                     sessions.add(vo);
                 }
             } catch (IOException e) {
-                log.warn("会话解析失败，跳过 key：{}", key);
+                LogUtil.warn(UserServiceImpl.class, "会话解析失败，跳过 key：{}", key);
             }
         }
         return sessions;

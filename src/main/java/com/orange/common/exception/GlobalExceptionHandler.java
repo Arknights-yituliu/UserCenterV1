@@ -1,10 +1,9 @@
 package com.orange.common.exception;
 
 import com.orange.common.enums.ResultCode;
+import com.orange.common.util.LogUtil;
 import com.orange.common.util.Result;
 import com.orange.entity.vo.UserConfigConflictVO;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BindException;
@@ -21,8 +20,6 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
-
-    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     /**
      * 处理用户配置 CAS 冲突。
@@ -100,7 +97,7 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<Void> handleNoResourceFound(NoResourceFoundException e) {
-        log.debug("请求的资源不存在：{}", e.getResourcePath());
+        LogUtil.debug(GlobalExceptionHandler.class, "请求的资源不存在：{}", e.getResourcePath());
         return ResponseEntity.notFound().build();
     }
 
@@ -112,7 +109,7 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(Exception.class)
     public Result<Void> handleException(Exception e) {
-        log.error("系统异常", e);
+        LogUtil.error(GlobalExceptionHandler.class, "系统异常", e);
         return Result.error(ResultCode.SYSTEM_ERROR);
     }
 }

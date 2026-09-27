@@ -1,9 +1,8 @@
 package com.orange.service;
 
+import com.orange.common.util.LogUtil;
 import com.orange.event.OAuthClientOriginChangedEvent;
 import com.orange.mapper.OAuthClientOriginMapper;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -27,8 +26,6 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 @Component
 public class OAuthClientOriginCache {
-
-    private static final Logger log = LoggerFactory.getLogger(OAuthClientOriginCache.class);
 
     private final OAuthClientOriginMapper oauthClientOriginMapper;
     private final AtomicReference<Set<String>> allowedOrigins = new AtomicReference<>(Set.of());
@@ -61,7 +58,7 @@ public class OAuthClientOriginCache {
             }
         }
         allowedOrigins.set(Set.copyOf(next));
-        log.info("[CORS] Origin 缓存刷新完成: count={}", next.size());
+        LogUtil.info(OAuthClientOriginCache.class, "[CORS] Origin 缓存刷新完成: count={}", next.size());
         return next.size();
     }
 
@@ -87,7 +84,7 @@ public class OAuthClientOriginCache {
         try {
             refresh();
         } catch (RuntimeException e) {
-            log.error("[CORS] Origin 缓存刷新失败，保留上一份快照: trigger={}", trigger, e);
+            LogUtil.error(OAuthClientOriginCache.class, "[CORS] Origin 缓存刷新失败，保留上一份快照: trigger={}", trigger, e);
         }
     }
 }

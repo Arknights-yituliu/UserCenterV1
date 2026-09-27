@@ -8,6 +8,7 @@ import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BadRequestException;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.exception.ConfigConflictException;
+import com.orange.common.util.LogUtil;
 import com.orange.entity.dto.userconfig.UserConfigSaveRequest;
 import com.orange.entity.po.AuditLog;
 import com.orange.entity.po.UserConfig;
@@ -19,8 +20,6 @@ import com.orange.mapper.AuditLogMapper;
 import com.orange.mapper.UserConfigMapper;
 import com.orange.mapper.UserConfigQuotaMapper;
 import com.orange.service.UserConfigService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -48,7 +47,6 @@ import java.util.stream.Collectors;
 @Service
 public class UserConfigServiceImpl implements UserConfigService {
 
-    private static final Logger log = LoggerFactory.getLogger(UserConfigServiceImpl.class);
     private static final long DEFAULT_CONFIG_QUOTA_BYTES = 500L * 1024;
     private static final long MAX_ASSIGNABLE_CONFIG_BYTES = 10L * 1024 * 1024;
     private static final Pattern SHA256_PATTERN = Pattern.compile("^[0-9a-fA-F]{64}$");
@@ -361,7 +359,7 @@ public class UserConfigServiceImpl implements UserConfigService {
         try {
             return objectMapper.writeValueAsString(config);
         } catch (JsonProcessingException e) {
-            log.warn("配置内容序列化失败：{}", e.getMessage());
+            LogUtil.warn(UserConfigServiceImpl.class, "配置内容序列化失败：{}", e.getMessage());
             throw new BusinessException(ResultCode.PARAM_ERROR, "配置内容格式错误");
         }
     }
@@ -391,7 +389,7 @@ public class UserConfigServiceImpl implements UserConfigService {
         try {
             return objectMapper.readValue(configString, Object.class);
         } catch (IOException e) {
-            log.warn("配置内容解析失败，原样返回：{}", e.getMessage());
+            LogUtil.warn(UserConfigServiceImpl.class, "配置内容解析失败，原样返回：{}", e.getMessage());
             return configString;
         }
     }

@@ -1,12 +1,11 @@
 package com.orange.common.exception;
 
 import com.orange.common.enums.ResultCode;
+import com.orange.common.util.LogUtil;
 import com.orange.common.util.Result;
 import com.orange.controller.oauth.OAuthAkAccountController;
 import com.orange.controller.user.AkAccountController;
 import com.orange.entity.vo.akoperator.RetryAfterVO;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.BindException;
@@ -31,8 +30,6 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @Order(0)
 @RestControllerAdvice(assignableTypes = {AkAccountController.class, OAuthAkAccountController.class})
 public class AkAccountExceptionHandler {
-
-    private static final Logger log = LoggerFactory.getLogger(AkAccountExceptionHandler.class);
 
     /**
      * 处理上传限流：业务码 30006，等待秒数通过 data.retryAfterSeconds 返回，不依赖 Retry-After 响应头
@@ -64,7 +61,7 @@ public class AkAccountExceptionHandler {
      */
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public Result<Void> handleMessageNotReadable(HttpMessageNotReadableException e) {
-        log.debug("干员接口请求体解析失败", e);
+        LogUtil.debug(AkAccountExceptionHandler.class, "干员接口请求体解析失败", e);
         return Result.error(ResultCode.PARAM_VALID_ERROR.getCode(), "请求体格式错误或字段类型非法");
     }
 
@@ -98,7 +95,7 @@ public class AkAccountExceptionHandler {
      */
     @ExceptionHandler(Exception.class)
     public Result<Void> handleException(Exception e) {
-        log.error("干员数据接口系统异常", e);
+        LogUtil.error(AkAccountExceptionHandler.class, "干员数据接口系统异常", e);
         return Result.error(ResultCode.SYSTEM_ERROR);
     }
 

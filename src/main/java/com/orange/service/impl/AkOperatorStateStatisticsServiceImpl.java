@@ -4,14 +4,13 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
+import com.orange.common.util.LogUtil;
 import com.orange.entity.po.AkOperatorState;
 import com.orange.entity.po.AkOperatorStateStatistics;
 import com.orange.entity.vo.akoperator.OperatorStatisticsVO;
 import com.orange.mapper.AkOperatorStateMapper;
 import com.orange.mapper.AkOperatorStateStatisticsMapper;
 import com.orange.service.AkOperatorStateStatisticsService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
@@ -67,8 +66,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 @Service
 public class AkOperatorStateStatisticsServiceImpl implements AkOperatorStateStatisticsService {
-
-    private static final Logger log = LoggerFactory.getLogger(AkOperatorStateStatisticsServiceImpl.class);
 
     /** 外部实装时间数据的时间格式，如 2026/09/04 12:00:00 */
     private static final DateTimeFormatter RELEASE_TIME_FORMATTER =
@@ -171,7 +168,7 @@ public class AkOperatorStateStatisticsServiceImpl implements AkOperatorStateStat
             scannedRows += batch.size();
             lastId = batch.get(batch.size() - 1).getId();
             if (batchIndex % PROGRESS_LOG_INTERVAL_BATCHES == 0) {
-                log.info("干员数据统计进度：批次 {}/{}，已扫描 {} 条，累计干员 {} 个，"
+                LogUtil.info(AkOperatorStateStatisticsServiceImpl.class, "干员数据统计进度：批次 {}/{}，已扫描 {} 条，累计干员 {} 个，"
                                 + "DB 查询 {} ms、内存累加 {} ms，总耗时 {} ms",
                         batchIndex, MAX_BATCH_ROUNDS, scannedRows, aggregates.size(),
                         nanosToMillis(queryNanos), nanosToMillis(accumulateNanos), elapsedMillis(totalStartNanos));
@@ -182,10 +179,10 @@ public class AkOperatorStateStatisticsServiceImpl implements AkOperatorStateStat
             }
         }
         if (!exhausted) {
-            log.warn("已达到最大批次轮数 {}（最多 {} 条），本次统计未覆盖全表，结果可能不完整",
+            LogUtil.warn(AkOperatorStateStatisticsServiceImpl.class, "已达到最大批次轮数 {}（最多 {} 条），本次统计未覆盖全表，结果可能不完整",
                     MAX_BATCH_ROUNDS, (long) MAX_BATCH_ROUNDS * BATCH_SIZE);
         }
-        log.info("干员数据扫描完成：共 {} 条记录，{} 个干员，{} 个游戏账号",
+        LogUtil.info(AkOperatorStateStatisticsServiceImpl.class, "干员数据扫描完成：共 {} 条记录，{} 个干员，{} 个游戏账号",
                 scannedRows, aggregates.size(), latestUpdateByAkUid.size());
 
         long accountTimeStartNanos = System.nanoTime();
@@ -196,7 +193,7 @@ public class AkOperatorStateStatisticsServiceImpl implements AkOperatorStateStat
         List<OperatorStatisticsVO> result = buildResult(aggregates, accountLatestUpdateTimes, releaseTimes);
         long buildMillis = elapsedMillis(buildStartNanos);
 
-        log.info("干员数据统计各阶段耗时（ms）：实装时间加载 {}，账号时间归集 {}，DB 查询 {}，内存累加 {}，"
+        LogUtil.info(AkOperatorStateStatisticsServiceImpl.class, "干员数据统计各阶段耗时（ms）：实装时间加载 {}，账号时间归集 {}，DB 查询 {}，内存累加 {}，"
                         + "结果汇总 {}，总耗时 {}",
                 releaseTimeMillis, accountTimeMillis, nanosToMillis(queryNanos), nanosToMillis(accumulateNanos),
                 buildMillis, elapsedMillis(totalStartNanos));
@@ -231,7 +228,7 @@ public class AkOperatorStateStatisticsServiceImpl implements AkOperatorStateStat
                 statisticsMapper.insert(toEntity(vo, statisticsTime));
             }
         });
-        log.info("干员数据统计结果已落库：{} 个干员，统计时间 {}，统计耗时 {} ms，落库耗时 {} ms，合计 {} ms",
+        LogUtil.info(AkOperatorStateStatisticsServiceImpl.class, "干员数据统计结果已落库：{} 个干员，统计时间 {}，统计耗时 {} ms，落库耗时 {} ms，合计 {} ms",
                 statistics.size(), statisticsTime, collectMillis, elapsedMillis(persistStartNanos),
                 elapsedMillis(totalStartNanos));
         return statistics.size();
@@ -249,7 +246,7 @@ public class AkOperatorStateStatisticsServiceImpl implements AkOperatorStateStat
     @Override
     public boolean triggerOperatorStatisticsRefresh() {
         if (!refreshing.compareAndSet(false, true)) {
-            log.warn("干员数据统计已在进行中，本次手动触发被忽略");
+            LogUtil.warn(AkOperatorStateStatisticsServiceImpl.class, "干员数据统计已在进行中，本次手动触发被忽略");
             return false;
         }
         try {
@@ -257,7 +254,7 @@ public class AkOperatorStateStatisticsServiceImpl implements AkOperatorStateStat
                 try {
                     refreshOperatorStatistics();
                 } catch (Exception e) {
-                    log.error("手动触发的干员数据统计执行失败", e);
+                    LogUtil.error(AkOperatorStateStatisticsServiceImpl.class, "手动触发的干员数据统计执行失败", e);
                 } finally {
                     refreshing.set(false);
                 }
@@ -267,7 +264,7 @@ public class AkOperatorStateStatisticsServiceImpl implements AkOperatorStateStat
             refreshing.set(false);
             throw e;
         }
-        log.info("干员数据统计已触发，将在后台执行");
+        LogUtil.info(AkOperatorStateStatisticsServiceImpl.class, "干员数据统计已触发，将在后台执行");
         return true;
     }
 
@@ -307,11 +304,11 @@ public class AkOperatorStateStatisticsServiceImpl implements AkOperatorStateStat
                     .retrieve()
                     .body(String.class);
         } catch (RuntimeException e) {
-            log.error("干员实装时间数据获取失败：{}", RELEASE_TIME_URL, e);
+            LogUtil.error(AkOperatorStateStatisticsServiceImpl.class, "干员实装时间数据获取失败：{}", RELEASE_TIME_URL, e);
             throw new BusinessException(ResultCode.SYSTEM_ERROR, "干员实装时间数据获取失败");
         }
         if (body == null || body.isBlank()) {
-            log.error("干员实装时间数据为空：{}", RELEASE_TIME_URL);
+            LogUtil.error(AkOperatorStateStatisticsServiceImpl.class, "干员实装时间数据为空：{}", RELEASE_TIME_URL);
             throw new BusinessException(ResultCode.SYSTEM_ERROR, "干员实装时间数据为空");
         }
 
@@ -325,10 +322,10 @@ public class AkOperatorStateStatisticsServiceImpl implements AkOperatorStateStat
                             LocalDateTime.parse(updateTime.asText(), RELEASE_TIME_FORMATTER));
                 }
             });
-            log.info("干员实装时间数据加载完成：共 {} 个干员", releaseTimes.size());
+            LogUtil.info(AkOperatorStateStatisticsServiceImpl.class, "干员实装时间数据加载完成：共 {} 个干员", releaseTimes.size());
             return releaseTimes;
         } catch (Exception e) {
-            log.error("干员实装时间数据解析失败：{}", RELEASE_TIME_URL, e);
+            LogUtil.error(AkOperatorStateStatisticsServiceImpl.class, "干员实装时间数据解析失败：{}", RELEASE_TIME_URL, e);
             throw new BusinessException(ResultCode.SYSTEM_ERROR, "干员实装时间数据解析失败");
         }
     }
@@ -350,7 +347,7 @@ public class AkOperatorStateStatisticsServiceImpl implements AkOperatorStateStat
             times[index++] = toEpochMilli(latestUpdateTime);
         }
         Arrays.sort(times);
-        log.info("游戏账号最近变更时间归集完成：共 {} 个账号", times.length);
+        LogUtil.info(AkOperatorStateStatisticsServiceImpl.class, "游戏账号最近变更时间归集完成：共 {} 个账号", times.length);
         return times;
     }
 
@@ -424,9 +421,9 @@ public class AkOperatorStateStatisticsServiceImpl implements AkOperatorStateStat
             result.add(vo);
         }
         if (unknownReleaseCount > 0) {
-            log.warn("有 {} 个干员未匹配到实装时间，其 sampleSize 记为 0", unknownReleaseCount);
+            LogUtil.warn(AkOperatorStateStatisticsServiceImpl.class, "有 {} 个干员未匹配到实装时间，其 sampleSize 记为 0", unknownReleaseCount);
         }
-        log.info("有效样本数统计耗时 {} ms（干员 {} 个 × 账号 {} 个）",
+        LogUtil.info(AkOperatorStateStatisticsServiceImpl.class, "有效样本数统计耗时 {} ms（干员 {} 个 × 账号 {} 个）",
                 nanosToMillis(sampleCountNanos), aggregates.size(), accountLatestUpdateTimes.length);
         return result;
     }

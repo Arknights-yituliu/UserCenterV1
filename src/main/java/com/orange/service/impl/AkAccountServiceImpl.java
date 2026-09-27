@@ -3,6 +3,7 @@ package com.orange.service.impl;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.exception.RateLimitedException;
+import com.orange.common.util.LogUtil;
 import com.orange.common.util.RedisKeyUtil;
 import com.orange.common.util.SignUtil;
 import com.orange.entity.dto.akoperator.OperatorItemRequest;
@@ -18,8 +19,6 @@ import com.orange.mapper.AkAccountBindingMapper;
 import com.orange.mapper.AkPlayerInfoMapper;
 import com.orange.mapper.AkOperatorStateMapper;
 import com.orange.service.AkAccountService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -50,8 +49,6 @@ import java.util.regex.Pattern;
  */
 @Service
 public class AkAccountServiceImpl implements AkAccountService {
-
-    private static final Logger log = LoggerFactory.getLogger(AkAccountServiceImpl.class);
 
     /** 游戏账号 UID 合法格式：不超过 32 位可见 ASCII 字符（与列定义 VARCHAR(32) utf8mb4_bin 一致，保持大小写敏感） */
     private static final Pattern AK_UID_PATTERN = Pattern.compile("^[\\x21-\\x7E]{1,32}$");
@@ -179,11 +176,11 @@ public class AkAccountServiceImpl implements AkAccountService {
                 return saveExecutor.save(akUid, uid, operators);
             } catch (DuplicateKeyException | PessimisticLockingFailureException e) {
                 if (attempt >= SAVE_MAX_RETRY) {
-                    log.warn("干员数据保存冲突重试耗尽, akUidHash={}, attempts={}",
+                    LogUtil.warn(AkAccountServiceImpl.class, "干员数据保存冲突重试耗尽, akUidHash={}, attempts={}",
                             SignUtil.sha256(akUid), attempt + 1, e);
                     throw new BusinessException(ResultCode.OPERATOR_SAVE_CONFLICT);
                 }
-                log.info("干员数据保存冲突，回滚后重试整个请求, akUidHash={}, attempt={}",
+                LogUtil.info(AkAccountServiceImpl.class, "干员数据保存冲突，回滚后重试整个请求, akUidHash={}, attempt={}",
                         SignUtil.sha256(akUid), attempt + 1);
             }
         }
@@ -204,7 +201,7 @@ public class AkAccountServiceImpl implements AkAccountService {
             acquired = Boolean.TRUE.equals(stringRedisTemplate.opsForValue()
                     .setIfAbsent(key, "1", Duration.ofSeconds(SAVE_RATE_LIMIT_WINDOW_SECONDS)));
         } catch (Exception e) {
-            log.error("干员上传限流设施不可用, key={}", key, e);
+            LogUtil.error(AkAccountServiceImpl.class, "干员上传限流设施不可用, key={}", key, e);
             throw new BusinessException(ResultCode.RATE_LIMITER_UNAVAILABLE);
         }
         if (!acquired) {

@@ -3,6 +3,7 @@ package com.orange.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.enums.ResultCode;
+import com.orange.common.util.LogUtil;
 import com.orange.entity.po.SmtpConfig;
 import com.orange.mapper.SmtpConfigMapper;
 import com.orange.service.MailService;
@@ -13,8 +14,6 @@ import com.tencentcloudapi.common.profile.HttpProfile;
 import com.tencentcloudapi.ses.v20201002.SesClient;
 import com.tencentcloudapi.ses.v20201002.models.SendEmailRequest;
 import com.tencentcloudapi.ses.v20201002.models.Template;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.mail.SimpleMailMessage;
@@ -44,8 +43,6 @@ import java.util.concurrent.TimeUnit;
  */
 @Service
 public class MailServiceImpl implements MailService {
-
-    private static final Logger log = LoggerFactory.getLogger(MailServiceImpl.class);
 
     /** 每日邮件降级阈值：500 封以内走腾讯云 SES */
     private static final int TENCENT_DAILY_LIMIT = 500;
@@ -124,11 +121,11 @@ public class MailServiceImpl implements MailService {
                     incrementDailyCount();
                     return;
                 }
-                log.info("腾讯云 SES 未配置或发送失败，降级为 mail-163-1");
+                LogUtil.info(MailServiceImpl.class, "腾讯云 SES 未配置或发送失败，降级为 mail-163-1");
             } else if (dailyCount < FIRST_163_DAILY_LIMIT) {
-                log.info("邮件渠道降级：今日已发送 {} 封，切换为 mail-163-1", dailyCount);
+                LogUtil.info(MailServiceImpl.class, "邮件渠道降级：今日已发送 {} 封，切换为 mail-163-1", dailyCount);
             } else {
-                log.info("邮件渠道降级：今日已发送 {} 封，切换为 mail-163-2", dailyCount);
+                LogUtil.info(MailServiceImpl.class, "邮件渠道降级：今日已发送 {} 封，切换为 mail-163-2", dailyCount);
             }
 
             // 降级/超额走 163 SMTP 渠道（配置存数据库）
@@ -138,7 +135,7 @@ public class MailServiceImpl implements MailService {
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
-            log.error("邮件发送失败，收件人：{}", to, e);
+            LogUtil.error(MailServiceImpl.class, "邮件发送失败，收件人：{}", to, e);
             throw new BusinessException(ResultCode.MAIL_SEND_FAILED);
         }
     }
@@ -282,10 +279,10 @@ public class MailServiceImpl implements MailService {
             req.setTemplate(template);
 
             client.SendEmail(req);
-            log.info("腾讯云邮件发送成功，收件人：{}", to);
+            LogUtil.info(MailServiceImpl.class, "腾讯云邮件发送成功，收件人：{}", to);
             return true;
         } catch (TencentCloudSDKException e) {
-            log.error("腾讯云邮件发送失败：{}", e.getMessage());
+            LogUtil.error(MailServiceImpl.class, "腾讯云邮件发送失败：{}", e.getMessage());
             return false;
         }
     }
