@@ -274,3 +274,29 @@ CREATE TABLE `user_schedule` (
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '用户排班表，每个用户最多 5 条由业务层控制';
 
+-- -------------------------------------------------------------
+-- 14. 干员养成数据统计结果表
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `ak_operator_state_statistics`;
+CREATE TABLE `ak_operator_state_statistics` (
+    `id`              BIGINT          NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `char_id`         VARCHAR(64)     NOT NULL COMMENT '干员编码，对应 ak_operator_state.operator_id',
+    `own`             BIGINT UNSIGNED NOT NULL COMMENT '拥有该干员的记录总数（operatorOwnedCount）',
+    `sample_size`     BIGINT UNSIGNED NOT NULL COMMENT '有效样本数：最近一次数据变更时间不早于该干员实装时间的游戏账号数',
+    `elite`           VARCHAR(512)    NOT NULL COMMENT '精英化阶段分布（JSON 字符串），对应 evolve_phase',
+    `skill1`          VARCHAR(512)    NOT NULL COMMENT '技能1等级或状态分布（JSON 字符串）',
+    `skill2`          VARCHAR(512)    NOT NULL COMMENT '技能2等级或状态分布（JSON 字符串）',
+    `skill3`          VARCHAR(512)    NOT NULL COMMENT '技能3等级或状态分布（JSON 字符串）',
+    `mod_a`           VARCHAR(512)    NOT NULL COMMENT 'A模组数值分布（JSON 字符串），对应 equip_a',
+    `mod_x`           VARCHAR(512)    NOT NULL COMMENT 'X模组数值分布（JSON 字符串），对应 equip_x',
+    `mod_y`           VARCHAR(512)    NOT NULL COMMENT 'Y模组数值分布（JSON 字符串），对应 equip_y',
+    `mod_d`           VARCHAR(512)    NOT NULL COMMENT 'D模组数值分布（JSON 字符串），对应 equip_d',
+    `mod_b`           VARCHAR(512)    NOT NULL COMMENT 'B模组数值分布（JSON 字符串），对应 equip_b',
+    `statistics_time` DATETIME(3)     NOT NULL COMMENT '本轮统计的完成时间',
+    `create_time`     DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+    `update_time`     DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_char_id` (`char_id`) COMMENT '一个干员只保留最新一份统计'
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '干员养成数据统计结果，一行一个干员，只保留最新一轮';
+

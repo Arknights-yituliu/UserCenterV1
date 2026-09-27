@@ -62,6 +62,23 @@ public interface AkOperatorStateMapper extends BaseMapper<AkOperatorState> {
     int batchInsert(@Param("items") List<AkOperatorState> items);
 
     /**
+     * 按主键升序分片扫描全表，供干员数据统计使用
+     *
+     * <p>读取统计所需的 9 个取值列、主键，以及账号归集用的 ak_uid 与 updated_at：调用方在扫描
+     * 过程中顺带归集每个账号的最近变更时间，就不必再发一次「MAX(updated_at) GROUP BY ak_uid」，
+     * 后者虽然只返回账号数的行数，却要把数千万行重新读一遍，缓冲池装不下整表时全是磁盘 I/O。
+     * 调用方以本批最后一条的 id 作为下一批起点，走主键范围扫描而非 LIMIT OFFSET，避免深分页。</p>
+     *
+     * @param lastId 上一批最后一条记录的 id，首页传 0
+     * @param size   本批最大条数，调用方按内存情况控制
+     * @return 按 id 升序排列的记录，无数据时返回空列表
+     */
+    @Select("SELECT id, ak_uid, operator_id, evolve_phase, skill1, skill2, skill3, "
+            + "equip_x, equip_y, equip_d, equip_a, equip_b, updated_at "
+            + "FROM ak_operator_state WHERE id > #{lastId} ORDER BY id LIMIT #{size}")
+    List<AkOperatorState> selectStatisticsBatch(@Param("lastId") long lastId, @Param("size") int size);
+
+    /**
      * 按数据库行 ID 更新属性实际变化的干员记录，并刷新变更时间
      *
      * @param record 记录（需含 id、akUid 与全部已归一化数值字段、updatedAt）
