@@ -12,6 +12,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
  * 全局异常处理器：将各类异常统一转换为 Result 返回
@@ -85,6 +86,22 @@ public class GlobalExceptionHandler {
         FieldError fieldError = e.getBindingResult().getFieldError();
         String message = fieldError == null ? ResultCode.PARAM_VALID_ERROR.getMessage() : fieldError.getDefaultMessage();
         return ResponseEntity.badRequest().body(Result.error(ResultCode.PARAM_VALID_ERROR.getCode(), message));
+    }
+
+    /**
+     * 处理静态资源缺失与未匹配路径（如浏览器自动请求的 /favicon.ico）
+     *
+     * <p>Spring 6.1 起，请求未匹配到任何处理器或静态资源时会抛 NoResourceFoundException。
+     * 若交给兜底的 Exception 处理器，会按系统异常打 ERROR 日志和堆栈、并返回业务错误码，
+     * 既污染日志，也让调用方误判为服务故障。这里按语义返回 404，只保留 debug 日志。</p>
+     *
+     * @param e 资源不存在异常
+     * @return HTTP 404，不带响应体
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<Void> handleNoResourceFound(NoResourceFoundException e) {
+        log.debug("请求的资源不存在：{}", e.getResourcePath());
+        return ResponseEntity.notFound().build();
     }
 
     /**
