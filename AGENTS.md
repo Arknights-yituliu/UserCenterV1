@@ -4,3 +4,5 @@ git提交格式要求:
 类型:功能描述，例如：feat:origin自动配置
 
 数据库排序规则默认用utf8mb4_bin或utf8mb4_general_ci
+
+如果没有明确说明需要迁移，不需要出迁移脚本和sql
