@@ -35,7 +35,7 @@ public interface AkOperatorStateStatisticsService {
     int refreshOperatorStatistics();
 
     /**
-     * 异步触发一轮干员数据统计，供手动触发接口使用
+     * 异步触发一轮干员数据统计，供手动触发接口与定时调度使用
      *
      * <p>立即返回，统计在后台线程执行；同一时刻只允许一轮统计在跑，
      * 已在跑时本次触发被忽略，避免两轮全表扫描同时进行并互相覆盖结果。</p>

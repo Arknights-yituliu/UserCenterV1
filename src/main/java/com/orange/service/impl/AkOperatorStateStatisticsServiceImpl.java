@@ -235,9 +235,9 @@ public class AkOperatorStateStatisticsServiceImpl implements AkOperatorStateStat
     }
 
     /**
-     * 异步触发一轮干员数据统计，供手动触发接口使用
+     * 异步触发一轮干员数据统计，供手动触发接口与定时调度使用
      *
-     * <p>先在请求线程用 CAS 抢占统计中标志：抢不到说明已有一轮在跑，直接返回 false，
+     * <p>先在调用线程用 CAS 抢占统计中标志：抢不到说明已有一轮在跑，直接返回 false，
      * 避免两轮全表扫描同时进行并互相覆盖结果；抢占成功则立即返回，真正的统计提交到
      * 后台线程执行。</p>
      *
@@ -246,7 +246,7 @@ public class AkOperatorStateStatisticsServiceImpl implements AkOperatorStateStat
     @Override
     public boolean triggerOperatorStatisticsRefresh() {
         if (!refreshing.compareAndSet(false, true)) {
-            LogUtil.warn(AkOperatorStateStatisticsServiceImpl.class, "干员数据统计已在进行中，本次手动触发被忽略");
+            LogUtil.warn(AkOperatorStateStatisticsServiceImpl.class, "干员数据统计已在进行中，本次触发被忽略");
             return false;
         }
         try {
