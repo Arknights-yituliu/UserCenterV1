@@ -8,9 +8,11 @@ import com.orange.entity.dto.user.ChangeEmailRequest;
 import com.orange.entity.dto.user.ClientAuthorizationRevokeRequest;
 import com.orange.entity.dto.user.UpdatePasswordRequest;
 import com.orange.entity.dto.user.UpdateProfileRequest;
+import com.orange.entity.dto.user.UserScopeRequest;
 import com.orange.entity.vo.SessionVO;
 import com.orange.entity.vo.UserInfoVO;
 import com.orange.entity.vo.oauth.OAuthClientGrantGroupVO;
+import com.orange.entity.vo.oauth.OAuthUserScopeVO;
 import com.orange.service.OAuthTokenService;
 import com.orange.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -22,6 +24,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -161,6 +164,51 @@ public class UserController {
             @Valid @RequestBody ClientAuthorizationRevokeRequest request) {
         oauthTokenService.revokeClientAuthorization(
                 UserContext.requireUid(), request.getClientId());
+        return Result.success(null);
+    }
+
+    /**
+     * 查看我对某第三方应用的授权范围（当前已授予权限 + 该应用可选权限）
+     *
+     * @param clientId 应用客户端 ID
+     * @return 已授予权限与可选权限，供前端渲染勾选状态
+     */
+    @Operation(summary = "查看我对某第三方应用的授权范围")
+    @GetMapping("/oauth/grants/scopes")
+    public Result<OAuthUserScopeVO> listGrantScopes(@RequestParam("client_id") String clientId) {
+        return Result.success(oauthTokenService.getUserScopeInfo(UserContext.requireUid(), clientId));
+    }
+
+    /**
+     * 为我授权的第三方应用追加权限（只增不减）
+     *
+     * <p>追加的权限必须是系统可授予的权限（不受该应用登记范围限制）；结果会写入用户自定义
+     * 授权范围表，并同步到已签发令牌，因此立即生效且下次授权自动延续。</p>
+     *
+     * @param request 追加请求（应用客户端 ID + 权限标识列表）
+     * @return 空结果
+     */
+    @Operation(summary = "追加第三方应用授权权限")
+    @PostMapping("/oauth/grants/scopes/grant")
+    public Result<Void> grantScopes(@Valid @RequestBody UserScopeRequest request) {
+        oauthTokenService.grantUserScopes(
+                UserContext.requireUid(), request.getClientId(), request.getScopes());
+        return Result.success(null);
+    }
+
+    /**
+     * 取消我对某第三方应用的已授权权限（只减不增）
+     *
+     * <p>取消后剩余权限不可为空；若要彻底收回该应用，请改用整体撤销授权。</p>
+     *
+     * @param request 取消请求（应用客户端 ID + 权限标识列表）
+     * @return 空结果
+     */
+    @Operation(summary = "取消第三方应用授权权限")
+    @PostMapping("/oauth/grants/scopes/revoke")
+    public Result<Void> revokeScopes(@Valid @RequestBody UserScopeRequest request) {
+        oauthTokenService.revokeUserScopes(
+                UserContext.requireUid(), request.getClientId(), request.getScopes());
         return Result.success(null);
     }
 
