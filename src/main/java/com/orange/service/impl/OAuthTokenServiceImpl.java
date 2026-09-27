@@ -14,16 +14,20 @@ import com.orange.common.util.RequestUtil;
 import com.orange.entity.dto.SessionInfo;
 import com.orange.entity.po.OAuthClient;
 import com.orange.entity.po.OAuthGrant;
+import com.orange.entity.po.OAuthUserScope;
 import com.orange.entity.po.UserInfo;
 import com.orange.entity.vo.oauth.ConsentInfoVO;
 import com.orange.entity.vo.oauth.LoginTicketVO;
 import com.orange.entity.vo.oauth.OAuthTokenVO;
 import com.orange.entity.vo.oauth.OAuthClientGrantGroupVO;
 import com.orange.entity.vo.oauth.OAuthGrantItemVO;
+import com.orange.entity.vo.oauth.OAuthUserScopeVO;
 import com.orange.entity.vo.oauth.RefreshGrantVO;
+import com.orange.entity.vo.oauth.ScopeItemVO;
 import com.orange.entity.vo.oauth.UserInfoVO;
 import com.orange.mapper.OAuthClientMapper;
 import com.orange.mapper.OAuthGrantMapper;
+import com.orange.mapper.OAuthUserScopeMapper;
 import com.orange.mapper.UserInfoMapper;
 import com.orange.service.OAuthTokenStore;
 import com.orange.service.OAuthTokenService;
@@ -43,6 +47,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -93,6 +98,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
 
     private final OAuthClientMapper oauthClientMapper;
     private final OAuthGrantMapper oauthGrantMapper;
+    private final OAuthUserScopeMapper oauthUserScopeMapper;
     private final UserInfoMapper userInfoMapper;
     private final StringRedisTemplate stringRedisTemplate;
     private final ObjectMapper objectMapper;
@@ -130,19 +136,22 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     /**
      * 构造器注入依赖
      *
-     * @param oauthClientMapper  OAuth 客户端 Mapper
-     * @param oauthGrantMapper   授权台账 Mapper
-     * @param userInfoMapper     用户表 Mapper（userinfo 组装用户资料）
-     * @param stringRedisTemplate Redis 客户端
-     * @param objectMapper       JSON 序列化器
-     * @param oauthTokenStore    OAuth 一次性凭证原子存储
+     * @param oauthClientMapper    OAuth 客户端 Mapper
+     * @param oauthGrantMapper     授权台账 Mapper
+     * @param oauthUserScopeMapper 用户自定义授权范围 Mapper
+     * @param userInfoMapper       用户表 Mapper（userinfo 组装用户资料）
+     * @param stringRedisTemplate  Redis 客户端
+     * @param objectMapper         JSON 序列化器
+     * @param oauthTokenStore      OAuth 一次性凭证原子存储
      */
     public OAuthTokenServiceImpl(OAuthClientMapper oauthClientMapper, OAuthGrantMapper oauthGrantMapper,
+                                 OAuthUserScopeMapper oauthUserScopeMapper,
                                  UserInfoMapper userInfoMapper,
                                  StringRedisTemplate stringRedisTemplate, ObjectMapper objectMapper,
                                  OAuthTokenStore oauthTokenStore) {
         this.oauthClientMapper = oauthClientMapper;
         this.oauthGrantMapper = oauthGrantMapper;
+        this.oauthUserScopeMapper = oauthUserScopeMapper;
         this.userInfoMapper = userInfoMapper;
         this.stringRedisTemplate = stringRedisTemplate;
         this.objectMapper = objectMapper;
@@ -336,8 +345,8 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         requireGrantAllowed(client, OAuthGrantType.AUTHORIZATION_CODE);
         // 3. 校验回调地址白名单（精确匹配，防开放重定向）
         checkRedirectUri(client, redirectUri);
-        // 4. 归一化并校验 scope（空则按客户端全部范围）
-        String finalScope = normalizeScope(client, scope);
+        // 4. 归一化并校验 scope（空则按客户端全部范围），再与用户自定义范围取交集
+        String finalScope = resolveGrantScope(client, scope, uid);
         // 5. PKCE 预校验：携带 challenge 时必须为 S256；公共客户端始终必须带 challenge。
         validatePkce(client, codeChallenge, codeChallengeMethod);
         // 6. 生成一次性授权码并存储（值绑定 client/uid/scope/redirectUri/PKCE challenge）
@@ -379,7 +388,8 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         requireGrantAllowed(client, OAuthGrantType.AUTHORIZATION_CODE);
         // 3. 预校验回调地址/scope/PKCE，无效请求直接拒绝，不进入确认页
         checkRedirectUri(client, redirectUri);
-        String finalScope = normalizeScope(client, scope);
+        // 申请范围同样受用户自定义范围约束：确认页默认勾选的就是用户此前选定的范围
+        String finalScope = resolveGrantScope(client, scope, uid);
         validatePkce(client, codeChallenge, codeChallengeMethod);
         // 4. 生成一次性确认单 ID，把待确认参数存入 Redis（TTL=确认单有效期）
         //    确认单只保存服务端校验后的最终参数，确认页/{confirm} 接口不接收任何授权参数回传
@@ -431,12 +441,13 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         vo.setClientId(client.getId());
         vo.setClientName(client.getClientName());
         vo.setRedirectUri((String) record.get("redirectUri"));
-        // 逐项把 scope 标识翻译为中文描述，未识别的 scope 原样展示（见 describeScope）
-        List<ConsentInfoVO.ScopeItem> items = new ArrayList<>();
-        for (String scope : ((String) record.get("scope")).split(",")) {
-            items.add(new ConsentInfoVO.ScopeItem(scope.trim(), describeScope(scope.trim())));
-        }
-        vo.setScopes(items);
+        // 本次将授予的范围（已按用户自定义范围收敛，见 resolveGrantScope）
+        vo.setScopes(toScopeItems(splitScopes((String) record.get("scope"))));
+        // 用户在确认页可查看并调整的授权范围：
+        // grantedScopes 只取用户自定义表（从未自定义过则为空，此时前端以 scopes 作为默认勾选），
+        // selectableScopes 为系统全部可选权限——用户追加的权限不受该应用登记范围限制
+        vo.setGrantedScopes(toScopeItems(loadCustomScopes(uid, client.getId())));
+        vo.setSelectableScopes(toScopeItems(selectableScopeCodes()));
         return vo;
     }
 
@@ -448,11 +459,13 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      *
      * @param pendingId 确认单 ID
      * @param approve   true=同意授权，false=拒绝授权
+     * @param scopes    用户在确认页最终确定的权限集合（可空：沿用确认单里的申请范围）；
+     *                  非空时须为系统可授予的权限，覆盖写入用户自定义范围表后按该集合签发
      * @param request   HTTP 请求（校验确认人身份）
      * @return 客户端回调地址（携带 code 或 error，必要时带 state）
      */
     @Override
-    public String confirmAuthorization(String pendingId, boolean approve, HttpServletRequest request) {
+    public String confirmAuthorization(String pendingId, boolean approve, List<String> scopes, HttpServletRequest request) {
         // 1. 一次性占用确认单：并发/重复提交只有第一次能进入
         Boolean first = stringRedisTemplate.opsForValue().setIfAbsent(
                 RedisKeyUtil.oauthConsentUsed(pendingId), "1", consentTtlSeconds, TimeUnit.SECONDS);
@@ -475,13 +488,25 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         StringBuilder target = new StringBuilder(redirectUri)
                 .append(redirectUri.contains("?") ? "&" : "?");
         if (approve) {
-            // 4a. 同意：签发一次性授权码并回跳（内部再次校验 client/redirect_uri/scope/PKCE）
-            String code = createAuthorizationCode((String) record.get("clientId"), redirectUri,
-                    (String) record.get("scope"), (String) record.get("codeChallenge"),
+            String clientId = (String) record.get("clientId");
+            // 4a. 用户在确认页可调整最终权限（追加或通过不勾选取消）：
+            //     非空时校验后覆盖写入自定义范围表，并按调整结果签发；为 null 时沿用确认单里的申请范围。
+            String grantedScope = (String) record.get("scope");
+            if (scopes != null) {
+                // 先校验客户端仍可用，避免权限已落库后才发现客户端被停用/封禁
+                requireEnabledClient(clientId);
+                Set<String> requested = normalizeRequestedScopes(scopes);
+                requireSelectableScopes(requested);
+                saveUserScopes(uid, clientId, requested);
+                grantedScope = String.join(",", requested);
+            }
+            // 4b. 同意：签发一次性授权码并回跳（内部再次校验 client/redirect_uri/scope/PKCE）
+            String code = createAuthorizationCode(clientId, redirectUri,
+                    grantedScope, (String) record.get("codeChallenge"),
                     (String) record.get("codeChallengeMethod"), uid);
             target.append("code=").append(code);
         } else {
-            // 4b. 拒绝：按 OAuth 规范回跳 error=access_denied（不签发授权码）
+            // 4c. 拒绝：按 OAuth 规范回跳 error=access_denied（不签发授权码）
             target.append("error=access_denied");
         }
         if (state != null && !state.isBlank()) {
@@ -699,8 +724,9 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     public OAuthTokenVO issueDirectToken(String clientId, Long uid) {
         // 1. 重新加载客户端：兑换瞬间客户端可能已被停用或封禁
         OAuthClient client = requireEnabledClient(clientId);
-        // 直连流程没有 scope 协商环节，传 null 即取客户端登记的全部范围
-        String scope = normalizeScope(client, null);
+        // 直连流程没有 scope 协商环节，传 null 即取客户端登记的全部范围，
+        // 但若该用户自定义过授权范围，则按自定义范围签发（下次登录自动延续用户的选择）
+        String scope = resolveGrantScope(client, null, uid);
         long accessTtl = resolveAccessTokenTtl(client);
         long refreshTtl = resolveRefreshTokenTtl(client);
 
@@ -967,6 +993,313 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
             }
             stringRedisTemplate.delete(tokenKey);
             stringRedisTemplate.opsForSet().remove(indexKey, member);
+        }
+    }
+
+    /**
+     * 查询用户对某应用的自定义授权范围（用户自助）
+     *
+     * <p>已授予范围优先取用户自定义表；从未自定义过时等于该应用登记范围，
+     * 以此作基线可保证用户首次追加/取消不会意外丢失原有权限。</p>
+     *
+     * <p>可选范围是系统全部可选权限，不受该应用登记范围限制：
+     * 用户可以在管理页为该应用追加它从未登记/申请过的能力。</p>
+     *
+     * @param uid      用户 uid
+     * @param clientId 应用客户端 ID
+     * @return 已授予权限 + 系统全部可选权限
+     */
+    @Override
+    public OAuthUserScopeVO getUserScopeInfo(Long uid, String clientId) {
+        OAuthClient client = requireEnabledClient(clientId);
+        OAuthUserScopeVO vo = new OAuthUserScopeVO();
+        vo.setClientId(client.getId());
+        vo.setClientName(client.getClientName());
+        vo.setGrantedScopes(toScopeItems(currentGrantedScopes(uid, client)));
+        vo.setSelectableScopes(toScopeItems(selectableScopeCodes()));
+        return vo;
+    }
+
+    /**
+     * 为用户追加对某应用的授权权限（只增不减）
+     *
+     * @param uid      用户 uid
+     * @param clientId 应用客户端 ID
+     * @param scopes   本次要追加的权限标识集合（非空，必须是系统可授予的权限）
+     */
+    @Override
+    public void grantUserScopes(Long uid, String clientId, List<String> scopes) {
+        OAuthClient client = requireEnabledClient(clientId);
+        Set<String> requested = normalizeRequestedScopes(scopes);
+        requireSelectableScopes(requested);
+        // 基线取当前已授予范围（未自定义过时为应用登记范围），因此追加是一次并集，
+        // 不会因为用户只提交新增项而把原有权限意外收窄
+        Set<String> merged = new LinkedHashSet<>(currentGrantedScopes(uid, client));
+        merged.addAll(requested);
+        saveUserScopes(uid, clientId, merged);
+        LogUtil.debug(OAuthTokenServiceImpl.class, "[OAuth] 追加应用授权范围: uid={}, clientId={}, scopes={}",
+                uid, clientId, String.join(",", merged));
+    }
+
+    /**
+     * 取消用户对某应用的已授权权限（只减不增）
+     *
+     * @param uid      用户 uid
+     * @param clientId 应用客户端 ID
+     * @param scopes   本次要取消的权限标识集合（非空；未授予的项会被忽略，便于重试幂等）
+     */
+    @Override
+    public void revokeUserScopes(Long uid, String clientId, List<String> scopes) {
+        OAuthClient client = requireEnabledClient(clientId);
+        Set<String> requested = normalizeRequestedScopes(scopes);
+        Set<String> remaining = new LinkedHashSet<>(currentGrantedScopes(uid, client));
+        remaining.removeAll(requested);
+        if (remaining.isEmpty()) {
+            // 剩余为空意味着该应用不再有任何权限，令牌也就失去意义，应改走整体撤销授权
+            throw new BusinessException(ResultCode.PARAM_ERROR, "至少保留一项权限；如需全部取消请撤销该应用授权");
+        }
+        saveUserScopes(uid, clientId, remaining);
+        LogUtil.debug(OAuthTokenServiceImpl.class, "[OAuth] 取消应用授权范围: uid={}, clientId={}, scopes={}",
+                uid, clientId, String.join(",", remaining));
+    }
+
+    /**
+     * 计算最终授权范围：用户自定义范围为权威，覆盖客户端本次申请范围
+     *
+     * <p>用户一旦在确认页或管理页自定义过该应用的权限（oauth_user_scope 有记录），
+     * 之后每次签发都严格按该记录执行：用户追加的权限即使不在客户端登记/申请范围内也会签发，
+     * 用户剔除的权限则不再签发，从而让「下次登录自动授权」与用户的裁剪保持一致。</p>
+     *
+     * <p>用户从未自定义过时保持原有语义：按客户端本次申请范围签发（申请为空则按登记全量）。</p>
+     *
+     * @param client         应用实体
+     * @param requestedScope 客户端申请的权限范围（可空，空则按登记全量）
+     * @param uid            授权用户 uid（可空表示无用户上下文，此时跳过自定义范围）
+     * @return 最终授权的范围（英文逗号分隔）
+     */
+    private String resolveGrantScope(OAuthClient client, String requestedScope, Long uid) {
+        // 1. 先完成客户端侧校验（登记项是否合法、all 是否仅限机密客户端），同时得到「申请范围」兜底值
+        String normalized = normalizeScope(client, requestedScope);
+        // 2. 用户自定义范围为权威：存在自定义记录时覆盖客户端本次申请范围
+        Set<String> custom = loadCustomScopes(uid, client.getId());
+        if (custom.isEmpty()) {
+            return normalized;
+        }
+        // 3. 与系统可选权限目录求交，剔除枚举已下线的历史权限，避免签发出系统无法解释的 scope
+        Set<String> selectable = selectableScopeCodes();
+        Set<String> granted = new LinkedHashSet<>();
+        for (String scope : custom) {
+            if (selectable.contains(scope)) {
+                granted.add(scope);
+            }
+        }
+        if (granted.isEmpty()) {
+            LogUtil.debug(OAuthTokenServiceImpl.class,
+                    "[OAuth] 用户自定义范围已无有效权限，按申请范围签发: uid={}, clientId={}",
+                    uid, client.getId());
+            return normalized;
+        }
+        return String.join(",", granted);
+    }
+
+    /**
+     * 读取用户对某应用的自定义授权范围
+     *
+     * @param uid      用户 uid
+     * @param clientId 应用客户端 ID
+     * @return 自定义范围集合；未自定义过或无用户上下文时返回空集合
+     */
+    private Set<String> loadCustomScopes(Long uid, String clientId) {
+        if (uid == null || !StringUtils.hasText(clientId)) {
+            return Collections.emptySet();
+        }
+        OAuthUserScope record = oauthUserScopeMapper.selectByUidAndClient(uid, clientId);
+        return record == null ? Collections.emptySet() : splitScopes(record.getScopes());
+    }
+
+    /**
+     * 计算用户对某应用当前已授予的权限集合
+     *
+     * <p>未自定义过时返回应用登记范围，并以登记范围作为「追加/取消」的基线，
+     * 保证用户首次操作不会因为基线为空而意外丢失原有权限。</p>
+     *
+     * @param uid    用户 uid
+     * @param client 应用实体
+     * @return 当前已授予的权限集合
+     */
+    private Set<String> currentGrantedScopes(Long uid, OAuthClient client) {
+        Set<String> custom = loadCustomScopes(uid, client.getId());
+        return custom.isEmpty() ? registeredScopeCodes(client) : custom;
+    }
+
+    /**
+     * 解析应用登记的权限标识（排除仅限管理员授予的元范围 all）
+     *
+     * <p>用作「用户从未自定义过」场景下已授予范围的基线。</p>
+     *
+     * @param client 应用实体
+     * @return 该应用登记范围内可用的权限集合
+     */
+    private Set<String> registeredScopeCodes(OAuthClient client) {
+        Set<String> codes = new LinkedHashSet<>();
+        if (!StringUtils.hasText(client.getScopes())) {
+            return codes;
+        }
+        for (String item : client.getScopes().split(",")) {
+            String code = item.trim();
+            if (!StringUtils.hasText(code) || OAuthScope.ALL.getCode().equals(code)) {
+                continue;
+            }
+            if (OAuthScope.findByCode(code).isPresent()) {
+                codes.add(code);
+            }
+        }
+        return codes;
+    }
+
+    /**
+     * 系统可供用户自选的权限标识集合
+     *
+     * <p>取自 {@link OAuthScope#selectable()}，即枚举中所有非 manualOnly 的权限；
+     * 元范围 all 仅限管理员写库授予，不向用户暴露。</p>
+     *
+     * @return 可选权限标识集合，顺序与枚举声明一致
+     */
+    private Set<String> selectableScopeCodes() {
+        Set<String> codes = new LinkedHashSet<>();
+        for (OAuthScope scope : OAuthScope.selectable()) {
+            codes.add(scope.getCode());
+        }
+        return codes;
+    }
+
+    /**
+     * 校验请求的权限集合必须都是系统可授予的权限
+     *
+     * <p>用户追加的范围不受应用登记范围限制（可授予该应用从未登记/申请过的能力），
+     * 但必须是系统已知且允许用户自选的权限，元范围 all 不在此列。</p>
+     *
+     * @param requested 请求的权限集合
+     */
+    private void requireSelectableScopes(Set<String> requested) {
+        if (!selectableScopeCodes().containsAll(requested)) {
+            throw new BusinessException(ResultCode.OAUTH_SCOPE_INVALID, "存在系统不支持的授权范围");
+        }
+    }
+
+    /**
+     * 归一化权限入参：去空白、去重，并保证结果非空
+     *
+     * @param scopes 权限标识列表
+     * @return 归一化后的有序权限集合
+     */
+    private Set<String> normalizeRequestedScopes(List<String> scopes) {
+        Set<String> requested = new LinkedHashSet<>();
+        if (scopes != null) {
+            for (String item : scopes) {
+                if (StringUtils.hasText(item)) {
+                    requested.add(item.trim());
+                }
+            }
+        }
+        if (requested.isEmpty()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "授权范围不能为空");
+        }
+        return requested;
+    }
+
+    /**
+     * 英文逗号串切分为有序去重集合（忽略空白项）
+     *
+     * @param scopeText 权限范围串（可空）
+     * @return 权限标识集合
+     */
+    private Set<String> splitScopes(String scopeText) {
+        Set<String> scopes = new LinkedHashSet<>();
+        if (!StringUtils.hasText(scopeText)) {
+            return scopes;
+        }
+        for (String item : scopeText.split(",")) {
+            if (StringUtils.hasText(item)) {
+                scopes.add(item.trim());
+            }
+        }
+        return scopes;
+    }
+
+    /**
+     * 权限标识集合转确认页/管理页展示条目
+     *
+     * @param scopeCodes 权限标识集合
+     * @return 权限条目列表（描述取自 OAuthScope，未知标识原样返回）
+     */
+    private List<ScopeItemVO> toScopeItems(Set<String> scopeCodes) {
+        List<ScopeItemVO> items = new ArrayList<>(scopeCodes.size());
+        for (String code : scopeCodes) {
+            items.add(new ScopeItemVO(code, describeScope(code)));
+        }
+        return items;
+    }
+
+    /**
+     * 覆盖写入用户自定义授权范围，并把变更同步到已签发令牌与授权台账
+     *
+     * @param uid      用户 uid
+     * @param clientId 应用客户端 ID
+     * @param scopes   调整后的权限集合（非空）
+     */
+    private void saveUserScopes(Long uid, String clientId, Set<String> scopes) {
+        if (scopes.isEmpty()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "授权范围不能为空");
+        }
+        String joined = String.join(",", scopes);
+        // upsert 依赖 uk_uid_client 唯一键，避免「先查再写」在并发提交下产生两行
+        oauthUserScopeMapper.upsert(uid, clientId, joined);
+        // 同步已签发令牌：调整后应立即生效，而不是等令牌自然过期或用户重新授权
+        syncIssuedTokenScopes(uid, clientId, joined);
+        // 同步授权台账：台账是「我的授权」列表的数据来源，否则列表仍展示调整前的范围
+        oauthGrantMapper.updateScopeByUidAndClient(uid, clientId, joined);
+    }
+
+    /**
+     * 把新的授权范围同步到该用户在该应用下已签发的令牌（access_token 与 refresh_token）
+     *
+     * <p>令牌以明文作为 Redis key，反向索引 uc:uid:oauth:{uid} 记录了该用户全部令牌，
+     * 因此可据此定位并逐个改写记录内的 scope。回写时沿用剩余 TTL，避免变相延长授权有效期。</p>
+     *
+     * @param uid      用户 uid
+     * @param clientId 应用客户端 ID
+     * @param scope    调整后的授权范围（英文逗号分隔）
+     */
+    private void syncIssuedTokenScopes(Long uid, String clientId, String scope) {
+        String indexKey = RedisKeyUtil.uidOauth(uid);
+        Set<String> members = stringRedisTemplate.opsForSet().members(indexKey);
+        if (members == null) {
+            return;
+        }
+        for (String member : members) {
+            String tokenKey = resolveTokenKeyByMember(member);
+            if (tokenKey == null) {
+                continue;
+            }
+            String raw = stringRedisTemplate.opsForValue().get(tokenKey);
+            if (raw == null) {
+                // 令牌已过期或被吊销：顺手摘除索引残留成员
+                stringRedisTemplate.opsForSet().remove(indexKey, member);
+                continue;
+            }
+            Map<String, Object> record = readJsonMapValue(raw);
+            // 只改写归属该应用的令牌，其他应用的授权不受影响
+            if (!Objects.equals(clientId, record.get("clientId"))) {
+                continue;
+            }
+            record.put("scope", scope);
+            Long remainingSeconds = stringRedisTemplate.getExpire(tokenKey, TimeUnit.SECONDS);
+            if (remainingSeconds == null || remainingSeconds <= 0) {
+                continue;
+            }
+            stringRedisTemplate.opsForValue()
+                    .set(tokenKey, writeJsonValue(record), remainingSeconds, TimeUnit.SECONDS);
         }
     }
 

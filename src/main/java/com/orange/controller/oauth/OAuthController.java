@@ -139,9 +139,12 @@ public class OAuthController {
      * （确认单一次性消费，重复提交直接报错）
      *
      * <p>请求体为 JSON（Content-Type: application/json），
-     * 如 {"pending_id":"xxx","approve":true}，由 OAuthConsentRequest 接收</p>
+     * 如 {"pending_id":"xxx","approve":true,"scopes":["user.read"]}，由 OAuthConsentRequest 接收。
+     * scopes 可省略表示沿用申请范围；非空时以该集合作为最终授予权限，
+     * 既可追加权限，也可通过不勾选取消已授权的权限（不可为空）。
+     * 集合元素须为系统可授予的权限，不受该应用登记范围限制。</p>
      *
-     * @param body    授权确认请求体（确认单 ID + 是否同意）
+     * @param body    授权确认请求体（确认单 ID + 是否同意 + 最终权限集合）
      * @param request HTTP 请求（解析登录会话，Authorization: Bearer {token} 或 UC-Token）
      * @return 302 回跳地址（含 code 或 error），由前端执行跳转
      */
@@ -156,7 +159,7 @@ public class OAuthController {
         String pendingId = body.getPendingId();
         boolean approve = body.getApprove();
         // 2. 调用服务确认授权（同意签发授权码 / 拒绝回跳 access_denied）
-        String redirectUrl = oauthTokenService.confirmAuthorization(pendingId, approve, request);
+        String redirectUrl = oauthTokenService.confirmAuthorization(pendingId, approve, body.getScopes(), request);
         LogUtil.debug(OAuthController.class, "[OAuth] 授权确认{}: pendingId={}", approve ? "同意" : "拒绝", mask(pendingId));
         return Result.success(redirectUrl);
     }

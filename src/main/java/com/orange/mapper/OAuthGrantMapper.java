@@ -62,4 +62,20 @@ public interface OAuthGrantMapper extends BaseMapper<OAuthGrant> {
      */
     @Update("UPDATE oauth_grant SET revoked = 1 WHERE uid = #{uid} AND revoked = 0")
     int markRevokedByUid(@Param("uid") Long uid);
+
+    /**
+     * 更新指定用户对指定应用全部未吊销授权的授权范围（用户自助调整权限后同步台账）
+     *
+     * <p>台账是「我的授权」列表的数据来源，用户追加/取消权限后若不同步，
+     * 列表会继续展示调整前的范围。</p>
+     *
+     * @param uid      用户 uid
+     * @param clientId 客户端 ID
+     * @param scope    调整后的授权范围（英文逗号分隔）
+     * @return 受影响行数
+     */
+    @Update("UPDATE oauth_grant SET scope = #{scope} "
+            + "WHERE uid = #{uid} AND client_id = #{clientId} AND revoked = 0")
+    int updateScopeByUidAndClient(@Param("uid") Long uid, @Param("clientId") String clientId,
+                                  @Param("scope") String scope);
 }

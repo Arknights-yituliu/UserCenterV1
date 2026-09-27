@@ -3,6 +3,7 @@ package com.orange.service;
 import com.orange.entity.vo.oauth.ConsentInfoVO;
 import com.orange.entity.vo.oauth.LoginTicketVO;
 import com.orange.entity.vo.oauth.OAuthTokenVO;
+import com.orange.entity.vo.oauth.OAuthUserScopeVO;
 import com.orange.entity.vo.oauth.OAuthClientGrantGroupVO;
 import com.orange.entity.vo.oauth.UserInfoVO;
 import jakarta.servlet.http.HttpServletRequest;
@@ -73,10 +74,13 @@ public interface OAuthTokenService {
      *
      * @param pendingId 确认单 ID
      * @param approve   是否同意授权
+     * @param scopes    用户在确认页最终确定的权限集合（可空：沿用确认单里的申请范围）；
+     *                  非空时须为系统可授予的权限（不受应用登记范围限制），
+     *                  覆盖写入用户自定义授权范围表并按该集合签发授权码
      * @param request   HTTP 请求（解析登录会话）
      * @return 302 回跳地址（含 code 或 error）
      */
-    String confirmAuthorization(String pendingId, boolean approve, HttpServletRequest request);
+    String confirmAuthorization(String pendingId, boolean approve, List<String> scopes, HttpServletRequest request);
 
     /**
      * 授权码签发：校验客户端/回调白名单/scope，生成一次性授权码并存储
@@ -222,6 +226,43 @@ public interface OAuthTokenService {
      * @param clientId 要撤销授权的应用客户端 ID
      */
     void revokeClientAuthorization(Long uid, String clientId);
+
+    /**
+     * 查询用户对某应用的自定义授权范围（用户自助，供授权管理页与确认页展示）
+     *
+     * <p>返回当前已授予的权限与系统全部可选权限（不受该应用登记范围限制），便于前端渲染勾选状态。</p>
+     *
+     * @param uid      用户 uid
+     * @param clientId 应用客户端 ID
+     * @return 已授予权限 + 可选权限
+     */
+    OAuthUserScopeVO getUserScopeInfo(Long uid, String clientId);
+
+    /**
+     * 为用户追加对某应用的授权权限（用户自助，只增不减）
+     *
+     * <p>追加集合必须是系统可授予的权限（不受该应用登记范围限制，可授予其从未登记/申请过的能力）；
+     * 变更会覆盖写入用户自定义授权范围表，并同步到该用户在该应用下已签发的令牌与授权台账，
+     * 使权限立即生效且下次授权自动延续。</p>
+     *
+     * @param uid      用户 uid
+     * @param clientId 应用客户端 ID
+     * @param scopes   本次要追加的权限标识集合（非空）
+     */
+    void grantUserScopes(Long uid, String clientId, List<String> scopes);
+
+    /**
+     * 取消用户对某应用的已授权权限（用户自助，只减不增）
+     *
+     * <p>取消后的剩余权限不可为空——若要把该应用权限全部取消，应改用
+     * {@link #revokeClientAuthorization(Long, String)} 整体撤销授权。
+     * 变更同样会覆盖写入自定义授权范围表并同步已签发令牌与台账。</p>
+     *
+     * @param uid      用户 uid
+     * @param clientId 应用客户端 ID
+     * @param scopes   本次要取消的权限标识集合（非空，且必须已授予）
+     */
+    void revokeUserScopes(Long uid, String clientId, List<String> scopes);
 
     /**
      * 访问令牌主体信息（uid + 客户端 + 范围）

@@ -14,6 +14,7 @@ import com.orange.entity.vo.oauth.OAuthTokenVO;
 import com.orange.entity.vo.oauth.RefreshGrantVO;
 import com.orange.mapper.OAuthClientMapper;
 import com.orange.mapper.OAuthGrantMapper;
+import com.orange.mapper.OAuthUserScopeMapper;
 import com.orange.mapper.UserInfoMapper;
 import com.orange.service.OAuthTokenStore;
 import org.junit.jupiter.api.BeforeEach;
@@ -70,6 +71,9 @@ class OAuthTokenServiceImplTest {
     private OAuthGrantMapper oauthGrantMapper;
 
     @Mock
+    private OAuthUserScopeMapper oauthUserScopeMapper;
+
+    @Mock
     private StringRedisTemplate redisTemplate;
 
     @Mock
@@ -89,7 +93,8 @@ class OAuthTokenServiceImplTest {
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         lenient().when(redisTemplate.opsForSet()).thenReturn(setOperations);
         service = new OAuthTokenServiceImpl(
-                oauthClientMapper, oauthGrantMapper, userInfoMapper, redisTemplate, objectMapper, oauthTokenStore);
+                oauthClientMapper, oauthGrantMapper, oauthUserScopeMapper, userInfoMapper,
+                redisTemplate, objectMapper, oauthTokenStore);
         ReflectionTestUtils.setField(service, "accessTokenTtlSeconds", 7200L);
         ReflectionTestUtils.setField(service, "refreshTokenTtlSeconds", 86400L);
         ReflectionTestUtils.setField(service, "authorizationCodeTtlSeconds", 300L);

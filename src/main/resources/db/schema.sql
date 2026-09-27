@@ -300,3 +300,24 @@ CREATE TABLE `ak_operator_state_statistics` (
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '干员养成数据统计结果，一行一个干员，只保留最新一轮';
 
+-- -------------------------------------------------------------
+-- 15. 用户自定义 OAuth 授权范围表
+--
+-- 与 oauth_grant（每次签发的令牌台账，一行一次授权）不同，本表是
+-- 「用户维度 × 客户端」的唯一偏好：用户主动挑选愿意授予该应用的权限集合。
+-- 签发令牌时若存在本记录，取「本次申请范围 ∩ 本表范围」作为最终授权范围，
+-- 从而让用户在确认页的裁剪/追加在下次登录时自动延续。
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `oauth_user_scope`;
+CREATE TABLE `oauth_user_scope` (
+    `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `uid`         BIGINT       NOT NULL COMMENT '用户 uid',
+    `client_id`   VARCHAR(128) NOT NULL COMMENT 'OAuth 客户端 ID',
+    `scopes`      VARCHAR(256) NOT NULL COMMENT '用户自定义授予该客户端的范围（英文逗号分隔，不可为空）',
+    `create_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_uid_client` (`uid`, `client_id`) COMMENT '同一用户对同一应用只保留一条自定义范围'
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '用户自定义OAuth授权范围，一行一个用户与应用组合';
+
