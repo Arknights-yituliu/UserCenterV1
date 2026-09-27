@@ -1,5 +1,6 @@
 package com.orange.mapper;
 
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.orange.entity.po.AkAccountBinding;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
@@ -14,10 +15,13 @@ import java.util.List;
  * <p>绑定关系为多对多：一个 uid 可绑定多个 ak_uid，一个 ak_uid 也可被多个 uid 绑定；
  * 绑定归属于用户，不再按 OAuth 客户端拆分。</p>
  *
+ * <p>表主键为代理自增 id，业务唯一性由唯一键 {@code uk_ak_owner (ak_uid, owner_uid)} 保证，
+ * 故 {@code upsertBinding} 的 {@code ON DUPLICATE KEY UPDATE} 按该唯一键判定冲突。</p>
+ *
  * @author UserCenter
  */
 @Mapper
-public interface AkAccountBindingMapper {
+public interface AkAccountBindingMapper extends BaseMapper<AkAccountBinding> {
 
     /**
      * 统计当前用户对某游戏账号的绑定关系
@@ -57,8 +61,7 @@ public interface AkAccountBindingMapper {
      * @param ownerUid 用户中心 UID
      * @return 绑定关系列表（含创建时间与最近导入时间），最近导入的在前
      */
-    @Select("SELECT ak_uid AS akUid, create_time AS createTime, update_time AS updateTime "
-            + "FROM ak_account_binding WHERE owner_uid = #{ownerUid} "
+    @Select("SELECT * FROM ak_account_binding WHERE owner_uid = #{ownerUid} "
             + "ORDER BY update_time DESC, ak_uid ASC")
     List<AkAccountBinding> selectByOwnerOrderByUpdateTime(@Param("ownerUid") Long ownerUid);
 }

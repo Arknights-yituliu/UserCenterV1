@@ -201,15 +201,19 @@ CREATE TABLE `oauth_grant` (
 --
 -- 一个 uid 可绑定多个 ak_uid，一个 ak_uid 也可被多个 uid 绑定；
 -- 干员数据只按 ak_uid 存一份，绑定表只存授权关系。
+-- 主键为代理自增 id，(ak_uid, owner_uid) 由 uk_ak_owner 保证业务唯一，
+-- 以便 MyBatis-Plus 实体可用单主键。
 -- 已有库请改用 db/migrate_ak_operator.sql 增量迁移。
 -- -------------------------------------------------------------
 DROP TABLE IF EXISTS `ak_account_binding`;
 CREATE TABLE `ak_account_binding` (
+    `id`          BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键',
     `ak_uid`      VARCHAR(32) NOT NULL COMMENT '游戏账号UID，一套干员数据的归属键',
     `owner_uid`   BIGINT      NOT NULL COMMENT '绑定此游戏账号的用户中心UID，同一游戏账号可有多个用户',
     `create_time` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '绑定关系创建时间：首次导入该账号数据时建立绑定并写入',
     `update_time` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '该账号干员数据最近一次导入时间：账号列表据此倒序，前端默认展示最新导入的数据',
-    PRIMARY KEY (`ak_uid`, `owner_uid`),
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_ak_owner` (`ak_uid`, `owner_uid`) COMMENT '同一游戏账号与用户只保留一条绑定关系',
     KEY `idx_owner_accounts` (`owner_uid`, `ak_uid`) COMMENT '按当前用户查询已绑定游戏账号',
     KEY `idx_owner_update_time` (`owner_uid`, `update_time`) COMMENT '按当前用户查询已绑定账号并按最近导入时间倒序'
 ) ENGINE = InnoDB
