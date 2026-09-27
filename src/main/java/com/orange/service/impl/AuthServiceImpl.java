@@ -184,10 +184,10 @@ public class AuthServiceImpl implements AuthService {
     }
 
     /**
-     * 注册（密码注册 / 邮箱验证码注册），注册成功后直接签发会话登录
+     * 注册（统一形态：邮箱 + 用户名 + 密码 + 昵称），注册成功后直接签发会话登录
      *
-     * <p>注册需设置密码（password / email_code 两种方式均要求密码）；邮箱与用户名至少填一个，
-     * email_code 方式必须填邮箱。只要填了邮箱，都必须先通过邮箱验证码验证邮箱可用。</p>
+     * <p>邮箱、用户名、密码、邮箱验证码均必填，由 {@link RegisterRequest} 上的 Bean Validation
+     * 保证；邮箱必须通过验证码验证后才做唯一性校验，避免退化为账号枚举入口。</p>
      *
      * @param request 注册参数
      * @param ip      注册 IP
@@ -206,10 +206,11 @@ public class AuthServiceImpl implements AuthService {
     }
 
     /**
-     * 创建注册用户：校验注册参数（邮箱/用户名至少一个、邮箱验证码、密码、唯一性），
-     * 加密密码并落库（主站注册与直连注册共用）
+     * 创建注册用户：校验邮箱验证码与唯一性，加密密码并落库（主站注册与直连注册共用）
      *
-     * <p>唯一性校验刻意排在邮箱验证码校验之后：探测某邮箱是否已注册必须先持有该邮箱收到的
+     * <p>统一注册形态为「邮箱 + 用户名 + 密码 + 邮箱验证码」，非空与格式约束由
+     * {@link RegisterRequest} 上的 Bean Validation 保证，本方法只做需要触达外部资源的校验。
+     * 唯一性校验刻意排在邮箱验证码校验之后：探测某邮箱是否已注册必须先持有该邮箱收到的
      * 验证码，避免本方法退化为无需任何凭证即可批量枚举注册账号的入口。</p>
      *
      * @param request 注册参数
@@ -219,55 +220,30 @@ public class AuthServiceImpl implements AuthService {
     private UserInfo createRegisteredUser(RegisterRequest request, String ip) {
         String email = request.getEmail();
         String userName = request.getUserName();
-        boolean hasEmail = email != null && !email.isBlank();
-        boolean hasUserName = userName != null && !userName.isBlank();
-        // 邮箱与用户名至少提供一个作为登录凭证
-        if (!hasEmail && !hasUserName) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "邮箱和用户名至少填写一个");
-        }
 
         UserInfo user = new UserInfo();
         user.setUid(IdGenerator.getInstance().nextId());
-        user.setEmail(hasEmail ? email : null);
-        user.setUserName(hasUserName ? userName : null);
-        // 昵称缺省时优先用用户名，其次邮箱
+        user.setEmail(email);
+        user.setUserName(userName);
+        // 昵称缺省时取用户名
         user.setNickname(request.getNickname() == null || request.getNickname().isBlank()
-                ? (hasUserName ? userName : email)
+                ? userName
                 : request.getNickname());
         user.setIp(ip);
         user.setStatus(1);
         user.setRegisterTime(LocalDateTime.now());
 
-        // 填了邮箱则必须先通过邮箱验证码验证：确保邮箱真实可用且属于注册者本人
-        // （密码注册带邮箱、邮箱验证码注册两种形态均适用；仅用户名注册不涉及）
-        if (hasEmail) {
-            if (request.getVerificationCode() == null || request.getVerificationCode().isBlank()) {
-                throw new BusinessException(ResultCode.PARAM_ERROR, "填写邮箱时需提供邮箱验证码");
-            }
-            emailCodeService.verifyCode(email, request.getVerificationCode());
-        }
+        // 邮箱必须先通过验证码验证：确保邮箱真实可用且属于注册者本人
+        emailCodeService.verifyCode(email, request.getVerificationCode());
+        user.setPassword(passwordEncoder.encode(request.getPassword()));
 
-        if ("password".equals(request.getRegisterType()) || "email_code".equals(request.getRegisterType())) {
-            // 统一要求设置密码（password / email_code 两种注册方式均要求）
-            if (request.getPassword() == null || request.getPassword().isBlank()) {
-                throw new BusinessException(ResultCode.PARAM_ERROR, "密码不能为空");
-            }
-            user.setPassword(passwordEncoder.encode(request.getPassword()));
-            // 邮箱验证码注册必须有邮箱（密码注册可仅用户名；验证码已在上方统一校验）
-            if ("email_code".equals(request.getRegisterType()) && !hasEmail) {
-                throw new BusinessException(ResultCode.PARAM_ERROR, "邮箱验证码注册需填写邮箱");
-            }
-        } else {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "不支持的注册方式");
-        }
-
-        // 邮箱唯一性校验（填了才校验）
-        if (hasEmail && userMapper.selectCount(Wrappers.<UserInfo>lambdaQuery()
+        // 邮箱唯一性校验
+        if (userMapper.selectCount(Wrappers.<UserInfo>lambdaQuery()
                 .eq(UserInfo::getEmail, email)) > 0) {
             throw new BusinessException(ResultCode.EMAIL_ALREADY_EXISTS);
         }
-        // 用户名唯一性校验（填了才校验）
-        if (hasUserName && userMapper.selectCount(Wrappers.<UserInfo>lambdaQuery()
+        // 用户名唯一性校验
+        if (userMapper.selectCount(Wrappers.<UserInfo>lambdaQuery()
                 .eq(UserInfo::getUserName, userName)) > 0) {
             throw new BusinessException(ResultCode.USERNAME_ALREADY_EXISTS);
         }
@@ -528,7 +504,7 @@ public class AuthServiceImpl implements AuthService {
      * （注册凭证不经过旧系统后端），旧系统后端凭票据兑换用户信息
      *
      * @param channel 发起会话凭证
-     * @param request 注册参数（方式/邮箱/用户名/密码/验证码/昵称）
+     * @param request 注册参数（邮箱/用户名/密码/邮箱验证码/昵称，统一形态）
      * @param ip      注册 IP
      * @return 一次性登录票据及有效期
      */

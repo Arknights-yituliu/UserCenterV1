@@ -16,7 +16,7 @@ import com.orange.entity.vo.oauth.DirectLoginTicketVO;
 public interface AuthService {
 
     /**
-     * 注册（密码注册 / 邮箱验证码注册），注册成功后直接签发会话登录
+     * 注册（统一形态：邮箱 + 用户名 + 密码 + 昵称），注册成功后直接签发会话登录
      *
      * @param request 注册参数
      * @param ip      注册 IP

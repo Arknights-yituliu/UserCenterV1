@@ -94,11 +94,11 @@ public class OAuthLegacyLoginController {
      * 前端将票据交给旧系统后端，由后端凭票据兑换用户信息（复用 /oauth2/direct-user）
      *
      * @param channel      发起会话凭证（旧系统后端签发）
-     * @param registerType 注册方式：password=密码注册 / email_code=邮箱验证码注册
-     * @param email        邮箱（与用户名至少一个；填了邮箱需提供验证码）
-     * @param userName     用户名（可选，3-20 位字母数字下划线）
+     * @param registerType 注册方式（已废弃：统一注册形态后不再参与校验，保留入参仅为兼容旧调用方，服务端忽略）
+     * @param email        邮箱（必填）
+     * @param userName     用户名（必填，3-20 位字母数字下划线）
      * @param password     密码（必填，6-32 位）
-     * @param code         邮箱验证码（填邮箱时必填）
+     * @param code         邮箱验证码（必填）
      * @param nickname     昵称（可选）
      * @param request      HTTP 请求（取注册 IP）
      * @return 一次性登录票据及有效期
@@ -106,22 +106,22 @@ public class OAuthLegacyLoginController {
     @Operation(summary = "直连注册（前端直接调用，注册信息不经旧系统后端）")
     @PostMapping("/direct-register")
     public Result<DirectLoginTicketVO> directRegister(@RequestParam("channel") String channel,
-                                                      @RequestParam("register_type") String registerType,
+                                                      @RequestParam(value = "register_type", required = false) String registerType,
                                                       @RequestParam(value = "email", required = false) String email,
                                                       @RequestParam(value = "user_name", required = false) String userName,
                                                       @RequestParam(value = "password", required = false) String password,
                                                       @RequestParam(value = "code", required = false) String code,
                                                       @RequestParam(value = "nickname", required = false) String nickname,
                                                       HttpServletRequest request) {
+        // register_type 已废弃：统一注册形态后两种取值行为完全一致，此处刻意不读取该参数
         RegisterRequest req = new RegisterRequest();
-        req.setRegisterType(registerType);
         req.setEmail(email);
         req.setUserName(userName);
         req.setPassword(password);
         req.setVerificationCode(code);
         req.setNickname(nickname);
         DirectLoginTicketVO vo = authService.directRegister(channel, req, RequestUtil.getIp(request));
-        LogUtil.debug(OAuthLegacyLoginController.class, "[OAuth] 直连注册成功: registerType={}", registerType);
+        LogUtil.debug(OAuthLegacyLoginController.class, "[OAuth] 直连注册成功");
         return Result.success(vo);
     }
 

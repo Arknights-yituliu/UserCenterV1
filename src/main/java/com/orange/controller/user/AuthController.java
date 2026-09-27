@@ -58,7 +58,7 @@ public class AuthController {
     }
 
     /**
-     * 注册（密码注册 / 邮箱验证码注册），成功后自动登录
+     * 注册（统一形态：邮箱 + 用户名 + 密码 + 昵称），成功后自动登录
      *
      * @param request      注册参数
      * @param httpRequest  HTTP 请求（取 IP / 来源客户端）
