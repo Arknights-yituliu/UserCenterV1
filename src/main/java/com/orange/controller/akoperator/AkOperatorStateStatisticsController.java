@@ -49,18 +49,5 @@ public class AkOperatorStateStatisticsController {
         return Result.success(statisticsService.getOperatorStatistics());
     }
 
-    /**
-     * 手动触发一轮干员数据统计
-     *
-     * <p>立即返回，统计在后台异步执行；同一时刻只允许一轮，已在执行时不会重复触发。
-     * 统计完成后结果表被整表替换，随后的查询接口即可读到新结果。</p>
-     *
-     * @return 统一响应，data 为本次触发结果说明
-     */
-    @Operation(summary = "手动触发干员数据统计")
-    @GetMapping("/refresh")
-    public Result<String> refresh() {
-        boolean triggered = statisticsService.triggerOperatorStatisticsRefresh();
-        return Result.success(triggered ? "统计已触发，将在后台执行" : "已有统计任务在执行，本次未重复触发");
-    }
+
 }
