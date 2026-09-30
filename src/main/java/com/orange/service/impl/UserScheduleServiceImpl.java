@@ -44,8 +44,12 @@ public class UserScheduleServiceImpl implements UserScheduleService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long saveSchedule(Long uid, UserScheduleSaveRequest request) {
-        JsonNode schedule = parseSchedule(request.getSchedule());
+        JsonNode schedule = request.getSchedule();
+        validateSchedule(schedule);
         String normalizedSchedule = serialize(schedule);
+        if (normalizedSchedule.getBytes(StandardCharsets.UTF_8).length > MAX_SCHEDULE_BYTES) {
+            throw new BadRequestException("排班表不能超过 30KB");
+        }
         if (request.getId() != null) {
             UserSchedule current = userScheduleMapper.selectOwnedByIdForUpdate(request.getId(), uid);
             if (current == null) {
@@ -76,6 +80,16 @@ public class UserScheduleServiceImpl implements UserScheduleService {
     }
 
     @Override
+    public List<UserScheduleVO> listOwnSchedules(Long uid) {
+        return userScheduleMapper.selectList(Wrappers.<UserSchedule>lambdaQuery()
+                        .eq(UserSchedule::getUid, uid)
+                        .orderByDesc(UserSchedule::getUpdateTime))
+                .stream()
+                .map(this::toOwnerVO)
+                .collect(Collectors.toList());
+    }
+
+    @Override
     public List<UserScheduleVO> listOwnSchedules(Long uid, String userName) {
         if (userName == null || userName.isBlank()) {
             throw new BadRequestException("用户名不能为空");
@@ -87,12 +101,7 @@ public class UserScheduleServiceImpl implements UserScheduleService {
         if (!uid.equals(user.getUid())) {
             throw new BusinessException(ResultCode.FORBIDDEN, "只能查询自己的排班表");
         }
-        return userScheduleMapper.selectList(Wrappers.<UserSchedule>lambdaQuery()
-                        .eq(UserSchedule::getUid, uid)
-                        .orderByDesc(UserSchedule::getUpdateTime))
-                .stream()
-                .map(this::toOwnerVO)
-                .collect(Collectors.toList());
+        return listOwnSchedules(uid);
     }
 
     @Override
@@ -116,26 +125,17 @@ public class UserScheduleServiceImpl implements UserScheduleService {
         }
     }
 
-    private JsonNode parseSchedule(String rawSchedule) {
-        if (rawSchedule == null || rawSchedule.isBlank()) {
+    private void validateSchedule(JsonNode schedule) {
+        if (schedule == null) {
             throw new BadRequestException("排班表不能为空");
         }
-        if (rawSchedule.getBytes(StandardCharsets.UTF_8).length > MAX_SCHEDULE_BYTES) {
-            throw new BadRequestException("排班表不能超过 30KB");
+        if (!schedule.isArray()) {
+            throw new BadRequestException("排班表必须是 JSON 数组");
         }
-        try {
-            JsonNode schedule = objectMapper.readTree(rawSchedule);
-            if (schedule == null || !schedule.isArray()) {
-                throw new BadRequestException("排班表必须是 JSON 数组");
+        for (JsonNode item : schedule) {
+            if (!item.isObject()) {
+                throw new BadRequestException("排班表中的每项必须是 JSON 对象");
             }
-            for (JsonNode item : schedule) {
-                if (!item.isObject()) {
-                    throw new BadRequestException("排班表中的每项必须是 JSON 对象");
-                }
-            }
-            return schedule;
-        } catch (JsonProcessingException e) {
-            throw new BadRequestException("排班表必须是合法 JSON");
         }
     }
 

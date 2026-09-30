@@ -1,7 +1,7 @@
 package com.orange.entity.dto.schedule;
 
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Size;
+import com.fasterxml.jackson.databind.JsonNode;
+import jakarta.validation.constraints.NotNull;
 
 /**
  * 保存用户排班表请求参数。
@@ -13,10 +13,9 @@ public class UserScheduleSaveRequest {
     /** 排班表 ID；为空时创建，非空时覆盖更新。 */
     private Long id;
 
-    /** 排班表 JSON 字符串。 */
-    @NotBlank(message = "排班表不能为空")
-    @Size(max = 30720, message = "排班表不能超过 30KB")
-    private String schedule;
+    /** 排班表 JSON 数组。 */
+    @NotNull(message = "排班表不能为空")
+    private JsonNode schedule;
 
     public Long getId() {
         return id;
@@ -26,11 +25,11 @@ public class UserScheduleSaveRequest {
         this.id = id;
     }
 
-    public String getSchedule() {
+    public JsonNode getSchedule() {
         return schedule;
     }
 
-    public void setSchedule(String schedule) {
+    public void setSchedule(JsonNode schedule) {
         this.schedule = schedule;
     }
 }

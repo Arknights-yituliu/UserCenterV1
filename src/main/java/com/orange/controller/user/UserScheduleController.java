@@ -21,7 +21,7 @@ import java.util.List;
 /** 需用户会话的排班表管理接口。 */
 @Tag(name = "用户排班表接口")
 @RestController
-@RequestMapping("/user/schedules")
+@RequestMapping("/user/schedule")
 public class UserScheduleController {
 
     private final UserScheduleService userScheduleService;

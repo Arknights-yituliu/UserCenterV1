@@ -1,5 +1,7 @@
 package com.orange.service.impl;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BadRequestException;
@@ -40,7 +42,7 @@ class UserScheduleServiceImplTest {
         when(userScheduleMapper.countByUid(UID)).thenReturn(4L);
         when(userScheduleMapper.insert(any(UserSchedule.class))).thenReturn(1);
 
-        long id = service().saveSchedule(UID, request(null, "[{\"date\":\"2026-09-21\"}]"));
+        long id = service().saveSchedule(UID, request(null, schedule("[{\"date\":\"2026-09-21\"}]")));
 
         assertThat(id).isPositive();
         ArgumentCaptor<UserSchedule> captor = ArgumentCaptor.forClass(UserSchedule.class);
@@ -54,25 +56,25 @@ class UserScheduleServiceImplTest {
         when(userInfoMapper.selectByUidForUpdate(UID)).thenReturn(user(UID, "orange"));
         when(userScheduleMapper.countByUid(UID)).thenReturn(5L);
 
-        assertThatThrownBy(() -> service().saveSchedule(UID, request(null, "[]")))
+        assertThatThrownBy(() -> service().saveSchedule(UID, request(null, schedule("[]"))))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessageContaining("最多保存 5");
         verify(userScheduleMapper, never()).insert(any());
     }
 
     @Test
-    void rejectsInvalidScheduleJsonBeforeDatabaseAccess() {
-        assertThatThrownBy(() -> service().saveSchedule(UID, request(null, "not-json")))
+    void rejectsNonArrayScheduleBeforeDatabaseAccess() {
+        assertThatThrownBy(() -> service().saveSchedule(UID, request(null, schedule("{}"))))
                 .isInstanceOf(BadRequestException.class)
-                .hasMessageContaining("合法 JSON");
+                .hasMessageContaining("必须是 JSON 数组");
         verify(userInfoMapper, never()).selectByUidForUpdate(any());
     }
 
     @Test
     void rejectsScheduleOverByteLimit() {
-        String tooLarge = "[\"" + "中".repeat(10_240) + "\"]";
+        String tooLarge = "[{\"value\":\"" + "中".repeat(10_240) + "\"}]";
 
-        assertThatThrownBy(() -> service().saveSchedule(UID, request(null, tooLarge)))
+        assertThatThrownBy(() -> service().saveSchedule(UID, request(null, schedule(tooLarge))))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessageContaining("30KB");
         verify(userInfoMapper, never()).selectByUidForUpdate(any());
@@ -95,7 +97,7 @@ class UserScheduleServiceImplTest {
     void updateOfOtherUsersScheduleIsForbidden() {
         when(userScheduleMapper.selectOwnedByIdForUpdate(9L, UID)).thenReturn(null);
 
-        assertThatThrownBy(() -> service().saveSchedule(UID, request(9L, "[]")))
+        assertThatThrownBy(() -> service().saveSchedule(UID, request(9L, schedule("[]"))))
                 .isInstanceOf(BusinessException.class)
                 .extracting(exception -> ((BusinessException) exception).getCode())
                 .isEqualTo(ResultCode.FORBIDDEN.getCode());
@@ -105,11 +107,19 @@ class UserScheduleServiceImplTest {
         return new UserScheduleServiceImpl(userScheduleMapper, userInfoMapper, new ObjectMapper());
     }
 
-    private UserScheduleSaveRequest request(Long id, String schedule) {
+    private UserScheduleSaveRequest request(Long id, JsonNode schedule) {
         UserScheduleSaveRequest request = new UserScheduleSaveRequest();
         request.setId(id);
         request.setSchedule(schedule);
         return request;
+    }
+
+    private JsonNode schedule(String json) {
+        try {
+            return new ObjectMapper().readTree(json);
+        } catch (JsonProcessingException e) {
+            throw new AssertionError(e);
+        }
     }
 
     private UserInfo user(long uid, String userName) {

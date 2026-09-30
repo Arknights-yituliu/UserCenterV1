@@ -4,9 +4,7 @@ import com.orange.common.context.UserContext;
 import com.orange.common.exception.BusinessException;
 import com.orange.controller.user.AkAccountController;
 import com.orange.entity.dto.akoperator.OperatorSaveRequest;
-import com.orange.entity.vo.UserScheduleVO;
 import com.orange.service.AkAccountService;
-import com.orange.service.UserScheduleService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -31,18 +29,6 @@ class OAuthGameDataControllerTest {
     @AfterEach
     void clearContext() {
         UserContext.clear();
-    }
-
-    @Test
-    void scheduleReadRequiresGameDataReadScope() {
-        UserScheduleService scheduleService = mock(UserScheduleService.class);
-        OAuthScheduleController controller = new OAuthScheduleController(scheduleService);
-        UserContext.setScope("gama-data.read");
-        when(scheduleService.getSchedule(8L)).thenReturn(new UserScheduleVO());
-
-        assertDoesNotThrow(() -> controller.get(8L));
-
-        verify(scheduleService).getSchedule(8L);
     }
 
     @Test

@@ -10,6 +10,9 @@ public interface UserScheduleService {
 
     Long saveSchedule(Long uid, UserScheduleSaveRequest request);
 
+    /** 按 uid 查询该用户自己的排班表列表，按更新时间倒序。 */
+    List<UserScheduleVO> listOwnSchedules(Long uid);
+
     List<UserScheduleVO> listOwnSchedules(Long uid, String userName);
 
     UserScheduleVO getSchedule(Long id);

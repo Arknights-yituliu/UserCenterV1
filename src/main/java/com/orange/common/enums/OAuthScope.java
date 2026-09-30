@@ -24,11 +24,11 @@ public enum OAuthScope {
     /** 读取并修改用户个人资料。 */
     USER_PROFILE("user.profile", "个人资料", "读取并修改你的个人资料", true, false),
 
-    /** 读取当前客户端名下的用户配置。 */
-    CONFIG_READ("config.read", "读取应用配置", "读取该应用名下的用户配置", false, false),
+    /** 读取当前客户端名下的用户配置，以及用户自己的排班表。 */
+    CONFIG_READ("config.read", "读取应用配置", "读取该应用名下的用户配置，以及查看你的排班表", false, false),
 
-    /** 写入或删除当前客户端名下的用户配置。 */
-    CONFIG_WRITE("config.write", "管理应用配置", "创建、修改或删除该应用名下的用户配置", false, false),
+    /** 写入或删除当前客户端名下的用户配置，以及保存或删除用户排班表。 */
+    CONFIG_WRITE("config.write", "管理应用配置", "创建、修改或删除该应用名下的用户配置，以及保存或删除你的排班表", false, false),
 
     /** 读取用户游戏数据。 */
     GAMA_DATA_READ("gama-data.read", "游戏数据", "读取用户游戏数据", true, false),
