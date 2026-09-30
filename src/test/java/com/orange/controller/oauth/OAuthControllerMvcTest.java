@@ -104,6 +104,16 @@ class OAuthControllerMvcTest {
     }
 
     @Test
+    void allowedOriginPreflightReturnsCorsHeadersForAnyPath() throws Exception {
+        mockMvc.perform(options("/open/ak-operator-statistics/result")
+                        .header("Origin", "https://spa.example.com")
+                        .header("Access-Control-Request-Method", "GET"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Access-Control-Allow-Origin", "https://spa.example.com"))
+                .andExpect(header().string("Access-Control-Allow-Credentials", "true"));
+    }
+
+    @Test
     void unknownOriginPreflightDoesNotReceiveCorsPermission() throws Exception {
         mockMvc.perform(options("/oauth2/token")
                         .header("Origin", "https://attacker.example")
