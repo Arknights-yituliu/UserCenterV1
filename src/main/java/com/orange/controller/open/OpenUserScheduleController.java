@@ -12,13 +12,13 @@ import org.springframework.web.bind.annotation.RestController;
 
 /** 不需要登录的排班表查询接口。 */
 @Tag(name = "排班表查询接口")
-@RestController
+@RestController()
 @RequestMapping("/open")
-public class UserScheduleController {
+public class OpenUserScheduleController {
 
     private final UserScheduleService userScheduleService;
 
-    public UserScheduleController(UserScheduleService userScheduleService) {
+    public OpenUserScheduleController(UserScheduleService userScheduleService) {
         this.userScheduleService = userScheduleService;
     }
 
