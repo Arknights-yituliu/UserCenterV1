@@ -11,7 +11,7 @@ import org.springframework.stereotype.Component;
  * 真正的全表扫描在后台线程执行；同一时刻只允许一轮，已有任务在执行时本次触发被忽略。</p>
  *
  * <p>首次执行延迟一个间隔，避免应用每次重启都立刻发起一次全表扫描；需要立即得到新结果时，
- * 仍可调用 {@code GET /ak-operator-statistics/refresh} 手动触发。</p>
+ * 仍可调用 {@code GET /open/ak-operator-statistics/refresh} 手动触发。</p>
  *
  * @author UserCenter
  */

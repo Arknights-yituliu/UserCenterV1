@@ -1,4 +1,4 @@
-package com.orange.controller.user;
+package com.orange.controller.open;
 
 import com.orange.common.util.Result;
 import com.orange.entity.vo.UserScheduleVO;
@@ -13,17 +13,17 @@ import org.springframework.web.bind.annotation.RestController;
 /** 不需要登录的排班表查询接口。 */
 @Tag(name = "排班表查询接口")
 @RestController
-@RequestMapping("/schedules")
-public class PublicUserScheduleController {
+@RequestMapping("/open")
+public class UserScheduleController {
 
     private final UserScheduleService userScheduleService;
 
-    public PublicUserScheduleController(UserScheduleService userScheduleService) {
+    public UserScheduleController(UserScheduleService userScheduleService) {
         this.userScheduleService = userScheduleService;
     }
 
     @Operation(summary = "按 ID 查询完整排班表")
-    @GetMapping("/{id}")
+    @GetMapping("/schedule/{id}")
     public Result<UserScheduleVO> get(@PathVariable Long id) {
         return Result.success(userScheduleService.getSchedule(id));
     }

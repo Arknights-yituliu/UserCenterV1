@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 不建议放进日常 {@code mvn test}。</p>
  *
  * <p>测试会先整表替换写入 ak_operator_state_statistics，再回读一次，因此跑完它之后公开查询接口
- * （{@code GET /ak-operator-statistics}）就有数据了。统计结果会完整打印到测试控制台，便于人工核对；
+ * （{@code GET /open/ak-operator-statistics}）就有数据了。统计结果会完整打印到测试控制台，便于人工核对；
  * 同时做基础自检，避免「能跑但结果错」。</p>
  *
  * @author UserCenter

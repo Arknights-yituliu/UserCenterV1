@@ -1,4 +1,4 @@
-package com.orange.controller.akoperator;
+package com.orange.controller.open;
 
 import com.orange.common.util.Result;
 import com.orange.entity.vo.akoperator.OperatorStatisticsVO;
@@ -12,19 +12,20 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- * 干员养成数据统计查询接口（无需登录）
+ * 干员养成数据统计查询接口（无需登录），路径前缀 {@code /open/ak-operator-statistics}
  *
  * <p>只读结果表 ak_operator_state_statistics，不触发全表扫描，接口耗时与源表数据量无关。</p>
  *
- * <p>重新统计入口：{@code GET /refresh} 供手动触发。跑一轮统计要扫描约 4000 万行，
- * 属离线跑批，因此该入口立即返回、统计在后台异步执行，同一时刻只允许一轮，
- * 已在执行时本次触发被忽略，避免外部反复调用把数据库压满。</p>
+ * <p>统计结果由 {@link com.orange.service.AkOperatorStateStatisticsScheduler} 定时异步刷新，
+ * 固定 30 分钟一轮，本接口不提供手动触发入口：跑一轮统计要扫描约 4000 万行，属离线跑批，
+ * 因此触发即返回、统计在后台线程执行，同一时刻只允许一轮，已在执行时本次触发被忽略，
+ * 避免反复触发把数据库压满。</p>
  *
  * @author UserCenter
  */
 @Tag(name = "干员数据统计")
 @RestController
-@RequestMapping("/ak-operator-statistics")
+@RequestMapping("/open")
 public class AkOperatorStateStatisticsController {
 
     private final AkOperatorStateStatisticsService statisticsService;
@@ -44,7 +45,7 @@ public class AkOperatorStateStatisticsController {
      * @return 统一响应，data 为按干员编码升序排列的统计结果；尚未跑过统计时 data 为空列表
      */
     @Operation(summary = "查询干员数据统计结果")
-    @GetMapping
+    @GetMapping("/ak-operator-statistics/result")
     public Result<List<OperatorStatisticsVO>> list() {
         return Result.success(statisticsService.getOperatorStatistics());
     }
