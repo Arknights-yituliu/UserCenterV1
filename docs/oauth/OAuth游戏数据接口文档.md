@@ -33,9 +33,9 @@ OAuth Token 仍同时绑定用户与客户端，用于客户端认证和 scope �
 
 | 场景 | 获取方式 |
 | --- | --- |
-| 后端服务 / BFF（能安全保存 client_secret） | 授权码 + PKCE，由业务后端换码，见《[加密客户端 OAuth2 接入文档](./加密客户端OAuth2接入文档.md)》 |
-| 无后端 Web 应用（公共客户端） | 授权码 + PKCE，浏览器直接换码，见《[无后端 Web 应用 OAuth2 接入文档](./无后端Web应用OAuth2接入文档.md)》 |
-| 存量 BackEndV3 会话 | 由前端在本地无 `UC_ACCESS_TOKEN` 时主动调 BackEndV3 兑换接口取得，凭据从响应体返回，见《[BackEndV3 与 UC 令牌统一方案](./BackEndV3与UC令牌统一方案.md)》 |
+| 后端服务 / BFF（能安全保存 client_secret） | 授权码 + PKCE，由业务后端换码，见《加密客户端 OAuth2 接入文档》 |
+| 无后端 Web 应用（公共客户端） | 授权码 + PKCE，浏览器直接换码，见《无后端 Web 应用 OAuth2 接入文档》 |
+| 存量 BackEndV3 会话 | 由前端在本地无 `UC_ACCESS_TOKEN` 时主动调 BackEndV3 兑换接口取得，凭据从响应体返回，见《BackEndV3 与 UC 令牌统一方案》 |
 | 直连登录链路 | `POST /oauth2/direct-login`、`POST /oauth2/direct-user` 等直连接口 |
 
 ### 1.4 令牌过期与刷新
@@ -298,4 +298,4 @@ HTTP `200`：
 | `40004` | 干员数据保存冲突，请重试 | 重试整个请求 |
 | `40001` | 系统繁忙，请稍后再试 | 稍后重试并保留请求信息 |
 
-完整错误码见《[错误码参考](./错误码参考.md)》。
+完整错误码见《错误码参考》。

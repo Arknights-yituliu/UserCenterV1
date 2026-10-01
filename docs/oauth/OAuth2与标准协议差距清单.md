@@ -87,7 +87,7 @@
 
 ### 3.5 内部令牌迁移端点（非标准扩展，非差距但需登记）
 
-- **端点**：`POST /oauth2/internal/migrate-token`，完整定义见 [BackEndV3与UC令牌统一方案](./BackEndV3与UC令牌统一方案.md) 第 5 节。
+- **端点**：`POST /oauth2/internal/migrate-token`，完整定义见《BackEndV3与UC令牌统一方案》第 5 节。
 - **性质**：非标准扩展，不属于 RFC 6749 的任何 grant type，也不面向标准 OAuth 客户端；它是 BackEndV3 → UC 的服务端间内部接口，用于把「旧自签 token 对应的 uid」按需兑换为一对 UC 令牌。因此 3.1 中「响应包裹 envelope」「错误统一 200 + `{code,msg}`」的偏差对本端点**不构成互操作问题**（无标准客户端调用）。
 - **认证方式**：HTTP 层不使用任何 OAuth 凭证（无 Bearer、无 client\_secret），改用 **Ed25519 非对称签名**——BackEndV3 持私钥签名，UC 只存公钥验签。签名原文（canonical 串）为：
 

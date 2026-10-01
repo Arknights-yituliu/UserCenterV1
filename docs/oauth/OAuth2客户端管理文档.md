@@ -528,4 +528,4 @@ Authorization: Bearer <UC_SESSION_TOKEN>
 4. 浏览器请求中不得包含或持久化 `client_secret`。
 5. 客户端登记的 `websiteOrigin` 必须已通过管理员审批（列表/详情中的 `originApproved=true`），该 Origin 才会进入服务端运行时 CORS 白名单，浏览器跨域请求才能放行。
 
-OAuth2 授权、换码、刷新、吊销和 userinfo 接口不属于本文档范围，参见[无后端 Web 应用 OAuth2 接入文档](./无后端Web应用OAuth2接入文档.md)。
+OAuth2 授权、换码、刷新、吊销和 userinfo 接口不属于本文档范围，参见《无后端 Web 应用 OAuth2 接入文档》。

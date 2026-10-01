@@ -86,6 +86,7 @@ CREATE TABLE `oauth_client` (
     `owner_enabled`     TINYINT      NOT NULL DEFAULT 1 COMMENT '所有者是否启用：1=启用 0=停用',
     `admin_approved`    TINYINT      NOT NULL DEFAULT 0 COMMENT '管理员是否审批通过：1=通过 0=待审批或封禁',
     `direct_auth_enabled` TINYINT    NOT NULL DEFAULT 0 COMMENT '是否允许直连认证（登录和注册）：1=允许 0=禁止',
+    `rotate_refresh_token` TINYINT   NOT NULL DEFAULT 0 COMMENT '是否开启 refresh_token 轮转：1=开启 0=关闭（固定凭证）',
     `owner_uid`         BIGINT       DEFAULT NULL COMMENT '所有者用户 uid（开发者账号，NULL=平台托管）',
     `create_time`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     PRIMARY KEY (`id`),
@@ -177,6 +178,8 @@ CREATE TABLE `user_config_quota` (
 -- 本表只作为“我的授权”查询与审计的持久化投影，允许最终一致：
 -- 每次签发 refresh_token 插入一行，吊销时置 revoked=1，
 -- 过期状态在查询时按 expire_time 过滤，不依赖定时任务。
+-- 开启轮转的客户端，一次授权派生的全部令牌共享同一 family_id：
+-- 轮转只更新本行的 token_hash，重放判定后按 family_id 整族置吊销。
 -- -------------------------------------------------------------
 DROP TABLE IF EXISTS `oauth_grant`;
 CREATE TABLE `oauth_grant` (
@@ -185,6 +188,7 @@ CREATE TABLE `oauth_grant` (
     `client_id`   VARCHAR(128)    NOT NULL COMMENT '被授权的 OAuth 客户端 ID',
     `scope`       VARCHAR(256)    NOT NULL COMMENT '授权范围（逗号分隔）',
     `token_hash`  CHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL COMMENT 'refresh_token 的 SHA-256（不落明文）',
+    `family_id`   CHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL COMMENT '令牌家族标识（64 位 hex，未开启轮转的历史记录为 NULL）',
     `issue_time`  DATETIME        NOT NULL COMMENT '授权（签发）时间',
     `expire_time` DATETIME        NOT NULL COMMENT '过期时间',
     `revoked`     TINYINT         NOT NULL DEFAULT 0 COMMENT '是否已吊销：1=已吊销 0=有效',
@@ -192,7 +196,8 @@ CREATE TABLE `oauth_grant` (
     `update_time` DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '记录更新时间',
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_oauth_grant_token_hash` (`token_hash`),
-    KEY `idx_oauth_grant_uid` (`uid`, `revoked`, `expire_time`)
+    KEY `idx_oauth_grant_uid` (`uid`, `revoked`, `expire_time`),
+    KEY `idx_oauth_grant_family` (`family_id`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = 'OAuth refresh_token 授权台账';
 
