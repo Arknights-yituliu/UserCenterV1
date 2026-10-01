@@ -44,6 +44,33 @@ public interface OAuthGrantMapper extends BaseMapper<OAuthGrant> {
     int markRevokedByTokenHash(@Param("tokenHash") String tokenHash);
 
     /**
+     * 把指定令牌家族的全部未吊销授权置为已吊销（refresh_token 重放时的整族吊销）
+     *
+     * @param familyId 令牌家族标识
+     * @return 受影响行数
+     */
+    @Update("UPDATE oauth_grant SET revoked = 1 "
+            + "WHERE family_id = #{familyId} AND revoked = 0")
+    int markRevokedByFamily(@Param("familyId") String familyId);
+
+    /**
+     * refresh_token 轮转时把台账摘要替换为新值，同时补写令牌家族标识
+     *
+     * <p>轮转沿用同一条台账记录（授权时间与到期时间保持不变，刷新不会让「我的授权」列表新增条目），
+     * 因此这里只替换摘要；历史记录没有家族标识时由本次轮转补写。</p>
+     *
+     * @param oldTokenHash 轮转前的 refresh_token 摘要
+     * @param newTokenHash 轮转后的 refresh_token 摘要
+     * @param familyId     令牌家族标识
+     * @return 受影响行数；0 表示台账中没有对应的有效记录
+     */
+    @Update("UPDATE oauth_grant SET token_hash = #{newTokenHash}, family_id = #{familyId} "
+            + "WHERE token_hash = #{oldTokenHash} AND revoked = 0")
+    int rotateTokenHash(@Param("oldTokenHash") String oldTokenHash,
+                        @Param("newTokenHash") String newTokenHash,
+                        @Param("familyId") String familyId);
+
+    /**
      * 把指定用户对指定应用（客户端）的全部未吊销授权置为已吊销（按应用整体撤销）
      *
      * @param uid      用户 uid

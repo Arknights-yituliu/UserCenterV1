@@ -36,6 +36,15 @@ public final class RedisKeyUtil {
     /** OAuth refresh_token key 前缀：uc:oauth:refresh:{token} */
     private static final String PREFIX_OAUTH_REFRESH = "uc:oauth:refresh:";
 
+    /** OAuth refresh_token 轮转墓碑 key 前缀：uc:oauth:refresh:used:{token}（值为家族信息，用于识别凭证重放） */
+    private static final String PREFIX_OAUTH_REFRESH_USED = "uc:oauth:refresh:used:";
+
+    /** OAuth refresh_token 宽限期幂等副本 key 前缀：uc:oauth:refresh:next:{token}（值为换发出的新 refresh_token） */
+    private static final String PREFIX_OAUTH_REFRESH_NEXT = "uc:oauth:refresh:next:";
+
+    /** OAuth 令牌家族索引 key 前缀：uc:oauth:family:{familyId}（Set，成员为同族 access/refresh） */
+    private static final String PREFIX_OAUTH_FAMILY = "uc:oauth:family:";
+
     /** OAuth 跨站登录票据 key 前缀：uc:oauth:ticket:{ticket} */
     private static final String PREFIX_OAUTH_TICKET = "uc:oauth:ticket:";
 
@@ -161,6 +170,36 @@ public final class RedisKeyUtil {
      */
     public static String oauthRefresh(String token) {
         return PREFIX_OAUTH_REFRESH + token;
+    }
+
+    /**
+     * OAuth refresh_token 轮转墓碑 key（旧 refresh 被换发后写入，长期保留至旧凭证原到期时间）
+     *
+     * @param token 已被轮转的旧 refresh_token 明文
+     * @return Redis key
+     */
+    public static String oauthRefreshUsed(String token) {
+        return PREFIX_OAUTH_REFRESH_USED + token;
+    }
+
+    /**
+     * OAuth refresh_token 宽限期幂等副本 key（仅在宽限期内存在，用于响应丢失后的重试）
+     *
+     * @param token 已被轮转的旧 refresh_token 明文
+     * @return Redis key
+     */
+    public static String oauthRefreshNext(String token) {
+        return PREFIX_OAUTH_REFRESH_NEXT + token;
+    }
+
+    /**
+     * OAuth 令牌家族索引 key（Set，成员为带类型前缀的令牌，用于整族吊销）
+     *
+     * @param familyId 令牌家族标识
+     * @return Redis key
+     */
+    public static String oauthFamily(String familyId) {
+        return PREFIX_OAUTH_FAMILY + familyId;
     }
 
     /**

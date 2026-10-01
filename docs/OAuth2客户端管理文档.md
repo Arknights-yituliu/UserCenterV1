@@ -101,6 +101,7 @@ UC-Token: <UC_SESSION_TOKEN>
 | `websiteOrigin` | string | 否 | 无后端 Web 应用或网站的 Origin，最长 255 个字符 |
 | `accessTokenTtl` | number | 否 | access token 有效期，单位秒，最小 60 |
 | `refreshTokenTtl` | number | 否 | refresh token 有效期，单位秒，最小 300 |
+| `rotateRefreshToken` | boolean | 否 | 是否开启 refresh token 轮转，默认 `false`（固定凭证） |
 
 `grantTypes` 只允许以下值：
 
@@ -108,6 +109,13 @@ UC-Token: <UC_SESSION_TOKEN>
 - `refresh_token`
 
 未登记 `refresh_token` 时，授权码兑换成功后不会签发 refresh token，也不能调用刷新流程。
+
+#### `rotateRefreshToken` 说明
+
+- `false`（默认）：refresh token 为固定凭证，刷新只返回新的 access token，客户端无需替换本地 refresh token。
+- `true`：刷新会换发新的 refresh token，响应中额外返回 `refresh_token`，客户端**必须替换本地保存的旧值**；旧值在 60 秒宽限期后再次使用会被判定为泄露，服务端将作废该次授权派生的全部令牌。
+- 开启前必须确认接入方具备"响应含 `refresh_token` 时持久化替换"的能力；由业务后端代持 refresh token 时，需保证写入成功再响应业务请求。
+- 该开关可在更新客户端接口中随时调整（`OAuthClientUpdateRequest.rotateRefreshToken`，不传表示不修改）。
 
 `scopes` 只能从平台支持的范围中选择。客户端管理页应先调用下方的 scope 元数据接口获取可选项，不能自行拼接新的 scope 标识。
 

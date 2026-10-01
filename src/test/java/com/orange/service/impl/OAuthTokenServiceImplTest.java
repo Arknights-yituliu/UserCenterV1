@@ -46,6 +46,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -98,6 +99,7 @@ class OAuthTokenServiceImplTest {
         ReflectionTestUtils.setField(service, "accessTokenTtlSeconds", 7200L);
         ReflectionTestUtils.setField(service, "refreshTokenTtlSeconds", 86400L);
         ReflectionTestUtils.setField(service, "authorizationCodeTtlSeconds", 300L);
+        ReflectionTestUtils.setField(service, "refreshRotationGraceSeconds", 60L);
     }
 
     @Test
@@ -238,6 +240,159 @@ class OAuthTokenServiceImplTest {
         assertEquals(oldJson, request.expectedOldRefreshJson());
         assertEquals(9L, request.uid());
         assertEquals(7200L, request.accessTtlSeconds());
+    }
+
+    @Test
+    void rotationEnabledRefreshIssuesNewRefreshToken() throws Exception {
+        OAuthClient client = client("none", "authorization_code,refresh_token", null, 1);
+        client.setRotateRefreshToken(1);
+        String oldJson = refreshTokenJson("client-1", "family-1");
+        when(oauthClientMapper.selectById("client-1")).thenReturn(client);
+        when(oauthTokenStore.readRefreshToken("refresh-1")).thenReturn(oldJson);
+        when(oauthTokenStore.rotateRefresh(any())).thenReturn(OAuthTokenStore.ROTATE_SUCCESS);
+
+        OAuthTokenVO token = service.refreshToken("client-1", null, "refresh-1");
+
+        // 轮转模式必须换发新的 refresh_token，且响应不额外携带 scope
+        assertNotNull(token.getAccessToken());
+        assertNotNull(token.getRefreshToken());
+        assertNull(token.getScope());
+        ArgumentCaptor<OAuthTokenStore.RotateRefreshRequest> captor =
+                ArgumentCaptor.forClass(OAuthTokenStore.RotateRefreshRequest.class);
+        verify(oauthTokenStore).rotateRefresh(captor.capture());
+        OAuthTokenStore.RotateRefreshRequest request = captor.getValue();
+        assertEquals("refresh-1", request.oldRefreshToken());
+        assertEquals(oldJson, request.expectedOldRefreshJson());
+        assertEquals("family-1", request.familyId());
+        assertEquals(9L, request.uid());
+        assertEquals(60L, request.graceTtlSeconds());
+        // 台账沿用同一条记录：只把摘要替换为新值并补写家族标识
+        verify(oauthGrantMapper).rotateTokenHash(anyString(), anyString(), eq("family-1"));
+    }
+
+    @Test
+    void rotationRetriesOnceWithFreshSnapshotWhenRecordChanged() throws Exception {
+        OAuthClient client = client("none", "authorization_code,refresh_token", null, 1);
+        client.setRotateRefreshToken(1);
+        String staleJson = refreshTokenJson("client-1", "family-1");
+        // 记录在只读校验后被其他流程改写（如用户调整授权范围）：重读会拿到新内容
+        String latestJson = "{\"uid\":9,\"clientId\":\"client-1\",\"scope\":\"user.read,user.profile\","
+                + "\"familyId\":\"family-1\"}";
+        when(oauthClientMapper.selectById("client-1")).thenReturn(client);
+        when(oauthTokenStore.readRefreshToken("refresh-1")).thenReturn(staleJson, latestJson);
+        when(oauthTokenStore.rotateRefresh(any()))
+                .thenReturn(OAuthTokenStore.ROTATE_STALE)
+                .thenReturn(OAuthTokenStore.ROTATE_SUCCESS);
+
+        OAuthTokenVO token = service.refreshToken("client-1", null, "refresh-1");
+
+        // 用新快照重试一次即可成功，不能把范围同步误判成凭证泄露
+        assertNotNull(token.getRefreshToken());
+        ArgumentCaptor<OAuthTokenStore.RotateRefreshRequest> captor =
+                ArgumentCaptor.forClass(OAuthTokenStore.RotateRefreshRequest.class);
+        verify(oauthTokenStore, times(2)).rotateRefresh(captor.capture());
+        assertEquals(staleJson, captor.getAllValues().get(0).expectedOldRefreshJson());
+        assertEquals(latestJson, captor.getAllValues().get(1).expectedOldRefreshJson());
+    }
+
+    @Test
+    void rotationWithoutTombstoneStillReportsInvalidToken() throws Exception {
+        OAuthClient client = client("none", "authorization_code,refresh_token", null, 1);
+        client.setRotateRefreshToken(1);
+        String oldJson = refreshTokenJson("client-1", null);
+        when(oauthClientMapper.selectById("client-1")).thenReturn(client);
+        when(oauthTokenStore.readRefreshToken("refresh-1")).thenReturn(oldJson);
+        // 快照不一致且线上记录未变：不重试，直接进入重放判定
+        when(oauthTokenStore.rotateRefresh(any())).thenReturn(OAuthTokenStore.ROTATE_STALE);
+        when(valueOperations.get(RedisKeyUtil.oauthRefreshUsed("refresh-1"))).thenReturn(null);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.refreshToken("client-1", null, "refresh-1"));
+
+        assertEquals(ResultCode.OAUTH_TOKEN_INVALID.getCode(), exception.getCode());
+        // 无轮转墓碑时与改造前一致：只报无效，不触发任何整族吊销
+        verify(oauthGrantMapper, never()).markRevokedByFamily(anyString());
+    }
+
+    @Test
+    void replayWithinGraceReturnsSameIssuedRefreshToken() throws Exception {
+        OAuthClient client = client("none", "authorization_code,refresh_token", null, 1);
+        client.setRotateRefreshToken(1);
+        when(oauthClientMapper.selectById("client-1")).thenReturn(client);
+        // 旧凭证已不在（刚被轮转）：直接进入重放判定
+        when(oauthTokenStore.readRefreshToken("refresh-1")).thenReturn(null);
+        String tombstone = "{\"familyId\":\"family-1\",\"clientId\":\"client-1\",\"uid\":9,\"rotatedAt\":"
+                + (System.currentTimeMillis() / 1000) + "}";
+        when(valueOperations.get(RedisKeyUtil.oauthRefreshUsed("refresh-1"))).thenReturn(tombstone);
+        when(valueOperations.get(RedisKeyUtil.oauthRefreshNext("refresh-1"))).thenReturn("refresh-2");
+        when(oauthTokenStore.readRefreshToken("refresh-2")).thenReturn(refreshTokenJson("client-1", "family-1"));
+
+        OAuthTokenVO token = service.refreshToken("client-1", null, "refresh-1");
+
+        // 宽限期内重放旧凭证：补签 access，并原样返回上次换发的新 refresh
+        assertNotNull(token.getAccessToken());
+        assertEquals("refresh-2", token.getRefreshToken());
+        verify(oauthGrantMapper, never()).markRevokedByFamily(anyString());
+    }
+
+    @Test
+    void replayBeyondGraceRevokesWholeTokenFamily() throws Exception {
+        OAuthClient client = client("none", "authorization_code,refresh_token", null, 1);
+        client.setRotateRefreshToken(1);
+        when(oauthClientMapper.selectById("client-1")).thenReturn(client);
+        when(oauthTokenStore.readRefreshToken("refresh-1")).thenReturn(null);
+        String tombstone = "{\"familyId\":\"family-1\",\"clientId\":\"client-1\",\"uid\":9,\"rotatedAt\":"
+                + (System.currentTimeMillis() / 1000 - 3600) + "}";
+        when(valueOperations.get(RedisKeyUtil.oauthRefreshUsed("refresh-1"))).thenReturn(tombstone);
+        // 幂等副本已过期：宽限期外再次使用旧值即判定泄露
+        when(valueOperations.get(RedisKeyUtil.oauthRefreshNext("refresh-1"))).thenReturn(null);
+        when(setOperations.members(RedisKeyUtil.oauthFamily("family-1")))
+                .thenReturn(Set.of("refresh:refresh-2", "access:access-1"));
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.refreshToken("client-1", null, "refresh-1"));
+
+        assertEquals(ResultCode.OAUTH_TOKEN_INVALID.getCode(), exception.getCode());
+        // 台账先按家族置吊销，「我的授权」列表立即收敛
+        verify(oauthGrantMapper).markRevokedByFamily("family-1");
+        // 再按家族索引删除同族令牌并摘除反向索引成员
+        verify(redisTemplate).delete(RedisKeyUtil.oauthRefresh("refresh-2"));
+        verify(redisTemplate).delete(RedisKeyUtil.oauthAccess("access-1"));
+        verify(setOperations).remove(RedisKeyUtil.uidOauth(9L), "refresh:refresh-2");
+        verify(redisTemplate).delete(RedisKeyUtil.oauthFamily("family-1"));
+    }
+
+    @Test
+    void tombstoneOfAnotherClientDoesNotTriggerRevocation() throws Exception {
+        OAuthClient client = client("none", "authorization_code,refresh_token", null, 1);
+        client.setRotateRefreshToken(1);
+        when(oauthClientMapper.selectById("client-1")).thenReturn(client);
+        when(oauthTokenStore.readRefreshToken("refresh-1")).thenReturn(null);
+        String tombstone = "{\"familyId\":\"family-1\",\"clientId\":\"other-client\",\"uid\":9,\"rotatedAt\":"
+                + (System.currentTimeMillis() / 1000 - 3600) + "}";
+        when(valueOperations.get(RedisKeyUtil.oauthRefreshUsed("refresh-1"))).thenReturn(tombstone);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.refreshToken("client-1", null, "refresh-1"));
+
+        // 跨客户端探测既不泄露判定结果，也不做任何吊销
+        assertEquals(ResultCode.OAUTH_TOKEN_INVALID.getCode(), exception.getCode());
+        verify(oauthGrantMapper, never()).markRevokedByFamily(anyString());
+        verify(redisTemplate, never()).delete(anyString());
+    }
+
+    @Test
+    void rotationEnabledIssuanceWritesFamilyIdToGrant() throws Exception {
+        OAuthClient client = client("none", "authorization_code,refresh_token", null, 1);
+        client.setRotateRefreshToken(1);
+        prepareAuthorizationCode(client, "code-1", VERIFIER);
+
+        service.exchangeToken("client-1", null, "code-1", REDIRECT_URI, VERIFIER);
+
+        // 开启轮转的客户端在签发时即写入家族标识，供后续按族吊销
+        ArgumentCaptor<OAuthGrant> captor = ArgumentCaptor.forClass(OAuthGrant.class);
+        verify(oauthGrantMapper).insert(captor.capture());
+        assertNotNull(captor.getValue().getFamilyId());
     }
 
     @Test
@@ -394,10 +549,18 @@ class OAuthTokenServiceImplTest {
     }
 
     private String refreshTokenJson(String clientId) throws JsonProcessingException {
+        return refreshTokenJson(clientId, null);
+    }
+
+    /** 构造 refresh 记录；familyId 非空时模拟开启轮转后仍可继承的家族标识 */
+    private String refreshTokenJson(String clientId, String familyId) throws JsonProcessingException {
         Map<String, Object> record = new LinkedHashMap<>();
         record.put("uid", 9L);
         record.put("clientId", clientId);
         record.put("scope", "user.read");
+        if (familyId != null) {
+            record.put("familyId", familyId);
+        }
         return objectMapper.writeValueAsString(record);
     }
 

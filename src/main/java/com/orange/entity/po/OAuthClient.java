@@ -61,6 +61,9 @@ public class OAuthClient {
     /** 是否允许直连认证（登录和注册）：1=允许 0=禁止。 */
     private Integer directAuthEnabled;
 
+    /** 是否开启 refresh_token 轮转：1=开启（刷新换发新 refresh_token 并检测重放）0=关闭（固定凭证）。 */
+    private Integer rotateRefreshToken;
+
     /** 所有者用户 uid（开发者账号，NULL=平台托管） */
     private Long ownerUid;
 
@@ -178,6 +181,14 @@ public class OAuthClient {
 
     public void setDirectAuthEnabled(Integer directAuthEnabled) {
         this.directAuthEnabled = directAuthEnabled;
+    }
+
+    public Integer getRotateRefreshToken() {
+        return rotateRefreshToken;
+    }
+
+    public void setRotateRefreshToken(Integer rotateRefreshToken) {
+        this.rotateRefreshToken = rotateRefreshToken;
     }
 
     public Long getOwnerUid() {

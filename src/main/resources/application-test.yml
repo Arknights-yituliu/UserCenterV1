@@ -70,6 +70,9 @@ user-center:
     access-token-ttl-seconds: 7200
     # refresh_token 有效期（秒）：默认 90 天
     refresh-token-ttl-seconds: 7776000
+    # refresh_token 轮转宽限期（秒）：开启轮转的客户端在宽限期内重放旧凭证返回同一份新凭证，
+    # 超出则判定为凭证泄露并作废整条令牌家族。建议不小于客户端网络重试窗口
+    refresh-rotation-grace-seconds: 60
     # 授权码有效期（秒）：默认 5 分钟
     authorization-code-ttl-seconds: 300
     # 登录页地址：authorize 未登录时 302 跳转（纯前端接入；为空则保持抛 80001）

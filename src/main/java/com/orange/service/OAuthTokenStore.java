@@ -9,6 +9,15 @@ package com.orange.service;
  */
 public interface OAuthTokenStore {
 
+    /** {@link #rotateRefresh} 返回值：轮转成功（旧凭证失效，新凭证生效） */
+    long ROTATE_SUCCESS = 1L;
+
+    /** {@link #rotateRefresh} 返回值：旧凭证与业务层读取的快照不一致（已被轮转/吊销/不存在），本次未做任何写入 */
+    long ROTATE_STALE = 0L;
+
+    /** {@link #rotateRefresh} 返回值：预校验失败，本次未做任何写入 */
+    long ROTATE_REJECTED = -1L;
+
     /**
      * 读取授权码原始 JSON。保留原始文本是为了在消费时进行 compare-and-delete，确保
      * Java 校验过的记录与 Lua 最终删除的是同一个版本。
@@ -55,6 +64,20 @@ public interface OAuthTokenStore {
     boolean issueAccessFromRefresh(RefreshAccessRequest request);
 
     /**
+     * 原子轮转 refresh token。在 {@link #issueAccessFromRefresh} 的基础上多做三件事：
+     * 删除旧 refresh 记录并写入重放检测墓碑与宽限期幂等副本、写入换发出的新 refresh 记录、
+     * 把新 access 与新 refresh 登记进令牌家族索引。新 refresh 继承旧记录的剩余有效期，
+     * 因此轮转不会延长授权。
+     *
+     * <p>旧记录仍与业务层读取的原始 JSON 完全一致时才会执行；不一致（已被其他请求轮转、
+     * 被吊销或已过期）时不做任何写入，由业务层进一步判断是并发落败还是凭证重放。</p>
+     *
+     * @param request 已序列化的轮转参数
+     * @return {@link #ROTATE_SUCCESS} / {@link #ROTATE_STALE} / {@link #ROTATE_REJECTED}
+     */
+    long rotateRefresh(RotateRefreshRequest request);
+
+    /**
      * 原子签发迁移凭证。一次调用完成三件事：撤销上一轮迁移签发的 refresh_token
      * （Redis 记录与反向索引成员）、写入新 access/refresh 令牌记录与索引成员、
      * 更新“当前迁移凭证”映射，使同一 (uid, clientId) 上恒只保留最新一条迁移凭证。
@@ -80,6 +103,40 @@ public interface OAuthTokenStore {
             String newAccessJson,
             long accessTtlSeconds,
             Long uid) {
+    }
+
+    /**
+     * refresh token 轮转所需的完整参数。
+     *
+     * <p>与 {@link RefreshAccessRequest} 的差异：额外携带换发出的新 refresh_token、
+     * 令牌家族标识、墓碑内容与宽限期。所有 JSON 均由业务层预先生成，Lua 只负责原子状态转换。</p>
+     *
+     * @param oldRefreshToken         被轮转的旧 refresh_token 明文
+     * @param expectedOldRefreshJson  业务层已完成校验的旧 refresh 原始 JSON（快照）
+     * @param newAccessToken          新 access_token 明文
+     * @param newAccessJson           新 access 记录 JSON
+     * @param accessTtlSeconds        新 access 有效期（秒）
+     * @param newRefreshToken         新 refresh_token 明文
+     * @param newRefreshJson          新 refresh 记录 JSON（含家族标识）
+     * @param refreshTtlSeconds       refresh TTL 兜底值（秒）：旧记录无 TTL 时使用
+     * @param uid                     用户 uid
+     * @param familyId                令牌家族标识
+     * @param tombstoneJson           轮转墓碑 JSON（家族标识/客户端/uid/轮转时刻）
+     * @param graceTtlSeconds         宽限期秒数，即幂等副本 TTL
+     */
+    record RotateRefreshRequest(
+            String oldRefreshToken,
+            String expectedOldRefreshJson,
+            String newAccessToken,
+            String newAccessJson,
+            long accessTtlSeconds,
+            String newRefreshToken,
+            String newRefreshJson,
+            long refreshTtlSeconds,
+            Long uid,
+            String familyId,
+            String tombstoneJson,
+            long graceTtlSeconds) {
     }
 
     /**

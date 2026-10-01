@@ -143,6 +143,8 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
         client.setRequireAuthConsent(1);
         client.setAccessTokenTtl(request.getAccessTokenTtl());
         client.setRefreshTokenTtl(request.getRefreshTokenTtl());
+        // refresh_token 轮转默认关闭：仅显式申请 true 的客户端才换发新 refresh 并检测重放
+        client.setRotateRefreshToken(Boolean.TRUE.equals(request.getRotateRefreshToken()) ? 1 : 0);
         // 新客户端默认进入管理员审批状态，且不具备直连认证能力。直连登录和注册
         // 只能由管理员对受信客户端开通，不能通过客户端自助接口申请或修改。
         client.setOwnerEnabled(1);
@@ -213,6 +215,10 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
         client.setScopes(join(scopes));
         client.setAccessTokenTtl(request.getAccessTokenTtl());
         client.setRefreshTokenTtl(request.getRefreshTokenTtl());
+        // 轮转开关可随时调整：关闭后已有家族仍按轮转语义生效至其自然过期，重新开启即恢复
+        if (request.getRotateRefreshToken() != null) {
+            client.setRotateRefreshToken(request.getRotateRefreshToken() ? 1 : 0);
+        }
         oauthClientMapper.updateById(client);
         if (syncOrigin(clientId, request.getClientName(), websiteOrigin,
                 client.getOwnerEnabled() != null && client.getOwnerEnabled() == 1)) {
@@ -543,6 +549,7 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
         vo.setOwnerEnabled(client.getOwnerEnabled() != null && client.getOwnerEnabled() == 1);
         vo.setAdminApproved(client.getAdminApproved() != null && client.getAdminApproved() == 1);
         vo.setDirectAuthEnabled(client.getDirectAuthEnabled() != null && client.getDirectAuthEnabled() == 1);
+        vo.setRotateRefreshToken(client.getRotateRefreshToken() != null && client.getRotateRefreshToken() == 1);
         vo.setCreateTime(client.getCreateTime());
         return vo;
     }

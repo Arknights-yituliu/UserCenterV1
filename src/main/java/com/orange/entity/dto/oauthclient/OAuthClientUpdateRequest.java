@@ -40,6 +40,9 @@ public class OAuthClientUpdateRequest {
     @Min(value = 300, message = "refresh_token 有效期不能小于 300 秒")
     private Long refreshTokenTtl;
 
+    /** 是否开启 refresh_token 轮转：true=开启，null/false=关闭（固定凭证） */
+    private Boolean rotateRefreshToken;
+
     public String getClientName() {
         return clientName;
     }
@@ -86,5 +89,13 @@ public class OAuthClientUpdateRequest {
 
     public void setRefreshTokenTtl(Long refreshTokenTtl) {
         this.refreshTokenTtl = refreshTokenTtl;
+    }
+
+    public Boolean getRotateRefreshToken() {
+        return rotateRefreshToken;
+    }
+
+    public void setRotateRefreshToken(Boolean rotateRefreshToken) {
+        this.rotateRefreshToken = rotateRefreshToken;
     }
 }

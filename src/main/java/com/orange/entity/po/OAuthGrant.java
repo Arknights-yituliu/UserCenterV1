@@ -35,6 +35,9 @@ public class OAuthGrant {
     /** refresh_token 的 SHA-256（64 位十六进制） */
     private String tokenHash;
 
+    /** 令牌家族标识：同一 refresh_token 轮转链共享，用于重放检测时按家族精确吊销（未轮转的历史记录为 NULL） */
+    private String familyId;
+
     /** 授权（签发）时间 */
     private LocalDateTime issueTime;
 
@@ -90,6 +93,14 @@ public class OAuthGrant {
 
     public void setTokenHash(String tokenHash) {
         this.tokenHash = tokenHash;
+    }
+
+    public String getFamilyId() {
+        return familyId;
+    }
+
+    public void setFamilyId(String familyId) {
+        this.familyId = familyId;
     }
 
     public LocalDateTime getIssueTime() {

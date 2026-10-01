@@ -69,8 +69,10 @@ import java.util.concurrent.TimeUnit;
  *   <li>授权码在全部安全校验通过后由 Lua 原子消费，非法请求不能提前烧毁合法 code</li>
  *   <li>授权码绑定客户端与回调地址，防止跨客户端盗用</li>
  *   <li>PKCE S256 校验；客户端强制 PKCE 时未携带 challenge 直接拒绝</li>
- *   <li>refresh_token 为固定凭证：有效期内可反复刷新，刷新只签发新 access_token，
- *       不删除不换发；吊销 refresh_token 只使其本身失效，派生 access 由 TTL 与惰性清理收敛</li>
+ *   <li>refresh_token 支持两种模型，由客户端 {@code rotate_refresh_token} 开关决定：
+ *       默认固定凭证（有效期内可反复刷新，只签发新 access_token，不删除不换发）；
+ *       开启轮转后刷新换发新 refresh_token，旧值立即失效并留轮转墓碑，
+ *       宽限期外重放旧值即判定泄露并作废整条令牌家族</li>
  * </ul>
  *
  * @author UserCenter
@@ -116,6 +118,10 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     /** 授权码默认有效期（秒） */
     @Value("${user-center.oauth.authorization-code-ttl-seconds:300}")
     private long authorizationCodeTtlSeconds;
+
+    /** refresh_token 轮转宽限期（秒）：宽限期内旧凭证重试返回同一份新凭证而不判定为泄露 */
+    @Value("${user-center.oauth.refresh-rotation-grace-seconds:60}")
+    private long refreshRotationGraceSeconds;
 
     /** 登录页地址：未登录时 302 跳转（纯前端接入场景，为空则保持抛 80001） */
     @Value("${user-center.oauth.login-page-url:}")
@@ -618,17 +624,22 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     /**
      * 刷新令牌（grant_type=refresh_token）。
      *
-     * <p>refresh_token 采用“固定凭证”模型：有效期内可反复刷新，刷新只签发新的 access_token，
-     * 既不改写也不换发 refresh_token；吊销 refresh_token 只让自身失效，此前派生的 access
-     * 由各自 TTL 与反向索引惰性清理自然收敛。</p>
+     * <p>refresh_token 有两种模型，由客户端的 {@code rotate_refresh_token} 开关决定：</p>
+     * <ul>
+     *   <li><b>固定凭证（默认）</b>：有效期内可反复刷新，刷新只签发新的 access_token，
+     *       既不改写也不换发 refresh_token；吊销 refresh_token 只让自身失效，此前派生的 access
+     *       由各自 TTL 与反向索引惰性清理自然收敛。</li>
+     *   <li><b>轮转</b>：刷新同时换发新的 refresh_token（旧值立即失效）并留下轮转墓碑；
+     *       宽限期外再次使用旧值即判定为凭证泄露，整条令牌家族（含派生 access）一并作废。</li>
+     * </ul>
      *
      * <p>安全顺序同样是“先只读校验，再原子写入”：客户端归属、状态、认证、grant 全部通过后，
-     * 才由 Lua 以“校验 refresh 仍有效 + 写新 access + 更新反向索引”作为一次原子状态转换。</p>
+     * 才由 Lua 以“校验 refresh 仍有效 + 写新 access（+ 轮转换发）”作为一次原子状态转换。</p>
      *
      * @param clientId     客户端 ID，必须与 refresh_token 的归属一致
      * @param clientSecret 客户端密钥（机密客户端必填）
      * @param refreshToken refresh_token 明文
-     * @return 令牌响应（只含新的 access_token，不回传 refresh_token 与 scope）
+     * @return 令牌响应（固定凭证模式只含新 access_token；轮转模式另含换发出的 refresh_token）
      */
     @Override
     public OAuthTokenVO refreshToken(String clientId, String clientSecret, String refreshToken) {
@@ -636,45 +647,233 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
             throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID, "缺少 refresh_token");
         }
 
-        // 1. 读取原始 JSON。Lua 稍后会比较完全相同的文本，以确认业务层验证过的
+        // 1. 读取原始 JSON（只读）。Lua 稍后会比较完全相同的文本，以确认业务层验证过的
         // 正是即将消费的记录，而不是并发期间被替换过的值。
         String rawRecord = oauthTokenStore.readRefreshToken(refreshToken);
-        if (rawRecord == null) {
-            // 不存在或已过期：统一按无效令牌处理，避免暴露令牌是否存在
-            throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID);
-        }
-        Map<String, Object> record = readJsonMapValue(rawRecord);
 
-        // 2. 先校验令牌归属，再校验客户端当前状态、认证方式和 refresh_token grant。
-        // 任一步失败都不会对令牌做任何变更。
-        if (!Objects.equals(clientId, record.get("clientId"))) {
-            throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID, "刷新令牌与客户端不匹配");
-        }
+        // 2. 客户端状态、认证方式和 refresh_token grant 校验。除原有的安全意义外，
+        // 轮转分支与重放判定同样依赖客户端配置，因此先完成这一层校验再决定走哪条分支；
+        // 两者都只在全部校验通过后才会改动令牌数据。
         OAuthClient client = requireEnabledClient(clientId);
         requireGrantAllowed(client, OAuthGrantType.REFRESH_TOKEN);
         authenticateClient(client, clientSecret);
 
-        // 3. 预生成新 access token 和 JSON。生成动作没有外部副作用；只有 Lua 成功后
+        // 3. 记录不存在：可能是刚被轮转的旧凭证被重放，也可能是从未签发或已过期的令牌。
+        // 交由重放判定区分：没有轮转墓碑时与改造前一致，直接按无效令牌返回。
+        if (rawRecord == null) {
+            return handleRotatedRefreshReplay(client, refreshToken);
+        }
+
+        // 4. 先校验令牌归属，再继续后续流程
+        Map<String, Object> record = readJsonMapValue(rawRecord);
+        if (!Objects.equals(clientId, record.get("clientId"))) {
+            throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID, "刷新令牌与客户端不匹配");
+        }
+
+        // 5. 预生成新 access token 和 JSON。生成动作没有外部副作用；只有 Lua 成功后
         // 这些值才会出现在 Redis 和响应中，因此失败请求不会留下半成品令牌。
         Long uid = ((Number) record.get("uid")).longValue();
         String scope = (String) record.get("scope");
         long accessTtl = resolveAccessTokenTtl(client);
         String newAccessToken = OAuthUtil.generateToken();
+
+        // 6. 固定凭证模式：refresh_token 不删除不换发，失败说明它已被吊销或失效，返回 90009
+        if (!isRefreshRotationEnabled(client)) {
+            OAuthTokenStore.RefreshAccessRequest request = new OAuthTokenStore.RefreshAccessRequest(
+                    refreshToken, rawRecord,
+                    newAccessToken, writeJsonValue(createAccessRecord(client, uid, scope)), accessTtl,
+                    uid);
+            if (!oauthTokenStore.issueAccessFromRefresh(request)) {
+                throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID, "刷新令牌已失效或已被吊销");
+            }
+            // 刷新只签发新 access_token：refresh_token 未变、scope 未变，均无需回传
+            maybeCleanupExpiredGrantMembers(uid);
+            return buildTokenResponse(newAccessToken, null, accessTtl, null);
+        }
+
+        // 7. 轮转模式：撤旧凭证 + 换发新凭证 + 写重放墓碑，由 Lua 一次原子完成
+        return rotateRefreshToken(client, refreshToken, rawRecord, uid, scope, accessTtl, newAccessToken);
+    }
+
+    /**
+     * 执行 refresh_token 轮转并组装响应。
+     *
+     * <p>Lua 报告“旧记录与快照不一致”时有两种可能：并发刷新（另一请求刚完成轮转）或
+     * 记录内容在同瞬间被其他流程改写（如用户调整授权范围会重写记录）。后者用新快照重试
+     * 一次即可成功，因此这里先重读记录再判断，避免把范围同步误判成凭证重放。</p>
+     *
+     * @param client         已通过认证的客户端
+     * @param oldRefreshToken 旧 refresh_token 明文
+     * @param rawRecord      业务层已校验的旧 refresh 原始 JSON
+     * @param uid            用户 uid
+     * @param scope          授权范围
+     * @param accessTtl      新 access 有效期（秒）
+     * @param newAccessToken 新 access_token 明文
+     * @return 令牌响应（含换发出的 refresh_token）
+     */
+    private OAuthTokenVO rotateRefreshToken(OAuthClient client, String oldRefreshToken, String rawRecord,
+                                            Long uid, String scope, long accessTtl, String newAccessToken) {
+        String newRefreshToken = OAuthUtil.generateToken();
+        // 家族标识沿轮转链继承；本次改造前签发的历史记录没有该字段，在此现场补一个
+        String familyId = resolveFamilyId(rawRecord);
+        long refreshTtl = resolveRefreshTokenTtl(client);
         String accessJson = writeJsonValue(createAccessRecord(client, uid, scope));
+        String refreshJson = writeJsonValue(createRefreshRecord(client, uid, scope, familyId));
+        String tombstoneJson = writeJsonValue(createRotationTombstone(client.getId(), uid, familyId));
 
-        OAuthTokenStore.RefreshAccessRequest request = new OAuthTokenStore.RefreshAccessRequest(
-                refreshToken, rawRecord,
-                newAccessToken, accessJson, accessTtl,
-                uid);
+        String snapshot = rawRecord;
+        long result = OAuthTokenStore.ROTATE_STALE;
+        // 最多两次：首次使用业务层快照；若记录恰好被并发流程改写，则用新快照重试一次
+        for (int attempt = 0; attempt < 2; attempt++) {
+            result = oauthTokenStore.rotateRefresh(new OAuthTokenStore.RotateRefreshRequest(
+                    oldRefreshToken, snapshot,
+                    newAccessToken, accessJson, accessTtl,
+                    newRefreshToken, refreshJson, refreshTtl,
+                    uid, familyId, tombstoneJson, refreshRotationGraceSeconds));
+            if (result != OAuthTokenStore.ROTATE_STALE) {
+                break;
+            }
+            String latest = oauthTokenStore.readRefreshToken(oldRefreshToken);
+            if (latest == null || latest.equals(snapshot)) {
+                break;
+            }
+            snapshot = latest;
+        }
 
-        // 4. Lua 将“校验 refresh 仍有效、写入新 access、更新反向索引”作为原子状态转换。
-        // refresh_token 为固定凭证，不删除不换发；失败说明它已被吊销或失效，返回 90009。
-        if (!oauthTokenStore.issueAccessFromRefresh(request)) {
+        if (result == OAuthTokenStore.ROTATE_STALE) {
+            // 旧凭证已不在：交由重放判定区分并发落败/响应丢失重试与凭证泄露
+            return handleRotatedRefreshReplay(client, oldRefreshToken);
+        }
+        if (result != OAuthTokenStore.ROTATE_SUCCESS) {
             throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID, "刷新令牌已失效或已被吊销");
         }
-        // 刷新只签发新 access_token：refresh_token 未变、scope 未变，均无需回传
+
+        // 台账沿用同一条记录：只替换摘要与家族标识，授权时间与到期时间不变，刷新不会新增条目
+        rotateGrantTokenHash(oldRefreshToken, newRefreshToken, familyId);
         maybeCleanupExpiredGrantMembers(uid);
-        return buildTokenResponse(newAccessToken, null, accessTtl, null);
+        LogUtil.debug(OAuthTokenServiceImpl.class, "[OAuth] 轮转刷新令牌: clientId={}, uid={}, familyId={}",
+                client.getId(), uid, familyId);
+        return buildTokenResponse(newAccessToken, newRefreshToken, accessTtl, null);
+    }
+
+    /**
+     * 处理“refresh 记录已不存在”的刷新请求：区分未知令牌、并发落败/重试与凭证泄露。
+     *
+     * <p>只有轮转墓碑中的客户端与本次已认证的客户端一致时才进入泄露判定，避免跨客户端
+     * 探测造成误伤。宽限期内（幂等副本仍在）返回上次换发的新 refresh_token，让响应丢失后的
+     * 重试与并发刷新落败方拿到同一份凭证；宽限期外再次使用旧值则判定为凭证泄露，
+     * 作废整条令牌家族。</p>
+     *
+     * @param client          已通过认证的客户端
+     * @param oldRefreshToken 请求携带的旧 refresh_token 明文
+     * @return 宽限期内命中的幂等响应
+     */
+    private OAuthTokenVO handleRotatedRefreshReplay(OAuthClient client, String oldRefreshToken) {
+        String tombstoneJson = stringRedisTemplate.opsForValue()
+                .get(RedisKeyUtil.oauthRefreshUsed(oldRefreshToken));
+        if (tombstoneJson == null) {
+            // 无轮转记录：从未签发、已过期或已被吊销，与改造前行为一致，仅报无效
+            throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID);
+        }
+        Map<String, Object> tombstone = readJsonMapValue(tombstoneJson);
+        if (!Objects.equals(client.getId(), tombstone.get("clientId"))) {
+            // 墓碑属于其他客户端：既不泄露判定结果，也不做任何吊销
+            throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID);
+        }
+        long rotatedAt = ((Number) tombstone.get("rotatedAt")).longValue();
+        long elapsedSeconds = System.currentTimeMillis() / 1000 - rotatedAt;
+        String nextRefreshToken = stringRedisTemplate.opsForValue()
+                .get(RedisKeyUtil.oauthRefreshNext(oldRefreshToken));
+        if (nextRefreshToken != null && elapsedSeconds >= 0 && elapsedSeconds <= refreshRotationGraceSeconds) {
+            LogUtil.info(OAuthTokenServiceImpl.class,
+                    "[OAuth] 宽限期内重放旧刷新令牌，返回同一份新凭证: clientId={}, elapsedSeconds={}",
+                    client.getId(), elapsedSeconds);
+            return issueAccessForReplay(client, tombstone, nextRefreshToken);
+        }
+        revokeTokenFamily(client.getId(), tombstone, elapsedSeconds);
+        throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID, "刷新令牌已被使用，授权已失效");
+    }
+
+    /**
+     * 宽限期内重放旧凭证时补签 access_token，并原样返回上次换发出的 refresh_token
+     *
+     * @param client           已通过认证的客户端
+     * @param tombstone        轮转墓碑字段
+     * @param nextRefreshToken 上次轮转换发出的 refresh_token
+     * @return 令牌响应（新 access + 同一 refresh）
+     */
+    private OAuthTokenVO issueAccessForReplay(OAuthClient client, Map<String, Object> tombstone,
+                                              String nextRefreshToken) {
+        String nextRecordJson = oauthTokenStore.readRefreshToken(nextRefreshToken);
+        if (nextRecordJson == null) {
+            // 新凭证也已失效（整族已被吊销或已过期）：不能再换发，按无效令牌处理
+            throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID);
+        }
+        Map<String, Object> record = readJsonMapValue(nextRecordJson);
+        Long uid = ((Number) record.get("uid")).longValue();
+        String scope = (String) record.get("scope");
+        long accessTtl = resolveAccessTokenTtl(client);
+        String accessToken = OAuthUtil.generateToken();
+        writeJson(RedisKeyUtil.oauthAccess(accessToken), createAccessRecord(client, uid, scope), accessTtl);
+        stringRedisTemplate.opsForSet().add(
+                RedisKeyUtil.uidOauth(uid), OAUTH_ACCESS_MEMBER_PREFIX + accessToken);
+        // 补签的 access 同属该家族，供后续整族吊销时一并作废
+        addFamilyMember((String) tombstone.get("familyId"),
+                OAUTH_ACCESS_MEMBER_PREFIX + accessToken, accessTtl);
+        return buildTokenResponse(accessToken, nextRefreshToken, accessTtl, null);
+    }
+
+    /**
+     * 判定 refresh_token 被重放后作废整条令牌家族。
+     *
+     * <p>顺序与按应用撤销一致：台账先置吊销（“我的授权”列表立即收敛），再按家族索引
+     * 删除同族全部 access/refresh 并从 uid 反向索引摘除成员。这是安全响应而非用户请求的
+     * 清理动作，Redis 异常只告警，调用方最终仍收到统一的 90009。</p>
+     *
+     * @param clientId       已认证的客户端 ID
+     * @param tombstone      轮转墓碑字段
+     * @param elapsedSeconds 距本次轮转的秒数
+     */
+    private void revokeTokenFamily(String clientId, Map<String, Object> tombstone, long elapsedSeconds) {
+        String familyId = (String) tombstone.get("familyId");
+        Object uidObj = tombstone.get("uid");
+        Long uid = uidObj == null ? null : ((Number) uidObj).longValue();
+        LogUtil.warn(OAuthTokenServiceImpl.class,
+                "[OAuth] 检测到刷新令牌重放，作废整条令牌家族: clientId={}, uid={}, familyId={}, elapsedSeconds={}",
+                clientId, uid, familyId, elapsedSeconds);
+        try {
+            if (StringUtils.hasText(familyId)) {
+                oauthGrantMapper.markRevokedByFamily(familyId);
+            } else if (uid != null) {
+                // 历史数据缺少家族标识：退化为按用户+应用吊销，避免漏吊销
+                oauthGrantMapper.markRevokedByUidAndClient(uid, clientId);
+            }
+        } catch (Exception e) {
+            LogUtil.warn(OAuthTokenServiceImpl.class, "[OAuth] 更新重放家族的台账状态失败: familyId={}", familyId, e);
+        }
+        if (!StringUtils.hasText(familyId)) {
+            return;
+        }
+        try {
+            String familyKey = RedisKeyUtil.oauthFamily(familyId);
+            Set<String> members = stringRedisTemplate.opsForSet().members(familyKey);
+            if (members != null) {
+                for (String member : members) {
+                    String tokenKey = resolveTokenKeyByMember(member);
+                    if (tokenKey == null) {
+                        // 无法识别的成员（历史格式/脏数据）：跳过，不做删除以免误删他键
+                        continue;
+                    }
+                    stringRedisTemplate.delete(tokenKey);
+                    if (uid != null) {
+                        stringRedisTemplate.opsForSet().remove(RedisKeyUtil.uidOauth(uid), member);
+                    }
+                }
+            }
+            stringRedisTemplate.delete(familyKey);
+        } catch (Exception e) {
+            LogUtil.warn(OAuthTokenServiceImpl.class, "[OAuth] 清理重放家族的令牌失败: familyId={}", familyId, e);
+        }
     }
 
     /**
@@ -738,12 +937,17 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
 
         // 3. 无条件签发 refresh_token：固定凭证，有效期内可反复刷新，不受 grant_types 登记限制
         String refreshToken = OAuthUtil.generateToken();
+        // 开启轮转的客户端在签发时即确定家族标识，之后每次轮转都继承同一个家族
+        String familyId = isRefreshRotationEnabled(client) ? OAuthUtil.generateToken() : null;
         writeJson(RedisKeyUtil.oauthRefresh(refreshToken),
-                createRefreshRecord(client, uid, scope), refreshTtl);
+                createRefreshRecord(client, uid, scope, familyId), refreshTtl);
         stringRedisTemplate.opsForSet().add(
                 RedisKeyUtil.uidOauth(uid), OAUTH_REFRESH_MEMBER_PREFIX + refreshToken);
+        // 家族索引登记首发的 access 与 refresh，使重放判定后能整族吊销
+        addFamilyMember(familyId, OAUTH_REFRESH_MEMBER_PREFIX + refreshToken, refreshTtl);
+        addFamilyMember(familyId, OAUTH_ACCESS_MEMBER_PREFIX + accessToken, accessTtl);
         // 授权台账：持久化查询与审计，失败不阻断签发
-        recordGrant(client, uid, scope, refreshToken, refreshTtl);
+        recordGrant(client, uid, scope, refreshToken, refreshTtl, familyId);
 
         maybeCleanupExpiredGrantMembers(uid);
         LogUtil.debug(OAuthTokenServiceImpl.class, "[OAuth] 直连登录签发令牌: clientId={}, uid={}", clientId, uid);
@@ -772,10 +976,12 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         // 2. 生成令牌并先序列化记录文本，交由 Lua 原子完成「撤旧 + 写新 + 写映射」
         String accessToken = OAuthUtil.generateToken();
         String refreshToken = OAuthUtil.generateToken();
+        // 开启轮转的客户端在签发时即确定家族标识，之后每次轮转都继承同一个家族
+        String familyId = isRefreshRotationEnabled(client) ? OAuthUtil.generateToken() : null;
         OAuthTokenStore.MigrateIssueRequest request = new OAuthTokenStore.MigrateIssueRequest(
                 clientId, uid,
                 accessToken, writeJsonValue(createAccessRecord(client, uid, scope)), accessTtl,
-                refreshToken, writeJsonValue(createRefreshRecord(client, uid, scope)), refreshTtl);
+                refreshToken, writeJsonValue(createRefreshRecord(client, uid, scope, familyId)), refreshTtl);
         OAuthTokenStore.MigrateIssueResult result = oauthTokenStore.issueMigratedToken(request);
         if (!result.success()) {
             throw new BusinessException(ResultCode.SYSTEM_ERROR, "迁移令牌签发失败");
@@ -790,7 +996,10 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
                         "[OAuth] 更新被替换迁移凭证的台账状态失败: clientId={}, uid={}", clientId, uid, e);
             }
         }
-        recordGrant(client, uid, scope, refreshToken, refreshTtl);
+        recordGrant(client, uid, scope, refreshToken, refreshTtl, familyId);
+        // 迁移脚本不维护家族索引，这里补登记首发凭证，使轮转后仍能整族吊销
+        addFamilyMember(familyId, OAUTH_REFRESH_MEMBER_PREFIX + refreshToken, refreshTtl);
+        addFamilyMember(familyId, OAUTH_ACCESS_MEMBER_PREFIX + accessToken, accessTtl);
 
         maybeCleanupExpiredGrantMembers(uid);
         LogUtil.debug(OAuthTokenServiceImpl.class, "[OAuth] 迁移兑换签发令牌: clientId={}, uid={}", clientId, uid);
@@ -1332,15 +1541,17 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      * @param scope         授权范围
      * @param refreshToken  refresh_token 明文（只存摘要）
      * @param refreshTtl    有效期（秒）
+     * @param familyId      令牌家族标识；未开启轮转时为 null，不写入该列
      */
     private void recordGrant(OAuthClient client, Long uid, String scope,
-                             String refreshToken, long refreshTtl) {
+                             String refreshToken, long refreshTtl, String familyId) {
         try {
             OAuthGrant grant = new OAuthGrant();
             grant.setUid(uid);
             grant.setClientId(client.getId());
             grant.setScope(scope);
             grant.setTokenHash(sha256Hex(refreshToken));
+            grant.setFamilyId(familyId);
             LocalDateTime now = LocalDateTime.now();
             grant.setIssueTime(now);
             grant.setExpireTime(now.plusSeconds(refreshTtl));
@@ -1400,15 +1611,20 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
 
         // 2. refresh_token 按客户端登记能力决定是否签发（grant_types 参与实际判断，而非仅展示）
         String refreshToken = null;
+        // 开启轮转的客户端在签发时即确定家族标识，之后每次轮转都继承同一个家族
+        String familyId = isRefreshRotationEnabled(client) ? OAuthUtil.generateToken() : null;
         if (isGrantAllowed(client, OAuthGrantType.REFRESH_TOKEN)) {
             long refreshTtl = resolveRefreshTokenTtl(client);
             refreshToken = OAuthUtil.generateToken();
             writeJson(RedisKeyUtil.oauthRefresh(refreshToken),
-                    createRefreshRecord(client, uid, scope), refreshTtl);
+                    createRefreshRecord(client, uid, scope, familyId), refreshTtl);
             stringRedisTemplate.opsForSet().add(
                     RedisKeyUtil.uidOauth(uid), OAUTH_REFRESH_MEMBER_PREFIX + refreshToken);
+            // 家族索引登记首发的 access 与 refresh，使重放判定后能整族吊销
+            addFamilyMember(familyId, OAUTH_REFRESH_MEMBER_PREFIX + refreshToken, refreshTtl);
+            addFamilyMember(familyId, OAUTH_ACCESS_MEMBER_PREFIX + accessToken, accessTtl);
             // 授权台账：持久化查询与审计，失败不阻断签发
-            recordGrant(client, uid, scope, refreshToken, refreshTtl);
+            recordGrant(client, uid, scope, refreshToken, refreshTtl, familyId);
         }
 
         // 3. 低频触发反向索引清理，控制 Set 体积；失败不影响本次签发结果
@@ -1485,22 +1701,109 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     }
 
     /**
-     * 创建 refresh token 记录（固定凭证，不记录与派生 access 的父子关联）。
+     * 创建 refresh token 记录（不记录与派生 access 的父子关联）。
      *
      * <p>refresh 与 access 之间不维护引用关系，因此 refresh 刷新或吊销都不影响已签发的
-     * access，后者由自身 TTL 与反向索引惰性清理收敛。</p>
+     * access，后者由自身 TTL 与反向索引惰性清理收敛。开启轮转的客户端会写入家族标识，
+     * 使同一条轮转链上的凭证可通过家族索引被整体吊销。</p>
      *
-     * @param client 签发该令牌的客户端
-     * @param uid    用户 uid
-     * @param scope  授权范围
+     * @param client   签发该令牌的客户端
+     * @param uid      用户 uid
+     * @param scope    授权范围
+     * @param familyId 令牌家族标识（未开启轮转时为 null，不写入该字段）
      * @return 可直接序列化写入 Redis 的记录
      */
-    private Map<String, Object> createRefreshRecord(OAuthClient client, Long uid, String scope) {
+    private Map<String, Object> createRefreshRecord(OAuthClient client, Long uid, String scope, String familyId) {
         Map<String, Object> record = new HashMap<>();
         record.put("uid", uid);
         record.put("clientId", client.getId());
         record.put("scope", scope);
+        if (StringUtils.hasText(familyId)) {
+            record.put("familyId", familyId);
+        }
         return record;
+    }
+
+    /**
+     * 判断客户端是否开启 refresh_token 轮转
+     *
+     * @param client 客户端实体
+     * @return 是否开启
+     */
+    private boolean isRefreshRotationEnabled(OAuthClient client) {
+        return client.getRotateRefreshToken() != null && client.getRotateRefreshToken() == 1;
+    }
+
+    /**
+     * 解析 refresh 记录中的令牌家族标识，历史记录（本次改造前签发）没有该字段时现场生成
+     *
+     * @param rawRecord refresh 记录原始 JSON
+     * @return 令牌家族标识
+     */
+    private String resolveFamilyId(String rawRecord) {
+        Object familyId = readJsonMapValue(rawRecord).get("familyId");
+        if (familyId instanceof String value && StringUtils.hasText(value)) {
+            return value;
+        }
+        return OAuthUtil.generateToken();
+    }
+
+    /**
+     * 构造轮转墓碑内容：记录凭证归属与轮转时刻，供后续识别旧凭证被重放
+     *
+     * @param clientId 客户端 ID
+     * @param uid      用户 uid
+     * @param familyId 令牌家族标识
+     * @return 墓碑字段 Map
+     */
+    private Map<String, Object> createRotationTombstone(String clientId, Long uid, String familyId) {
+        Map<String, Object> tombstone = new HashMap<>();
+        tombstone.put("familyId", familyId);
+        tombstone.put("clientId", clientId);
+        tombstone.put("uid", uid);
+        // 秒级时间戳：宽限期判定只需秒级精度，且便于脚本内直接比较
+        tombstone.put("rotatedAt", System.currentTimeMillis() / 1000);
+        return tombstone;
+    }
+
+    /**
+     * 把令牌成员登记进令牌家族索引
+     *
+     * <p>家族索引整体 TTL 只在小于成员有效期时才被延长，保证家族不会先于成员过期而失去
+     * 整族吊销能力，也不会因为登记短期 access 而缩短已有的家族有效期。</p>
+     *
+     * @param familyId   令牌家族标识（为空表示未开启轮转，直接跳过）
+     * @param member     索引成员（access:{token} 或 refresh:{token}）
+     * @param ttlSeconds 该成员的有效期（秒）
+     */
+    private void addFamilyMember(String familyId, String member, long ttlSeconds) {
+        if (!StringUtils.hasText(familyId) || ttlSeconds <= 0) {
+            return;
+        }
+        String familyKey = RedisKeyUtil.oauthFamily(familyId);
+        stringRedisTemplate.opsForSet().add(familyKey, member);
+        Long remaining = stringRedisTemplate.getExpire(familyKey, TimeUnit.SECONDS);
+        if (remaining == null || remaining < ttlSeconds) {
+            stringRedisTemplate.expire(familyKey, ttlSeconds, TimeUnit.SECONDS);
+        }
+    }
+
+    /**
+     * 轮转后同步授权台账：把授权行的令牌摘要替换为新 refresh_token 的摘要并补写家族标识
+     *
+     * <p>授权行沿用同一条记录（授权时间与到期时间不变），因此刷新不会让「我的授权」列表
+     * 新增条目，也不会延长授权。台账更新失败不阻断刷新（Redis 已完成轮转），只记录告警。</p>
+     *
+     * @param oldRefreshToken 轮转前的 refresh_token 明文
+     * @param newRefreshToken 轮转后的 refresh_token 明文
+     * @param familyId        令牌家族标识
+     */
+    private void rotateGrantTokenHash(String oldRefreshToken, String newRefreshToken, String familyId) {
+        try {
+            oauthGrantMapper.rotateTokenHash(sha256Hex(oldRefreshToken), sha256Hex(newRefreshToken), familyId);
+        } catch (Exception e) {
+            LogUtil.warn(OAuthTokenServiceImpl.class, "[OAuth] 轮转同步授权台账失败: familyId={}", familyId, e);
+        }
     }
 
     /**

@@ -49,6 +49,9 @@ public class OAuthClientVO {
     /** 是否已由管理员开通直连认证能力（统一控制直连登录和直连注册）。 */
     private Boolean directAuthEnabled;
 
+    /** 是否开启 refresh_token 轮转（刷新换发新 refresh_token 并检测重放）。 */
+    private Boolean rotateRefreshToken;
+
     /** 创建时间 */
     private LocalDateTime createTime;
 
@@ -154,6 +157,14 @@ public class OAuthClientVO {
 
     public void setDirectAuthEnabled(Boolean directAuthEnabled) {
         this.directAuthEnabled = directAuthEnabled;
+    }
+
+    public Boolean getRotateRefreshToken() {
+        return rotateRefreshToken;
+    }
+
+    public void setRotateRefreshToken(Boolean rotateRefreshToken) {
+        this.rotateRefreshToken = rotateRefreshToken;
     }
 
     public LocalDateTime getCreateTime() {

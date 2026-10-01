@@ -26,6 +26,7 @@ public class RedisOAuthTokenStore implements OAuthTokenStore {
     private final StringRedisTemplate redisTemplate;
     private final DefaultRedisScript<Long> consumeAuthorizationCodeScript;
     private final DefaultRedisScript<Long> issueAccessFromRefreshScript;
+    private final DefaultRedisScript<Long> rotateRefreshScript;
     private final DefaultRedisScript<List> issueMigratedTokenScript;
 
     /**
@@ -36,6 +37,7 @@ public class RedisOAuthTokenStore implements OAuthTokenStore {
         this.redisTemplate = redisTemplate;
         this.consumeAuthorizationCodeScript = loadScript("scripts/oauth-code-consume.lua");
         this.issueAccessFromRefreshScript = loadScript("scripts/oauth-refresh-issue.lua");
+        this.rotateRefreshScript = loadScript("scripts/oauth-refresh-rotate.lua");
         this.issueMigratedTokenScript = loadMultiValueScript("scripts/oauth-migrate-issue.lua");
     }
 
@@ -77,6 +79,33 @@ public class RedisOAuthTokenStore implements OAuthTokenStore {
                 Long.toString(request.accessTtlSeconds()),
                 ACCESS_MEMBER_PREFIX + request.newAccessToken());
         return Long.valueOf(1L).equals(result);
+    }
+
+    @Override
+    public long rotateRefresh(RotateRefreshRequest request) {
+        List<String> keys = Arrays.asList(
+                RedisKeyUtil.oauthRefresh(request.oldRefreshToken()),
+                RedisKeyUtil.oauthAccess(request.newAccessToken()),
+                RedisKeyUtil.oauthRefresh(request.newRefreshToken()),
+                RedisKeyUtil.uidOauth(request.uid()),
+                RedisKeyUtil.oauthRefreshUsed(request.oldRefreshToken()),
+                RedisKeyUtil.oauthRefreshNext(request.oldRefreshToken()),
+                RedisKeyUtil.oauthFamily(request.familyId()));
+
+        Long result = redisTemplate.execute(rotateRefreshScript, keys,
+                request.expectedOldRefreshJson(),
+                request.newAccessJson(),
+                Long.toString(request.accessTtlSeconds()),
+                request.newRefreshJson(),
+                ACCESS_MEMBER_PREFIX + request.newAccessToken(),
+                REFRESH_MEMBER_PREFIX + request.newRefreshToken(),
+                REFRESH_MEMBER_PREFIX + request.oldRefreshToken(),
+                request.tombstoneJson(),
+                Long.toString(request.graceTtlSeconds()),
+                request.newRefreshToken(),
+                Long.toString(request.refreshTtlSeconds()));
+        // 脚本未返回结果（如连接异常后重试）按预校验失败处理，业务层统一报令牌无效
+        return result == null ? ROTATE_REJECTED : result;
     }
 
     @Override

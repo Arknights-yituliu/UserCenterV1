@@ -221,7 +221,7 @@ grant_type=refresh_token
 &refresh_token={REFRESH_TOKEN}
 ```
 
-成功响应格式与授权码换取令牌相同，仅返回新的 access token（refresh_token 未变、scope 未变，均不返回）：
+成功响应格式与授权码换取令牌相同。固定凭证模式下仅返回新的 access token（refresh_token 未变、scope 未变，均不返回）：
 
 ```json
 {
@@ -235,11 +235,35 @@ grant_type=refresh_token
 }
 ```
 
-refresh token 为固定凭证：
+refresh token 有两种模型，由客户端是否开启 `rotateRefreshToken` 决定：
+
+**固定凭证（默认，未开启轮转）**
 
 - 默认 90 天有效（从签发起算），有效期内可反复刷新，服务端不删除、不换发。
 - 每次刷新只签发新的 access token；本地无需更新 refresh token。
 - 刷新返回 `90009` 时表示 refresh token 已过期或被吊销，清除本地令牌并重新发起授权。
+
+**轮转（客户端开启 `rotateRefreshToken`）**
+
+- 每次刷新会**换发新的 refresh_token**，旧值立即失效。响应中会额外返回 `refresh_token` 字段：
+
+  ```json
+  {
+    "code": 200,
+    "msg": "操作成功",
+    "data": {
+      "access_token": "access_token_value_2",
+      "token_type": "Bearer",
+      "expires_in": 7200,
+      "refresh_token": "refresh_token_value_2"
+    }
+  }
+  ```
+
+- **只要响应中带 `refresh_token`，就必须用它替换本地保存的旧值**，否则下一次刷新会失败，需重新走授权流程。
+- 服务端有 60 秒宽限期：响应丢失后的重试、以及并发刷新中落败的一方，会在宽限期内拿到**同一份**新 refresh_token，不会因此被判定为异常。
+- 宽限期外再次使用已失效的旧 refresh_token，会被判定为凭证泄露，服务端将作废该次授权派生的全部令牌，客户端收到 `90009`，必须清除本地令牌并重新发起授权。
+- 轮转不延长授权总时长：新 refresh_token 继承旧凭证的剩余有效期。
 
 公共客户端刷新时同样不得提交 `client_secret`。
 

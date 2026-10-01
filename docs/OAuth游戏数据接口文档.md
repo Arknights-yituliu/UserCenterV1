@@ -42,7 +42,7 @@ OAuth Token 仍同时绑定用户与客户端，用于客户端认证和 scope �
 
 access_token 默认有效期 7200 秒。过期后再调用本文档接口会响应 `code=80001`。
 
-- 业务后端持有 refresh_token 的接入方：调用 `POST /oauth2/token`（`grant_type=refresh_token`，须提交 `client_secret`）换取新的 access_token，见《加密客户端 OAuth2 接入文档》第 7 节。refresh_token 是固定凭证，有效期内可反复刷新，本地无需替换。
+- 业务后端持有 refresh_token 的接入方：调用 `POST /oauth2/token`（`grant_type=refresh_token`，须提交 `client_secret`）换取新的 access_token，见《加密客户端 OAuth2 接入文档》第 7 节。默认 refresh_token 为固定凭证，有效期内可反复刷新，本地无需替换；若客户端开启了轮转（`rotateRefreshToken=1`），刷新响应会额外返回 `refresh_token`，此时必须替换本地保存的旧值。刷新失败统一返回 `90009`。
 - 刷新返回 `90009` 表示 refresh_token 已过期或被吊销，需清除本地令牌并重新发起授权。
 - 由 BackEndV3 代持 refresh_token 的前端：带自签 token 调用 BackEndV3 的 `/auth/token/refresh`，由服务端代刷并回带新的 access_token。
 
