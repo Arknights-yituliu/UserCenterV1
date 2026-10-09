@@ -909,10 +909,15 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
 
     /**
      * 使用已有 ucToken 或 refresh_token 直接签发指定有效期的 OAuth access_token。
+     *
+     * <p>可选传入 {@code scope} 做权限收敛：新令牌只能携带「凭证已有范围」的子集，
+     * 超出即拒绝。该约束保证本接口无法被用于提权，同时支持最小权限场景
+     * （例如用宽范围 refresh_token 换一个只含 user.read 的短时令牌）。</p>
      */
     @Override
     public OAuthTokenVO issueAccessTokenFromCredential(String ucToken, String refreshToken,
-                                                       String requestedClientId, Long expiresInSeconds) {
+                                                       String requestedClientId, Long expiresInSeconds,
+                                                       String requestedScope) {
         if (expiresInSeconds == null || expiresInSeconds <= 0) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "expires_in 必须为大于 0 的秒数");
         }
@@ -963,6 +968,11 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
                     ? session.getClientId() : requestedClientId;
             client = requireEnabledClient(sessionClientId);
             scope = resolveGrantScope(client, null, uid);
+        }
+
+        // 请求收敛时替换为子集：只允许在凭证已有范围内缩小，超出即拒绝（防提权）
+        if (StringUtils.hasText(requestedScope)) {
+            scope = narrowScope(scope, requestedScope);
         }
 
         String accessToken = OAuthUtil.generateToken();
@@ -1503,6 +1513,35 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
             }
         }
         return scopes;
+    }
+
+    /**
+     * 权限收敛：把请求范围限制在凭证已有范围之内（只减不增）。
+     *
+     * <p>用于 {@code /oauth2/token/custom} 的最小权限场景：调用方可指定一个子集换取更小权限的
+     * 短时 access_token，但不能借此扩大权限。凭证范围为元范围 {@code all} 时视为覆盖全部已知权限。</p>
+     *
+     * @param heldScope      凭证已有权限串（英文逗号分隔，可能为元范围 all）
+     * @param requestedScope 请求收敛到的权限串
+     * @return 收敛后的权限串（保持请求顺序）
+     */
+    private String narrowScope(String heldScope, String requestedScope) {
+        Set<String> requested = splitScopes(requestedScope);
+        if (requested.isEmpty()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "scope 不能为空");
+        }
+        // 逐项校验：必须是系统已知标识，避免任意字符串被写进令牌
+        for (String code : requested) {
+            if (OAuthScope.findByCode(code).isEmpty()) {
+                throw new BusinessException(ResultCode.OAUTH_SCOPE_INVALID, "存在系统不支持的授权范围: " + code);
+            }
+        }
+        // 凭证含元范围 all 时覆盖全部权限，任意已知范围都是其子集；否则要求严格子集
+        Set<String> held = splitScopes(heldScope);
+        if (!held.contains(OAuthScope.ALL.getCode()) && !held.containsAll(requested)) {
+            throw new BusinessException(ResultCode.OAUTH_SCOPE_INVALID, "scope 不能超出凭证已有权限");
+        }
+        return String.join(",", requested);
     }
 
     /**

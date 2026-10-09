@@ -225,6 +225,9 @@ public class OAuthController {
 
     /**
      * 使用已有 ucToken 或 refresh_token 直接签发指定有效期的 OAuth access_token。
+     *
+     * <p>可选传 scope 做权限收敛：只能指定「凭证已有权限」的子集换取更小权限的短时令牌
+     * （最小权限实践），超出凭证范围会被拒绝，本接口不能用于扩权。</p>
      */
     @Operation(summary = "使用 ucToken 或 refresh_token 直接签发 access_token")
     @PostMapping({"/token/custom", "/token/from-credential"})
@@ -235,12 +238,13 @@ public class OAuthController {
             @RequestParam(value = "refreshToken", required = false) String refreshTokenCamel,
             @RequestParam(value = "client_id", required = false) String clientId,
             @RequestParam(value = "expires_in", required = false) Long expiresIn,
-            @RequestParam(value = "expiresIn", required = false) Long expiresInCamel) {
+            @RequestParam(value = "expiresIn", required = false) Long expiresInCamel,
+            @RequestParam(value = "scope", required = false) String scope) {
         String resolvedUcToken = StringUtils.hasText(ucToken) ? ucToken : ucTokenCamel;
         String resolvedRefreshToken = StringUtils.hasText(refreshToken) ? refreshToken : refreshTokenCamel;
         Long resolvedExpiresIn = expiresIn != null ? expiresIn : expiresInCamel;
         OAuthTokenVO vo = oauthTokenService.issueAccessTokenFromCredential(
-                resolvedUcToken, resolvedRefreshToken, clientId, resolvedExpiresIn);
+                resolvedUcToken, resolvedRefreshToken, clientId, resolvedExpiresIn, scope);
         LogUtil.debug(OAuthController.class, "[OAuth] 凭证直接签发 access_token: expiresIn={}s", vo.getExpiresIn());
         return Result.success(vo);
     }

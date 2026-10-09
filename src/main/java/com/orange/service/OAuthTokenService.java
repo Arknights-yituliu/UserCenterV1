@@ -140,14 +140,18 @@ public interface OAuthTokenService {
     /**
      * 使用已有的用户会话 ucToken 或 refresh_token 直接签发 OAuth access_token。
      *
+     * <p>可选携带 scope 做「只减不增」的权限收敛（最小权限）：请求集合必须落在凭证已有范围之内，
+     * 用于为低风险调用换发更小权限的短时令牌；超出凭证范围会被拒绝，本接口不能用于扩权。</p>
+     *
      * @param ucToken          已存在的用户会话令牌（二选一）
      * @param refreshToken     已存在的 OAuth refresh_token（二选一）
      * @param clientId         ucToken 未携带来源客户端时可显式指定的客户端 ID
      * @param expiresInSeconds access_token 有效期（秒）
+     * @param scope            期望收敛到的权限范围（英文逗号分隔，可空表示沿用凭证原范围）
      * @return 新签发的 access_token
      */
     OAuthTokenVO issueAccessTokenFromCredential(String ucToken, String refreshToken,
-                                                String clientId, Long expiresInSeconds);
+                                                String clientId, Long expiresInSeconds, String scope);
 
     /**
      * 直连登录兑换令牌：为已完成客户端认证与直连权限校验的用户无条件签发
