@@ -224,6 +224,27 @@ public class OAuthController {
     }
 
     /**
+     * 使用已有 ucToken 或 refresh_token 直接签发指定有效期的 OAuth access_token。
+     */
+    @Operation(summary = "使用 ucToken 或 refresh_token 直接签发 access_token")
+    @PostMapping({"/token/custom", "/token/from-credential"})
+    public Result<OAuthTokenVO> customToken(
+            @RequestParam(value = "uc_token", required = false) String ucToken,
+            @RequestParam(value = "ucToken", required = false) String ucTokenCamel,
+            @RequestParam(value = "refresh_token", required = false) String refreshToken,
+            @RequestParam(value = "refreshToken", required = false) String refreshTokenCamel,
+            @RequestParam(value = "client_id", required = false) String clientId,
+            @RequestParam(value = "expires_in", required = false) Long expiresIn,
+            @RequestParam(value = "expiresIn", required = false) Long expiresInCamel) {
+        String resolvedUcToken = StringUtils.hasText(ucToken) ? ucToken : ucTokenCamel;
+        String resolvedRefreshToken = StringUtils.hasText(refreshToken) ? refreshToken : refreshTokenCamel;
+        Long resolvedExpiresIn = expiresIn != null ? expiresIn : expiresInCamel;
+        OAuthTokenVO vo = oauthTokenService.issueAccessTokenFromCredential(
+                resolvedUcToken, resolvedRefreshToken, clientId, resolvedExpiresIn);
+        LogUtil.debug(OAuthController.class, "[OAuth] 凭证直接签发 access_token: expiresIn={}s", vo.getExpiresIn());
+        return Result.success(vo);
+    }
+    /**
      * 吊销令牌（RFC 7009）：客户端携带自己名下的 access_token / refresh_token 调用，
      * 使其立即失效（自动识别令牌类型）。吊销 refresh_token 只使其本身失效，此前派生的
      * access_token 按各自有效期自然过期；令牌不存在或已失效同样返回成功（幂等，不泄露令牌是否有效）
@@ -270,3 +291,4 @@ public class OAuthController {
         return token.length() <= 8 ? token : token.substring(0, 8) + "***";
     }
 }
+

@@ -908,6 +908,75 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     }
 
     /**
+     * 使用已有 ucToken 或 refresh_token 直接签发指定有效期的 OAuth access_token。
+     */
+    @Override
+    public OAuthTokenVO issueAccessTokenFromCredential(String ucToken, String refreshToken,
+                                                       String requestedClientId, Long expiresInSeconds) {
+        if (expiresInSeconds == null || expiresInSeconds <= 0) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "expires_in 必须为大于 0 的秒数");
+        }
+        boolean hasUcToken = StringUtils.hasText(ucToken);
+        boolean hasRefreshToken = StringUtils.hasText(refreshToken);
+        if (hasUcToken == hasRefreshToken) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "uc_token 与 refresh_token 必须二选一");
+        }
+
+        OAuthClient client;
+        Long uid;
+        String scope;
+        String familyId = null;
+        if (hasRefreshToken) {
+            String rawRecord = oauthTokenStore.readRefreshToken(refreshToken.trim());
+            if (rawRecord == null) {
+                throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID);
+            }
+            Map<String, Object> record = readJsonMapValue(rawRecord);
+            uid = numberToLong(record.get("uid"));
+            String tokenClientId = stringValue(record.get("clientId"));
+            if (uid == null || !StringUtils.hasText(tokenClientId)) {
+                throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID);
+            }
+            if (StringUtils.hasText(requestedClientId)
+                    && !Objects.equals(requestedClientId.trim(), tokenClientId)) {
+                throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID, "刷新令牌与客户端不匹配");
+            }
+            client = requireEnabledClient(tokenClientId);
+            scope = stringValue(record.get("scope"));
+            familyId = stringValue(record.get("familyId"));
+        } else {
+            String sessionJson = stringRedisTemplate.opsForValue().get(RedisKeyUtil.token(ucToken.trim()));
+            if (sessionJson == null) {
+                throw new BusinessException(ResultCode.NOT_LOGIN);
+            }
+            SessionInfo session;
+            try {
+                session = objectMapper.readValue(sessionJson, SessionInfo.class);
+            } catch (IOException e) {
+                throw new BusinessException(ResultCode.NOT_LOGIN);
+            }
+            uid = session == null ? null : session.getUid();
+            if (uid == null) {
+                throw new BusinessException(ResultCode.NOT_LOGIN);
+            }
+            String sessionClientId = StringUtils.hasText(session.getClientId())
+                    ? session.getClientId() : requestedClientId;
+            client = requireEnabledClient(sessionClientId);
+            scope = resolveGrantScope(client, null, uid);
+        }
+
+        String accessToken = OAuthUtil.generateToken();
+        writeJson(RedisKeyUtil.oauthAccess(accessToken), createAccessRecord(client, uid, scope), expiresInSeconds);
+        stringRedisTemplate.opsForSet().add(
+                RedisKeyUtil.uidOauth(uid), OAUTH_ACCESS_MEMBER_PREFIX + accessToken);
+        addFamilyMember(familyId, OAUTH_ACCESS_MEMBER_PREFIX + accessToken, expiresInSeconds);
+        maybeCleanupExpiredGrantMembers(uid);
+        LogUtil.debug(OAuthTokenServiceImpl.class,
+                "[OAuth] 凭证直接签发 access_token: clientId={}, uid={}, expiresIn={}s",
+                client.getId(), uid, expiresInSeconds);
+        return buildTokenResponse(accessToken, null, expiresInSeconds, scope);
+    }
+    /**
      * 直连登录兑换令牌：无条件签发 access_token 与 refresh_token。
      *
      * <p>与授权码流程的差异见接口注释。这里刻意不调用 {@code isGrantAllowed}：
@@ -1692,6 +1761,15 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      * @param scope  授权范围
      * @return 可直接序列化写入 Redis 的记录
      */
+    /** 将 Redis JSON 中的数字字段安全转换为 uid。 */
+    private Long numberToLong(Object value) {
+        return value instanceof Number number ? number.longValue() : null;
+    }
+
+    /** 将 Redis JSON 中的文本字段安全转换为字符串。 */
+    private String stringValue(Object value) {
+        return value instanceof String text ? text : null;
+    }
     private Map<String, Object> createAccessRecord(OAuthClient client, Long uid, String scope) {
         Map<String, Object> record = new HashMap<>();
         record.put("uid", uid);
@@ -1713,6 +1791,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      * @param familyId 令牌家族标识（未开启轮转时为 null，不写入该字段）
      * @return 可直接序列化写入 Redis 的记录
      */
+
     private Map<String, Object> createRefreshRecord(OAuthClient client, Long uid, String scope, String familyId) {
         Map<String, Object> record = new HashMap<>();
         record.put("uid", uid);
@@ -2103,3 +2182,6 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         }
     }
 }
+
+
+
