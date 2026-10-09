@@ -47,15 +47,7 @@ POST /oauth2/token/from-credential
 
 `Content-Type: application/x-www-form-urlencoded`。
 
-参数同时接受下划线与驼峰两种命名，取值时**下划线优先**（非空白则采用，否则回退驼峰）：
-
-| 下划线 | 驼峰 |
-| --- | --- |
-| `uc_token` | `ucToken` |
-| `refresh_token` | `refreshToken` |
-| `expires_in` | `expiresIn` |
-
-`client_id` 与 `scope` 只有下划线形式。
+参数仅接受**下划线命名**（与同域 `/oauth2/token`、`/oauth2/authorize` 等端点一致）：`uc_token`、`refresh_token`、`client_id`、`expires_in`、`scope`、`name`。
 
 ### 2.3 响应格式
 
@@ -70,11 +62,13 @@ POST /oauth2/token/from-credential
 | `client_id` | 条件必填 | 目标客户端 ID。`uc_token` 未携带来源客户端时必须传；提交 `refresh_token` 时可不传，传了则须与令牌归属一致 |
 | `expires_in` | 是 | 期望的 `access_token` 有效期（秒），必须为大于 0 的整数 |
 | `scope` | 否 | 期望收敛到的权限范围，英文逗号分隔。省略表示沿用凭证原有范围 |
+| `name` | 是 | 本次签发的名称，用户用于在「我的自定义令牌」中区分用途；去空白后非空且不超过 50 字符 |
 
 约束：
 
 - `uc_token` 与 `refresh_token` **必须且只能提供一个**，同时提供或都不提供均报错。
 - `expires_in` **不受客户端配置的 TTL 限制**，由调用方自行保证合理（建议贴近实际调用窗口，不宜过长）。
+- `name` 为**必填**：每次调用成功都会在 `oauth_custom_token` 表落一条记录（见第 5.4 节），供用户回看。
 
 ## 4. 响应
 
@@ -120,6 +114,23 @@ POST /oauth2/token/from-credential
 - **不消费、不轮转凭证**：`refresh_token` 与 `uc_token` 在本调用后依然有效，可重复换取。
 - **不写 `oauth_user_scope`**：本端点只做「换发更小范围的令牌」，不修改用户的授权记录。
 
+### 5.4 签发记录落库（`oauth_custom_token`）
+
+签发成功后，按请求的 `name` 在 `oauth_custom_token` 表落一条记录：
+
+| 列 | 内容 |
+| --- | --- |
+| `uid` | 签发用户 |
+| `client_id` | 目标客户端 ID |
+| `name` | 请求方填写的名称（≤50 字符） |
+| `token` | 本次签发的 `access_token` **明文** |
+| `scope` | 本次令牌实际携带的权限范围 |
+| `expires_in` / `expire_time` | 本次有效期（秒）与到期时间 |
+| `create_time` / `update_time` | 记录创建/更新时间 |
+
+- 该表是**查询投影**，令牌的权威仍在 Redis（TTL 由 Redis 控制）；写库失败只记录告警，**不阻断签发**。
+- 记录通过用户侧接口 [第 10 节](#10-查询我的自定义令牌) 回看，**包含已过期记录**（过期与否由返回的剩余秒数体现，不依赖定时任务）。
+
 ## 6. scope 收敛语义（最小权限）
 
 `scope` 只能**缩小**，不能扩大：
@@ -144,7 +155,7 @@ POST /oauth2/token/from-credential
 
 | HTTP | code | 含义 | 处理建议 |
 | --- | --- | --- | --- |
-| 200 | `10001` | 参数错误：`expires_in` 非正、凭证未二选一、`scope` 为空串 | 修正请求参数 |
+| 200 | `10001` | 参数错误：`expires_in` 非正、凭证未二选一、`scope` 为空串、`name` 为空或超过 50 字符 | 修正请求参数 |
 | 200 | `40001` | 系统繁忙（未处理异常） | 稍后重试并联系管理员 |
 | 200 | `80001` | 未登录或登录已失效（`uc_token` 无效） | 引导用户重新登录后重试 |
 | 200 | `90001` | 客户端不存在或已停用 | 检查 `client_id`，停止调用并联系管理员 |
@@ -159,6 +170,7 @@ POST /oauth2/token/from-credential
 3. **`expires_in` 由调用方决定**，务必按最小必要原则设置；本端点不会替调用方收敛过长有效期。
 4. **不要把 `scope` 当作提权手段**：它在设计上只能下降。若业务确实需要为用户增加授权，应走用户本人的授权流程（确认页 `POST /oauth2/consent` 或用户侧接口 `POST /user/oauth/grants/scopes/grant`），这两处有明确的用户意图确认。
 5. **日志脱敏**：凭证、`access_token` 明文不得写入日志、监控或错误上报。
+6. **`access_token` 明文落库**：按需求本端点签发的 `access_token` 会以明文写入 `oauth_custom_token` 表，供用户在「我的自定义令牌」中复制复用。该表因此成为敏感数据源：需限制数据库访问权限、纳入备份加密与审计；如需下线该能力，应把 `token` 列加密存储或改为仅存摘要（届时用户将无法回看令牌原文）。
 
 ## 9. 调用示例
 
@@ -171,6 +183,7 @@ Content-Type: application/x-www-form-urlencoded
 uc_token={UC_SESSION_TOKEN}
 &client_id={CLIENT_ID}
 &expires_in=600
+&name=dashboard-readonly
 ```
 
 ### 9.2 用会话令牌换取（收敛到只读）
@@ -183,6 +196,7 @@ uc_token={UC_SESSION_TOKEN}
 &client_id={CLIENT_ID}
 &expires_in=600
 &scope=user.read
+&name=dashboard-readonly
 ```
 
 ### 9.3 用刷新令牌换取短时令牌
@@ -194,6 +208,55 @@ Content-Type: application/x-www-form-urlencoded
 refresh_token={REFRESH_TOKEN}
 &expires_in=300
 &scope=config.read
+&name=cron-config-sync
 ```
 
 上述请求成功后返回新的 `access_token`，原 `refresh_token` 继续有效。
+
+## 10. 查询我的自定义令牌
+
+查看当前用户在**本端点**签发的全部自定义有效期令牌（**含已过期记录**），供「我的自定义令牌」页面展示。
+
+```http
+GET /user/oauth/custom-tokens
+```
+
+- 认证：走用户登录态（`/user/**` 由 `UserAuthInterceptor` 保护），从会话取 `uid`，**无需传参**；非本人数据不返回。
+- 排序：按签发时间 `create_time` 倒序。
+- 过期标注：每条记录返回剩余秒数 `expiresInSeconds`（`TIMESTAMPDIFF(SECOND, NOW(), expire_time)`），**≤0 即已过期**，前端据此展示状态；服务端不做过滤，也没有清理定时任务。
+
+响应示例：
+
+```json
+{
+  "code": 200,
+  "msg": "操作成功",
+  "data": [
+    {
+      "id": 1001,
+      "clientId": "back-end-v3",
+      "clientName": "业务后台",
+      "name": "dashboard-readonly",
+      "token": "access_token_value",
+      "scope": "user.read",
+      "expiresIn": 600,
+      "expireTime": "2026-10-09T10:30:00",
+      "createdAt": "2026-10-09T10:20:00",
+      "expiresInSeconds": 420
+    }
+  ]
+}
+```
+
+| 字段 | 说明 |
+| --- | --- |
+| `id` | 记录主键 |
+| `clientId` | 目标客户端 ID |
+| `clientName` | 应用名称；应用被删除/停用时为空 |
+| `name` | 签发时填写的名称 |
+| `token` | `access_token` **明文**（安全说明见第 8 节第 6 条） |
+| `scope` | 本次令牌携带的权限范围 |
+| `expiresIn` | 签发时指定的有效期（秒） |
+| `expireTime` | 到期时间 |
+| `createdAt` | 签发时间 |
+| `expiresInSeconds` | 剩余有效期（秒），**≤0 即已过期** |

@@ -326,3 +326,28 @@ CREATE TABLE `oauth_user_scope` (
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '用户自定义OAuth授权范围，一行一个用户与应用组合';
 
+-- -------------------------------------------------------------
+-- 16. 用户自定义有效期的 access_token 签发记录表
+--
+-- 与 oauth_grant（refresh_token 台账，只存摘要）不同，本表记录
+-- POST /oauth2/token/custom 现场签发的短时 access_token，供用户在
+-- 「我的自定义令牌」页面查看；按需求 token 明文保存，便于用户复制复用。
+-- 过期状态在查询时按 expire_time 计算，不依赖定时任务。
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `oauth_custom_token`;
+CREATE TABLE `oauth_custom_token` (
+    `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `uid`         BIGINT       NOT NULL COMMENT '签发用户 uid',
+    `client_id`   VARCHAR(128) NOT NULL COMMENT '目标 OAuth 客户端 ID',
+    `name`        VARCHAR(50)  NOT NULL COMMENT '用户为本次签发起的名称',
+    `token`       VARCHAR(128) NOT NULL COMMENT 'access_token 明文',
+    `scope`       VARCHAR(256) NOT NULL COMMENT '本次令牌携带的权限范围（英文逗号分隔）',
+    `expires_in`  BIGINT       NOT NULL COMMENT '签发时指定的有效期（秒）',
+    `expire_time` DATETIME     NOT NULL COMMENT '到期时间',
+    `create_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_oauth_custom_token_uid` (`uid`, `create_time`) COMMENT '按用户查询其签发的自定义令牌并按签发时间倒序'
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '用户自定义有效期的access_token签发记录';
+

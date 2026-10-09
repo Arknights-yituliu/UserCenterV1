@@ -12,6 +12,7 @@ import com.orange.entity.dto.user.UserScopeRequest;
 import com.orange.entity.vo.SessionVO;
 import com.orange.entity.vo.UserInfoVO;
 import com.orange.entity.vo.oauth.OAuthClientGrantGroupVO;
+import com.orange.entity.vo.oauth.OAuthCustomTokenVO;
 import com.orange.entity.vo.oauth.OAuthUserScopeVO;
 import com.orange.service.OAuthTokenService;
 import com.orange.service.UserService;
@@ -150,6 +151,20 @@ public class UserController {
     @GetMapping("/oauth/grants")
     public Result<List<OAuthClientGrantGroupVO>> listRefreshTokens() {
         return Result.success(oauthTokenService.listUserRefreshTokens(UserContext.requireUid()));
+    }
+
+    /**
+     * 查看我生成的自定义有效期 access_token 列表（含已过期记录）
+     *
+     * <p>对应「直签令牌」接口（POST /oauth2/token/custom）签发的令牌；返回 token 明文，
+     * 过期与否由 {@code expiresInSeconds}（剩余秒数，≤0 即已过期）体现，不依赖定时任务。</p>
+     *
+     * @return 自定义令牌列表，按签发时间倒序
+     */
+    @Operation(summary = "查看我的自定义有效期令牌列表")
+    @GetMapping("/oauth/custom-tokens")
+    public Result<List<OAuthCustomTokenVO>> listCustomTokens() {
+        return Result.success(oauthTokenService.listUserCustomTokens(UserContext.requireUid()));
     }
 
     /**

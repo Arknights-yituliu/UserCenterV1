@@ -2,6 +2,7 @@ package com.orange.service;
 
 import com.orange.entity.vo.oauth.ConsentInfoVO;
 import com.orange.entity.vo.oauth.LoginTicketVO;
+import com.orange.entity.vo.oauth.OAuthCustomTokenVO;
 import com.orange.entity.vo.oauth.OAuthTokenVO;
 import com.orange.entity.vo.oauth.OAuthUserScopeVO;
 import com.orange.entity.vo.oauth.OAuthClientGrantGroupVO;
@@ -143,15 +144,30 @@ public interface OAuthTokenService {
      * <p>可选携带 scope 做「只减不增」的权限收敛（最小权限）：请求集合必须落在凭证已有范围之内，
      * 用于为低风险调用换发更小权限的短时令牌；超出凭证范围会被拒绝，本接口不能用于扩权。</p>
      *
+     * <p>签发成功后按 name 落一条自定义令牌记录（oauth_custom_token），供用户在自己的
+     * 「自定义令牌」列表中查看；因此 name 为必填。</p>
+     *
      * @param ucToken          已存在的用户会话令牌（二选一）
      * @param refreshToken     已存在的 OAuth refresh_token（二选一）
      * @param clientId         ucToken 未携带来源客户端时可显式指定的客户端 ID
      * @param expiresInSeconds access_token 有效期（秒）
      * @param scope            期望收敛到的权限范围（英文逗号分隔，可空表示沿用凭证原范围）
+     * @param name             本次签发的名称（必填，不超过 50 字符）
      * @return 新签发的 access_token
      */
     OAuthTokenVO issueAccessTokenFromCredential(String ucToken, String refreshToken,
-                                                String clientId, Long expiresInSeconds, String scope);
+                                                String clientId, Long expiresInSeconds, String scope, String name);
+
+    /**
+     * 查询当前用户签发的全部自定义有效期 access_token（用户自助，含已过期记录）
+     *
+     * <p>数据来自 oauth_custom_token 表，按签发时间倒序；过期与否由返回的
+     * {@code expiresInSeconds}（剩余秒数，≤0 即已过期）体现，不依赖定时任务清理。</p>
+     *
+     * @param uid 用户 uid
+     * @return 自定义令牌列表（含应用名称、权限范围与剩余有效期）
+     */
+    List<OAuthCustomTokenVO> listUserCustomTokens(Long uid);
 
     /**
      * 直连登录兑换令牌：为已完成客户端认证与直连权限校验的用户无条件签发

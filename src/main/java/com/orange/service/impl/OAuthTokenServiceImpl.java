@@ -13,11 +13,13 @@ import com.orange.common.util.RedisKeyUtil;
 import com.orange.common.util.RequestUtil;
 import com.orange.entity.dto.SessionInfo;
 import com.orange.entity.po.OAuthClient;
+import com.orange.entity.po.OAuthCustomToken;
 import com.orange.entity.po.OAuthGrant;
 import com.orange.entity.po.OAuthUserScope;
 import com.orange.entity.po.UserInfo;
 import com.orange.entity.vo.oauth.ConsentInfoVO;
 import com.orange.entity.vo.oauth.LoginTicketVO;
+import com.orange.entity.vo.oauth.OAuthCustomTokenVO;
 import com.orange.entity.vo.oauth.OAuthTokenVO;
 import com.orange.entity.vo.oauth.OAuthClientGrantGroupVO;
 import com.orange.entity.vo.oauth.OAuthGrantItemVO;
@@ -26,6 +28,7 @@ import com.orange.entity.vo.oauth.RefreshGrantVO;
 import com.orange.entity.vo.oauth.ScopeItemVO;
 import com.orange.entity.vo.oauth.UserInfoVO;
 import com.orange.mapper.OAuthClientMapper;
+import com.orange.mapper.OAuthCustomTokenMapper;
 import com.orange.mapper.OAuthGrantMapper;
 import com.orange.mapper.OAuthUserScopeMapper;
 import com.orange.mapper.UserInfoMapper;
@@ -101,6 +104,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     private final OAuthClientMapper oauthClientMapper;
     private final OAuthGrantMapper oauthGrantMapper;
     private final OAuthUserScopeMapper oauthUserScopeMapper;
+    private final OAuthCustomTokenMapper oauthCustomTokenMapper;
     private final UserInfoMapper userInfoMapper;
     private final StringRedisTemplate stringRedisTemplate;
     private final ObjectMapper objectMapper;
@@ -145,6 +149,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      * @param oauthClientMapper    OAuth 客户端 Mapper
      * @param oauthGrantMapper     授权台账 Mapper
      * @param oauthUserScopeMapper 用户自定义授权范围 Mapper
+     * @param oauthCustomTokenMapper 自定义有效期令牌记录 Mapper
      * @param userInfoMapper       用户表 Mapper（userinfo 组装用户资料）
      * @param stringRedisTemplate  Redis 客户端
      * @param objectMapper         JSON 序列化器
@@ -152,12 +157,14 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      */
     public OAuthTokenServiceImpl(OAuthClientMapper oauthClientMapper, OAuthGrantMapper oauthGrantMapper,
                                  OAuthUserScopeMapper oauthUserScopeMapper,
+                                 OAuthCustomTokenMapper oauthCustomTokenMapper,
                                  UserInfoMapper userInfoMapper,
                                  StringRedisTemplate stringRedisTemplate, ObjectMapper objectMapper,
                                  OAuthTokenStore oauthTokenStore) {
         this.oauthClientMapper = oauthClientMapper;
         this.oauthGrantMapper = oauthGrantMapper;
         this.oauthUserScopeMapper = oauthUserScopeMapper;
+        this.oauthCustomTokenMapper = oauthCustomTokenMapper;
         this.userInfoMapper = userInfoMapper;
         this.stringRedisTemplate = stringRedisTemplate;
         this.objectMapper = objectMapper;
@@ -917,9 +924,16 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     @Override
     public OAuthTokenVO issueAccessTokenFromCredential(String ucToken, String refreshToken,
                                                        String requestedClientId, Long expiresInSeconds,
-                                                       String requestedScope) {
+                                                       String requestedScope, String name) {
         if (expiresInSeconds == null || expiresInSeconds <= 0) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "expires_in 必须为大于 0 的秒数");
+        }
+        String trimmedName = name == null ? null : name.trim();
+        if (!StringUtils.hasText(trimmedName)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "name 不能为空");
+        }
+        if (trimmedName.length() > 50) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "name 长度不能超过 50");
         }
         boolean hasUcToken = StringUtils.hasText(ucToken);
         boolean hasRefreshToken = StringUtils.hasText(refreshToken);
@@ -981,10 +995,55 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
                 RedisKeyUtil.uidOauth(uid), OAUTH_ACCESS_MEMBER_PREFIX + accessToken);
         addFamilyMember(familyId, OAUTH_ACCESS_MEMBER_PREFIX + accessToken, expiresInSeconds);
         maybeCleanupExpiredGrantMembers(uid);
+        // 落库自定义令牌记录：供用户在「我的自定义令牌」列表回看，失败不阻断签发
+        recordCustomToken(uid, client, accessToken, scope, expiresInSeconds, trimmedName);
         LogUtil.debug(OAuthTokenServiceImpl.class,
                 "[OAuth] 凭证直接签发 access_token: clientId={}, uid={}, expiresIn={}s",
                 client.getId(), uid, expiresInSeconds);
         return buildTokenResponse(accessToken, null, expiresInSeconds, scope);
+    }
+
+    /**
+     * 记录一条用户自定义有效期 access_token 到 oauth_custom_token 表
+     *
+     * <p>令牌本身仍以 Redis 为权威（TTL 由 Redis 控制）；本表只是查询投影，
+     * 写入失败不阻断签发，只记录告警，避免数据库故障拖垮核心令牌流程。</p>
+     *
+     * @param uid       签发用户 uid
+     * @param client    目标客户端
+     * @param token     access_token 明文
+     * @param scope     本次令牌携带的权限范围
+     * @param ttlSeconds 有效期（秒）
+     * @param name      用户为本次签发起的名称
+     */
+    private void recordCustomToken(Long uid, OAuthClient client, String token, String scope,
+                                   long ttlSeconds, String name) {
+        try {
+            OAuthCustomToken record = new OAuthCustomToken();
+            record.setUid(uid);
+            record.setClientId(client.getId());
+            record.setName(name);
+            record.setToken(token);
+            record.setScope(scope);
+            record.setExpiresIn(ttlSeconds);
+            record.setExpireTime(LocalDateTime.now().plusSeconds(ttlSeconds));
+            oauthCustomTokenMapper.insert(record);
+        } catch (Exception e) {
+            LogUtil.warn(OAuthTokenServiceImpl.class, "[OAuth] 写入自定义令牌记录失败: uid={}, clientId={}",
+                    uid, client.getId(), e);
+        }
+    }
+
+    /**
+     * 查询当前用户签发的全部自定义有效期 access_token（含已过期记录）
+     *
+     * @param uid 用户 uid
+     * @return 自定义令牌列表，按签发时间倒序
+     */
+    @Override
+    public List<OAuthCustomTokenVO> listUserCustomTokens(Long uid) {
+        List<OAuthCustomTokenVO> tokens = oauthCustomTokenMapper.selectByUid(uid);
+        return tokens == null ? Collections.emptyList() : tokens;
     }
     /**
      * 直连登录兑换令牌：无条件签发 access_token 与 refresh_token。
