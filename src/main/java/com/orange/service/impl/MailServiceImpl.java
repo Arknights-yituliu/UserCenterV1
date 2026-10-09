@@ -31,24 +31,24 @@ import java.util.concurrent.TimeUnit;
 /**
  * 多渠道邮件发送服务实现
  *
- * <p>渠道降级策略（基于每日累计发送量，计数存 Redis，参考 BackEndV3）：</p>
+ * <p>渠道策略（基于每日累计发送量，计数存 Redis）：</p>
  * <ol>
- *     <li>每日 500 封以内：腾讯云 SES 发送（未配置则跳过）</li>
- *     <li>超过 500 封：降级为第一个 163 邮箱（mail-163-1，配置存 smtp_config 表）</li>
- *     <li>超过 800 封：转为第二个 163 邮箱（mail-163-2）</li>
+ *     <li>每日 300 封以内：第一个 163 邮箱（mail-163-1，配置存 smtp_config 表）</li>
+ *     <li>超过 300 封：转为第二个 163 邮箱（mail-163-2）</li>
+ *     <li>超过 600 封：腾讯云 SES 发送</li>
  * </ol>
- * <p>SES 发送失败时自动降级到 163 渠道，保证可用性。</p>
+ * <p>腾讯云 SES 未配置或发送失败时，回退到 mail-163-2，保证可用性。</p>
  *
  * @author UserCenter
  */
 @Service
 public class MailServiceImpl implements MailService {
 
-    /** 每日邮件降级阈值：500 封以内走腾讯云 SES */
-    private static final int TENCENT_DAILY_LIMIT = 500;
+    /** 每日邮件切换阈值：300 封以内走 mail-163-1 */
+    private static final int FIRST_163_DAILY_LIMIT = 300;
 
-    /** 每日邮件降级阈值：超过 500 封后降级为第一个 163 邮箱，超过 800 封转为第二个 163 邮箱 */
-    private static final int FIRST_163_DAILY_LIMIT = 800;
+    /** 每日邮件切换阈值：超过 600 封后切换为腾讯云 SES */
+    private static final int TENCENT_DAILY_LIMIT = 600;
 
     private final String secretId;
     private final String secretKey;
@@ -114,23 +114,21 @@ public class MailServiceImpl implements MailService {
         int dailyCount = getDailyCount();
 
         try {
-            if (dailyCount < TENCENT_DAILY_LIMIT) {
-                // 每日 500 封以内：腾讯云 SES 发送
-                if (sendTencentCloudEmail(to, subject, content, templateId)) {
-                    // 发送成功，递增当日累计计数
-                    incrementDailyCount();
-                    return;
-                }
-                LogUtil.info(MailServiceImpl.class, "腾讯云 SES 未配置或发送失败，降级为 mail-163-1");
-            } else if (dailyCount < FIRST_163_DAILY_LIMIT) {
-                LogUtil.info(MailServiceImpl.class, "邮件渠道降级：今日已发送 {} 封，切换为 mail-163-1", dailyCount);
+            if (dailyCount < FIRST_163_DAILY_LIMIT) {
+                // 每日 300 封以内：mail-163-1
+                send163Email(to, subject, content, "mail-163-1");
+            } else if (dailyCount < TENCENT_DAILY_LIMIT) {
+                // 每日 300~600 封：mail-163-2
+                LogUtil.info(MailServiceImpl.class, "邮件渠道切换：今日已发送 {} 封，使用 mail-163-2", dailyCount);
+                send163Email(to, subject, content, "mail-163-2");
+            } else if (sendTencentCloudEmail(to, subject, content, templateId)) {
+                // 每日超过 600 封：腾讯云 SES
+                LogUtil.info(MailServiceImpl.class, "邮件渠道切换：今日已发送 {} 封，使用腾讯云 SES", dailyCount);
             } else {
-                LogUtil.info(MailServiceImpl.class, "邮件渠道降级：今日已发送 {} 封，切换为 mail-163-2", dailyCount);
+                // SES 未配置或发送失败，回退 mail-163-2 保证可用性
+                LogUtil.warn(MailServiceImpl.class, "腾讯云 SES 未配置或发送失败，回退为 mail-163-2");
+                send163Email(to, subject, content, "mail-163-2");
             }
-
-            // 降级/超额走 163 SMTP 渠道（配置存数据库）
-            String accountKey = dailyCount < FIRST_163_DAILY_LIMIT ? "mail-163-1" : "mail-163-2";
-            send163Email(to, subject, content, accountKey);
             incrementDailyCount();
         } catch (BusinessException e) {
             throw e;
