@@ -213,7 +213,11 @@ refresh_token={REFRESH_TOKEN}
 
 上述请求成功后返回新的 `access_token`，原 `refresh_token` 继续有效。
 
-## 10. 查询我的自定义令牌
+## 10. 查询自定义令牌
+
+提供两个入口：用户侧（登录态，看本人全部记录）与 OAuth 侧（access_token，只看本应用记录且仅限已开通直连认证的客户端）。
+
+### 10.1 用户侧查询（登录态）
 
 查看当前用户在**本端点**签发的全部自定义有效期令牌（**含已过期记录**），供「我的自定义令牌」页面展示。
 
@@ -260,3 +264,21 @@ GET /user/oauth/custom-tokens
 | `expireTime` | 到期时间 |
 | `createdAt` | 签发时间 |
 | `expiresInSeconds` | 剩余有效期（秒），**≤0 即已过期** |
+
+### 10.2 OAuth 侧查询（access_token，仅限直连客户端）
+
+第三方应用后端可用**自己持有的 `access_token`** 查询本应用为该用户签发的自定义令牌，无需用户登录态：
+
+```http
+GET /oauth2/custom-tokens
+Authorization: Bearer {ACCESS_TOKEN}
+```
+
+也可用 `UC-Token: {ACCESS_TOKEN}`。
+
+- 认证：由 `OAuthAuthInterceptor` 完成，使用标准 `access_token`（`refresh_token` 提交会被判为无效令牌）。
+- 准入：服务层强制校验该应用**已启用、已由管理员审批且已开通直连认证能力**（`direct_auth_enabled=1`）。未开通返回 `90014`，未审批返回 `90013`，客户端无效返回 `90001`。该能力只授予管理员显式开通的机密客户端，公共客户端与普通第三方应用无法调用，避免凭普通 access_token 收割用户的自定义令牌明文。
+- 过滤：`uid` 与 `client_id` 均取自该 access_token 记录，**只返回该应用名下的记录**，不会读到该用户在其它应用的自定义令牌明文。
+- 响应结构与字段与第 10.1 节的用户侧接口完全一致（含 `clientId`、`clientName` 等），其余约定（排序、过期标注）相同。
+- 安全约束同第 8 节：返回的 `token` 为 `access_token` 明文，调用方必须服务端保存，严禁下发到浏览器。
+- 残留风险：本接口不做 scope 收敛校验。若某次签发的 access_token 使用 `/oauth2/token/from-credential` 收窄过 scope，它仍能读到本应用名下更宽 scope 的自定义令牌明文。直连客户端属于受信后端，故按此设计；如需彻底堵住，须额外按「只返回 scope ⊆ 调用方 scope 的记录」过滤。

@@ -9,6 +9,7 @@ import com.orange.common.util.Result;
 import com.orange.entity.vo.oauth.ConsentInfoVO;
 import com.orange.entity.vo.oauth.LoginTicketVO;
 import com.orange.entity.vo.oauth.OAuthConsentRequest;
+import com.orange.entity.vo.oauth.OAuthCustomTokenVO;
 import com.orange.entity.vo.oauth.OAuthTokenVO;
 import com.orange.entity.vo.oauth.UserInfoVO;
 import com.orange.service.OAuthTokenService;
@@ -25,6 +26,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.io.IOException;
+import java.util.List;
 
 /**
  * OAuth2 授权服务器端点
@@ -277,6 +279,30 @@ public class OAuthController {
         UserContext.requireScope(OAuthScope.USER_READ);
         return Result.success(oauthTokenService.getUserInfo(
                 UserContext.requireUid(), UserContext.getClientId(), UserContext.getScope()));
+    }
+
+    /**
+     * 查询本应用为该用户签发的自定义有效期令牌列表（含已过期记录）
+     *
+     * <p>认证由 {@code OAuthAuthInterceptor} 完成，使用标准 access_token
+     * （Authorization: Bearer {access_token} 或 UC-Token）。在令牌解析之外，
+     * 服务层还会校验本应用<strong>必须已开通直连认证能力</strong>（{@code direct_auth_enabled=1}）：
+     * 该能力由管理员逐应用显式开通，公共客户端与未审批应用会被拒绝（90014/90013），
+     * 避免任意第三方应用凭普通 access_token 收割用户的自定义令牌明文。</p>
+     *
+     * <p>uid 与 clientId 均取自 access_token 记录，因此调用方只能看到<strong>自己应用名下</strong>
+     * 的签发记录，不会读到该用户在其它应用的自定义令牌明文。</p>
+     *
+     * @return 本应用下的自定义令牌列表，按签发时间倒序
+     */
+    @Operation(summary = "查询本应用的自定义令牌列表（仅限已开通直连认证的客户端）")
+    @GetMapping("/custom-tokens")
+    public Result<List<OAuthCustomTokenVO>> customTokens() {
+        List<OAuthCustomTokenVO> tokens = oauthTokenService.listUserCustomTokensByClient(
+                UserContext.requireUid(), UserContext.getClientId());
+        LogUtil.debug(OAuthController.class, "[OAuth] 查询本应用自定义令牌: clientId={}, size={}",
+                UserContext.getClientId(), tokens.size());
+        return Result.success(tokens);
     }
 
     /**

@@ -1045,6 +1045,32 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         List<OAuthCustomTokenVO> tokens = oauthCustomTokenMapper.selectByUid(uid);
         return tokens == null ? Collections.emptyList() : tokens;
     }
+
+    /**
+     * 查询指定用户在指定应用下签发的自定义有效期 access_token（含已过期记录）
+     *
+     * <p>供 OAuth 侧查询使用，做两层约束：</p>
+     * <ol>
+     *   <li>准入：客户端必须启用、已审批且已开通直连认证能力（{@code direct_auth_enabled=1}）。
+     *       该能力只授予管理员显式开通的机密客户端，公共客户端与未审批应用一律 90014/90013，
+     *       避免任意第三方应用凭普通 access_token 收割用户的自定义令牌明文；</li>
+     *   <li>过滤：强制按 clientId 过滤，调用方只能读取自己名下的签发记录。</li>
+     * </ol>
+     *
+     * @param uid      用户 uid
+     * @param clientId 目标应用（OAuth 客户端）ID
+     * @return 该应用下的自定义令牌列表，按签发时间倒序
+     */
+    @Override
+    public List<OAuthCustomTokenVO> listUserCustomTokensByClient(Long uid, String clientId) {
+        if (uid == null || !StringUtils.hasText(clientId)) {
+            return Collections.emptyList();
+        }
+        requireDirectAuthEnabledClient(clientId);
+        List<OAuthCustomTokenVO> tokens = oauthCustomTokenMapper.selectByUidAndClientId(uid, clientId);
+        return tokens == null ? Collections.emptyList() : tokens;
+    }
+
     /**
      * 直连登录兑换令牌：无条件签发 access_token 与 refresh_token。
      *
@@ -2040,6 +2066,24 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
             throw new BusinessException(ResultCode.OAUTH_CLIENT_BANNED);
         }
         return client;
+    }
+
+    /**
+     * 校验客户端已启用、已审批且已开通直连认证能力（direct_auth_enabled=1）
+     *
+     * <p>用于自定义令牌查询等「仅限直连应用」的 OAuth 侧接口：直连能力由管理员逐应用显式开通，
+     * 天然排除公共客户端（无法通过直连认证流程）与未经审批的应用。任一条件不满足即拒绝，
+     * 避免普通第三方应用凭 access_token 读取用户的自定义令牌明文。</p>
+     *
+     * @param clientId 客户端 ID
+     * @throws BusinessException 客户端无效/未审批（沿用 requireEnabledClient 的错误码）
+     *                           或未开通直连认证能力（90014）
+     */
+    private void requireDirectAuthEnabledClient(String clientId) {
+        OAuthClient client = requireEnabledClient(clientId);
+        if (client.getDirectAuthEnabled() == null || client.getDirectAuthEnabled() != 1) {
+            throw new BusinessException(ResultCode.OAUTH_DIRECT_AUTH_NOT_ALLOWED);
+        }
     }
 
     /**

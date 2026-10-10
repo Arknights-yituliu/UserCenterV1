@@ -170,6 +170,20 @@ public interface OAuthTokenService {
     List<OAuthCustomTokenVO> listUserCustomTokens(Long uid);
 
     /**
+     * 查询指定用户在指定应用（OAuth 客户端）下签发的自定义有效期 access_token
+     *
+     * <p>供 OAuth 侧查询使用：调用方以该应用的 access_token 访问，只能看到自己 client_id
+     * 名下的记录。入口处会校验该应用是否已开通直连认证能力（{@code direct_auth_enabled=1}），
+     * 未开通抛 {@link com.orange.common.enums.ResultCode#OAUTH_DIRECT_AUTH_NOT_ALLOWED}；
+     * 该能力仅授予管理员显式开通的机密客户端，公共客户端与未审批应用无法调用。</p>
+     *
+     * @param uid      用户 uid（由 access_token 解析得出）
+     * @param clientId 目标应用（OAuth 客户端）ID（由 access_token 解析得出）
+     * @return 该应用下的自定义令牌列表（含已过期记录），按签发时间倒序
+     */
+    List<OAuthCustomTokenVO> listUserCustomTokensByClient(Long uid, String clientId);
+
+    /**
      * 直连登录兑换令牌：为已完成客户端认证与直连权限校验的用户无条件签发
      * access_token 与 refresh_token。
      *

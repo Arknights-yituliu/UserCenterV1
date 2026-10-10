@@ -12,9 +12,10 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  *   <li>OAuthAuthInterceptor：仅校验 OAuth access_token（/oauth2 下受令牌保护的资源端点）</li>
  * </ul>
  *
- * <p>两条鉴权链路完全分离，互不纠缠：用户自助面（含配置、OAuth 客户端自助管理、
+ * <p>鉴权链路完全分离，互不纠缠：用户自助面（含配置、OAuth 客户端自助管理、
  * 第三方应用授权管理）只认用户会话并统一收口在 /user/** 下；
- * OAuth 资源接口只认 access_token，client_id 均由各自登录上下文提供。
+ * OAuth 资源接口（含自定义令牌查询 /oauth2/custom-tokens）只认 access_token，
+ * client_id 均由各自登录上下文提供。
  * /oauth2 下其余端点为 OAuth 协议端点（authorize/consent/token/ticket/revoke），
  * 自带协议级认证，不在此注册。</p>
  *
@@ -29,8 +30,8 @@ public class WebConfig implements WebMvcConfigurer {
     /**
      * 构造器注入拦截器
      *
-     * @param userAuthInterceptor 用户认证拦截器
-     * @param oauthAuthInterceptor OAuth 认证拦截器
+     * @param userAuthInterceptor  用户认证拦截器
+     * @param oauthAuthInterceptor OAuth access_token 认证拦截器
      */
     public WebConfig(UserAuthInterceptor userAuthInterceptor, OAuthAuthInterceptor oauthAuthInterceptor) {
         this.userAuthInterceptor = userAuthInterceptor;
@@ -51,8 +52,10 @@ public class WebConfig implements WebMvcConfigurer {
                 .addPathPatterns("/user/**", "/auth/logout");
         // OAuth 资源接口：需要 access_token 的接口统一走此拦截器
         // （/oauth2/userinfo 为 OAuthController 的用户信息端点，/oauth2/config/** 为 OAuth 令牌版用户配置，
-        //  /oauth2/schedule/** 为独立的排班接口，/oauth2/ak-accounts/** 为 OAuth 游戏数据接口）
+        //  /oauth2/schedule/** 为独立的排班接口，/oauth2/ak-accounts/** 为 OAuth 游戏数据接口，
+        //  /oauth2/custom-tokens 为自定义令牌查询，端点内部另校验客户端是否开通直连认证能力）
         registry.addInterceptor(oauthAuthInterceptor)
-                .addPathPatterns("/oauth2/userinfo", "/oauth2/config/**", "/oauth2/schedule/**", "/oauth2/ak-accounts/**");
+                .addPathPatterns("/oauth2/userinfo", "/oauth2/config/**", "/oauth2/schedule/**",
+                        "/oauth2/ak-accounts/**", "/oauth2/custom-tokens");
     }
 }
