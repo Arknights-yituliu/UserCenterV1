@@ -12,7 +12,8 @@ import java.time.LocalDateTime;
  * 用户自定义有效期的 access_token 签发记录实体（oauth_custom_token）
  *
  * <p>与 {@link OAuthGrant} 的区别：授权台账记录 refresh_token 且只存摘要；
- * 本表记录 {@code POST /oauth2/token/custom} 现场签发的短时 access_token，
+ * 本表记录 {@code POST /user/oauth/custom-tokens} 或 {@code POST /oauth2/token/from-refresh}
+ * 现场签发的短时 access_token，
  * 按需求 token 明文保存，供用户在「我的自定义令牌」页面查看。</p>
  *
  * @author UserCenter

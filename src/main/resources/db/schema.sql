@@ -330,7 +330,7 @@ CREATE TABLE `oauth_user_scope` (
 -- 16. 用户自定义有效期的 access_token 签发记录表
 --
 -- 与 oauth_grant（refresh_token 台账，只存摘要）不同，本表记录
--- POST /oauth2/token/custom 现场签发的短时 access_token，供用户在
+-- POST /user/oauth/custom-tokens 或 POST /oauth2/token/from-refresh 现场签发的短时 access_token，供用户在
 -- 「我的自定义令牌」页面查看；按需求 token 明文保存，便于用户复制复用。
 -- 过期状态在查询时按 expire_time 计算，不依赖定时任务。
 -- -------------------------------------------------------------

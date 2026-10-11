@@ -2,6 +2,7 @@ package com.orange.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.orange.common.context.UserContext;
 import com.orange.common.enums.OAuthClientAuthMethod;
 import com.orange.common.enums.OAuthGrantType;
 import com.orange.common.enums.OAuthScope;
@@ -915,16 +916,73 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     }
 
     /**
-     * 使用已有 ucToken 或 refresh_token 直接签发指定有效期的 OAuth access_token。
+     * 为当前登录用户（uid 由认证上下文提供）直接签发指定有效期的 access_token。
      *
-     * <p>可选传入 {@code scope} 做权限收敛：新令牌只能携带「凭证已有范围」的子集，
-     * 超出即拒绝。该约束保证本接口无法被用于提权，同时支持最小权限场景
-     * （例如用宽范围 refresh_token 换一个只含 user.read 的短时令牌）。</p>
+     * <p>权限基准取用户对目标应用的有效授权（受用户自定义授权范围约束），
+     * 可选传 scope 收敛为子集，超出即拒绝（防提权）。</p>
      */
     @Override
-    public OAuthTokenVO issueAccessTokenFromCredential(String ucToken, String refreshToken,
-                                                       String requestedClientId, Long expiresInSeconds,
-                                                       String requestedScope, String name) {
+    public OAuthTokenVO issueAccessTokenFromSession(Long uid, String requestedClientId,
+                                                    Long expiresInSeconds, String requestedScope, String name) {
+        String trimmedName = validateDirectIssueParams(expiresInSeconds, name);
+        if (uid == null) {
+            throw new BusinessException(ResultCode.NOT_LOGIN);
+        }
+        // 会话未携带来源客户端（如系统自有前端），才回落到请求参数
+        String sessionClientId = UserContext.getClientId();
+        if (!StringUtils.hasText(sessionClientId)) {
+            sessionClientId = requestedClientId;
+        }
+        if (!StringUtils.hasText(sessionClientId)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "client_id 不能为空");
+        }
+        OAuthClient client = requireEnabledClient(sessionClientId);
+        String scope = resolveGrantScope(client, null, uid);
+        return issueCustomAccessToken(uid, client, scope, null, expiresInSeconds, requestedScope, trimmedName);
+    }
+
+    /**
+     * 使用已有 refresh_token 直接签发指定有效期的 access_token。
+     *
+     * <p>权限直接沿用刷新令牌记录中的 scope，不重新计算用户自定义授权范围；
+     * 可选传 scope 收敛为子集，超出即拒绝（防提权）。本调用不消费、不轮转刷新令牌。</p>
+     */
+    @Override
+    public OAuthTokenVO issueAccessTokenFromRefreshToken(String refreshToken, String requestedClientId,
+                                                         Long expiresInSeconds, String requestedScope, String name) {
+        String trimmedName = validateDirectIssueParams(expiresInSeconds, name);
+        if (!StringUtils.hasText(refreshToken)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "refresh_token 不能为空");
+        }
+        String rawRecord = oauthTokenStore.readRefreshToken(refreshToken.trim());
+        if (rawRecord == null) {
+            throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID);
+        }
+        Map<String, Object> record = readJsonMapValue(rawRecord);
+        Long uid = numberToLong(record.get("uid"));
+        String tokenClientId = stringValue(record.get("clientId"));
+        if (uid == null || !StringUtils.hasText(tokenClientId)) {
+            throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID);
+        }
+        // 请求带了 client_id 时必须与令牌归属一致，防止跨应用换发
+        if (StringUtils.hasText(requestedClientId)
+                && !Objects.equals(requestedClientId.trim(), tokenClientId)) {
+            throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID, "刷新令牌与客户端不匹配");
+        }
+        OAuthClient client = requireEnabledClient(tokenClientId);
+        String scope = stringValue(record.get("scope"));
+        String familyId = stringValue(record.get("familyId"));
+        return issueCustomAccessToken(uid, client, scope, familyId, expiresInSeconds, requestedScope, trimmedName);
+    }
+
+    /**
+     * 校验直签接口的公共参数（有效期与名称）
+     *
+     * @param expiresInSeconds 期望有效期（秒）
+     * @param name             本次签发的名称
+     * @return 去空白后的名称
+     */
+    private String validateDirectIssueParams(Long expiresInSeconds, String name) {
         if (expiresInSeconds == null || expiresInSeconds <= 0) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "expires_in 必须为大于 0 的秒数");
         }
@@ -935,58 +993,30 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         if (trimmedName.length() > 50) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "name 长度不能超过 50");
         }
-        boolean hasUcToken = StringUtils.hasText(ucToken);
-        boolean hasRefreshToken = StringUtils.hasText(refreshToken);
-        if (hasUcToken == hasRefreshToken) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "uc_token 与 refresh_token 必须二选一");
-        }
+        return trimmedName;
+    }
 
-        OAuthClient client;
-        Long uid;
-        String scope;
-        String familyId = null;
-        if (hasRefreshToken) {
-            String rawRecord = oauthTokenStore.readRefreshToken(refreshToken.trim());
-            if (rawRecord == null) {
-                throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID);
-            }
-            Map<String, Object> record = readJsonMapValue(rawRecord);
-            uid = numberToLong(record.get("uid"));
-            String tokenClientId = stringValue(record.get("clientId"));
-            if (uid == null || !StringUtils.hasText(tokenClientId)) {
-                throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID);
-            }
-            if (StringUtils.hasText(requestedClientId)
-                    && !Objects.equals(requestedClientId.trim(), tokenClientId)) {
-                throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID, "刷新令牌与客户端不匹配");
-            }
-            client = requireEnabledClient(tokenClientId);
-            scope = stringValue(record.get("scope"));
-            familyId = stringValue(record.get("familyId"));
-        } else {
-            String sessionJson = stringRedisTemplate.opsForValue().get(RedisKeyUtil.token(ucToken.trim()));
-            if (sessionJson == null) {
-                throw new BusinessException(ResultCode.NOT_LOGIN);
-            }
-            SessionInfo session;
-            try {
-                session = objectMapper.readValue(sessionJson, SessionInfo.class);
-            } catch (IOException e) {
-                throw new BusinessException(ResultCode.NOT_LOGIN);
-            }
-            uid = session == null ? null : session.getUid();
-            if (uid == null) {
-                throw new BusinessException(ResultCode.NOT_LOGIN);
-            }
-            String sessionClientId = StringUtils.hasText(session.getClientId())
-                    ? session.getClientId() : requestedClientId;
-            client = requireEnabledClient(sessionClientId);
-            scope = resolveGrantScope(client, null, uid);
-        }
-
+    /**
+     * 直签接口公共签发核心：按凭证确定的身份与范围落一条短时 access_token
+     *
+     * <p>请求携带 scope 时在凭证已有范围内做「只减不增」收敛；随后写入 Redis、
+     * 登记反向索引、按需挂入令牌家族，并落库自定义令牌记录（失败不阻断签发）。</p>
+     *
+     * @param uid              签发用户 uid
+     * @param client           目标客户端
+     * @param heldScope        凭证已有权限范围
+     * @param familyId         令牌家族 ID（仅 refresh_token 路径可能非空，无则传 null）
+     * @param expiresInSeconds access_token 有效期（秒）
+     * @param requestedScope   期望收敛到的权限范围（可空表示沿用凭证原范围）
+     * @param name             本次签发的名称（已去空白且校验通过）
+     * @return 新签发的 access_token 响应
+     */
+    private OAuthTokenVO issueCustomAccessToken(Long uid, OAuthClient client, String heldScope, String familyId,
+                                                Long expiresInSeconds, String requestedScope, String name) {
+        String scope = heldScope;
         // 请求收敛时替换为子集：只允许在凭证已有范围内缩小，超出即拒绝（防提权）
         if (StringUtils.hasText(requestedScope)) {
-            scope = narrowScope(scope, requestedScope);
+            scope = narrowScope(heldScope, requestedScope);
         }
 
         String accessToken = OAuthUtil.generateToken();
@@ -996,7 +1026,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         addFamilyMember(familyId, OAUTH_ACCESS_MEMBER_PREFIX + accessToken, expiresInSeconds);
         maybeCleanupExpiredGrantMembers(uid);
         // 落库自定义令牌记录：供用户在「我的自定义令牌」列表回看，失败不阻断签发
-        recordCustomToken(uid, client, accessToken, scope, expiresInSeconds, trimmedName);
+        recordCustomToken(uid, client, accessToken, scope, expiresInSeconds, name);
         LogUtil.debug(OAuthTokenServiceImpl.class,
                 "[OAuth] 凭证直接签发 access_token: clientId={}, uid={}, expiresIn={}s",
                 client.getId(), uid, expiresInSeconds);
@@ -1603,7 +1633,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     /**
      * 权限收敛：把请求范围限制在凭证已有范围之内（只减不增）。
      *
-     * <p>用于 {@code /oauth2/token/custom} 的最小权限场景：调用方可指定一个子集换取更小权限的
+     * <p>用于直签接口（{@code /user/oauth/custom-tokens}、{@code /oauth2/token/from-refresh}）的最小权限场景：调用方可指定一个子集换取更小权限的
      * 短时 access_token，但不能借此扩大权限。凭证范围为元范围 {@code all} 时视为覆盖全部已知权限。</p>
      *
      * @param heldScope      凭证已有权限串（英文逗号分隔，可能为元范围 all）

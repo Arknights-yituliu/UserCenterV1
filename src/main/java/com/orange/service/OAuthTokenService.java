@@ -139,24 +139,44 @@ public interface OAuthTokenService {
     OAuthTokenVO issueToken(String grantType, String clientId, String clientSecret,
                             String code, String redirectUri, String codeVerifier, String refreshToken);
     /**
-     * 使用已有的用户会话 ucToken 或 refresh_token 直接签发 OAuth access_token。
+     * 为当前登录用户（uid 由认证上下文提供）直接签发指定有效期的 OAuth access_token。
      *
-     * <p>可选携带 scope 做「只减不增」的权限收敛（最小权限）：请求集合必须落在凭证已有范围之内，
-     * 用于为低风险调用换发更小权限的短时令牌；超出凭证范围会被拒绝，本接口不能用于扩权。</p>
+     * <p>权限基准取用户对目标应用的有效授权（受用户自定义授权范围约束）。
+     * 可选携带 scope 做「只减不增」的权限收敛（最小权限）：请求集合必须落在凭证已有范围之内，
+     * 超出凭证范围会被拒绝，本接口不能用于扩权。</p>
      *
-     * <p>签发成功后按 name 落一条自定义令牌记录（oauth_custom_token），供用户在自己的
-     * 「自定义令牌」列表中查看；因此 name 为必填。</p>
+     * <p>签发成功后按 name 落一条自定义令牌记录（oauth_custom_token），供用户在
+     * 「我的自定义令牌」列表中查看；因此 name 为必填。</p>
      *
-     * @param ucToken          已存在的用户会话令牌（二选一）
-     * @param refreshToken     已存在的 OAuth refresh_token（二选一）
-     * @param clientId         ucToken 未携带来源客户端时可显式指定的客户端 ID
+     * @param uid              登录用户 uid（来自用户会话认证上下文）
+     * @param clientId         目标客户端 ID（优先取会话来源客户端，缺失时才由调用方传入）
      * @param expiresInSeconds access_token 有效期（秒）
      * @param scope            期望收敛到的权限范围（英文逗号分隔，可空表示沿用凭证原范围）
      * @param name             本次签发的名称（必填，不超过 50 字符）
      * @return 新签发的 access_token
      */
-    OAuthTokenVO issueAccessTokenFromCredential(String ucToken, String refreshToken,
-                                                String clientId, Long expiresInSeconds, String scope, String name);
+    OAuthTokenVO issueAccessTokenFromSession(Long uid, String clientId,
+                                             Long expiresInSeconds, String scope, String name);
+
+    /**
+     * 使用已有的 OAuth refresh_token 直接签发指定有效期的 OAuth access_token。
+     *
+     * <p>权限范围直接沿用刷新令牌记录中的 scope（不重新计算用户自定义授权范围），
+     * 可选携带 scope 做「只减不增」的权限收敛（最小权限），超出凭证范围会被拒绝。
+     * 本调用<strong>不消费、不轮转</strong>刷新令牌，原凭证保持有效。</p>
+     *
+     * <p>签发成功后按 name 落一条自定义令牌记录（oauth_custom_token），供用户在自己的
+     * 「自定义令牌」列表中查看；因此 name 为必填。</p>
+     *
+     * @param refreshToken     已存在的 OAuth refresh_token（必填）
+     * @param clientId         可选，传入时必须与刷新令牌归属的客户端一致
+     * @param expiresInSeconds access_token 有效期（秒）
+     * @param scope            期望收敛到的权限范围（英文逗号分隔，可空表示沿用凭证原范围）
+     * @param name             本次签发的名称（必填，不超过 50 字符）
+     * @return 新签发的 access_token
+     */
+    OAuthTokenVO issueAccessTokenFromRefreshToken(String refreshToken, String clientId,
+                                                  Long expiresInSeconds, String scope, String name);
 
     /**
      * 查询当前用户签发的全部自定义有效期 access_token（用户自助，含已过期记录）
