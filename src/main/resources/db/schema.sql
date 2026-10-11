@@ -7,6 +7,13 @@ CREATE DATABASE IF NOT EXISTS `user_center`
   DEFAULT CHARACTER SET utf8mb4
   DEFAULT COLLATE utf8mb4_general_ci;
 
+-- 已有库可能沿用了历史默认排序规则（如 utf8mb4_german2_ci）。若不显式对齐，
+-- 后续新建表或新增列会继承错误的排序规则，与既有列字符串比较时报 1267 非法混用。
+-- CREATE DATABASE IF NOT EXISTS 对已存在的库不生效，故此处再强制对齐一次。
+ALTER DATABASE `user_center`
+  DEFAULT CHARACTER SET utf8mb4
+  DEFAULT COLLATE utf8mb4_general_ci;
+
 USE `user_center`;
 
 -- -------------------------------------------------------------
