@@ -1,21 +1,29 @@
 package com.orange.service.impl;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.util.LogUtil;
+import com.orange.common.util.RedisKeyUtil;
 import com.orange.entity.dto.oauth.LegacyImportTokenItem;
 import com.orange.entity.po.OAuthCustomToken;
 import com.orange.mapper.OAuthCustomTokenMapper;
 import com.orange.service.OAuthLegacyImportService;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 旧系统只读令牌导入实现（临时接口）
@@ -46,7 +54,12 @@ public class OAuthLegacyImportServiceImpl implements OAuthLegacyImportService {
     /** 单批入库的最大条数，避免单条 SQL 过大 */
     private static final int BATCH_SIZE = 500;
 
+    /** uid 反向索引中 access_token 成员前缀，与 OAuthTokenServiceImpl 保持一致 */
+    private static final String OAUTH_ACCESS_MEMBER_PREFIX = "access:";
+
     private final OAuthCustomTokenMapper oauthCustomTokenMapper;
+    private final StringRedisTemplate stringRedisTemplate;
+    private final ObjectMapper objectMapper;
 
     /** 调用方密钥：与请求头 X-Import-Key 做字符串比对 */
     @Value("${legacy-import-key:}")
@@ -56,9 +69,15 @@ public class OAuthLegacyImportServiceImpl implements OAuthLegacyImportService {
      * 构造器注入依赖
      *
      * @param oauthCustomTokenMapper 自定义令牌 Mapper
+     * @param stringRedisTemplate    Redis 客户端（同步写入令牌记录，使旧令牌可被资源服务器校验）
+     * @param objectMapper           JSON 序列化器（构造 Redis 令牌记录）
      */
-    public OAuthLegacyImportServiceImpl(OAuthCustomTokenMapper oauthCustomTokenMapper) {
+    public OAuthLegacyImportServiceImpl(OAuthCustomTokenMapper oauthCustomTokenMapper,
+                                        StringRedisTemplate stringRedisTemplate,
+                                        ObjectMapper objectMapper) {
         this.oauthCustomTokenMapper = oauthCustomTokenMapper;
+        this.stringRedisTemplate = stringRedisTemplate;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -89,11 +108,49 @@ public class OAuthLegacyImportServiceImpl implements OAuthLegacyImportService {
             records.add(record);
         }
         for (int i = 0; i < records.size(); i += BATCH_SIZE) {
-            oauthCustomTokenMapper.batchInsert(records.subList(i, Math.min(i + BATCH_SIZE, records.size())));
+            List<OAuthCustomToken> batch = records.subList(i, Math.min(i + BATCH_SIZE, records.size()));
+            oauthCustomTokenMapper.batchInsert(batch);
+            // 同步写入 Redis：资源服务器仅凭 uc:oauth:access:{token} 校验令牌，
+            // 只入库不写 Redis 的旧令牌将无法通过访问校验
+            syncToRedis(batch);
         }
         LogUtil.info(OAuthLegacyImportServiceImpl.class,
                 "[OAuth] 旧系统令牌导入完成: imported={}, skipped={}", records.size(), skipped);
         return new LegacyImportResult(records.size(), skipped);
+    }
+
+    /**
+     * 把导入的旧令牌同步写入 Redis，使其与 UC 现场签发的 access_token 等价可校验
+     *
+     * <p>写入内容与 {@code oauthAccess} 记录一致（uid/clientId/scope），TTL 取令牌到期时间
+     * 的剩余秒数；已过期的旧令牌只入库、不写 Redis。同时登记 uid 反向索引，供整体撤销与
+     * 惰性清理定位。Redis 写入失败会向上抛出，避免出现「入库成功但令牌不可用」的静默错误。</p>
+     *
+     * @param records 本批已完成入库的令牌记录
+     */
+    private void syncToRedis(List<OAuthCustomToken> records) {
+        LocalDateTime now = LocalDateTime.now();
+        for (OAuthCustomToken record : records) {
+            long ttlSeconds = Duration.between(now, record.getExpireTime()).getSeconds();
+            if (ttlSeconds <= 0) {
+                // 已过期的旧令牌无需写入 Redis
+                continue;
+            }
+            Map<String, Object> redisRecord = new LinkedHashMap<>();
+            redisRecord.put("uid", record.getUid());
+            redisRecord.put("clientId", record.getClientId());
+            redisRecord.put("scope", record.getScope());
+            String json;
+            try {
+                json = objectMapper.writeValueAsString(redisRecord);
+            } catch (JsonProcessingException e) {
+                throw new BusinessException(ResultCode.SYSTEM_ERROR, "旧令牌记录序列化失败");
+            }
+            stringRedisTemplate.opsForValue().set(
+                    RedisKeyUtil.oauthAccess(record.getToken()), json, ttlSeconds, TimeUnit.SECONDS);
+            stringRedisTemplate.opsForSet().add(
+                    RedisKeyUtil.uidOauth(record.getUid()), OAUTH_ACCESS_MEMBER_PREFIX + record.getToken());
+        }
     }
 
     /**
