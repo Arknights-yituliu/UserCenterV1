@@ -3,6 +3,7 @@ package com.orange.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.orange.entity.po.OAuthCustomToken;
 import com.orange.entity.vo.oauth.OAuthCustomTokenVO;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -72,4 +73,35 @@ public interface OAuthCustomTokenMapper extends BaseMapper<OAuthCustomToken> {
             + "#{it.expiresIn}, #{it.expireTime})"
             + "</foreach></script>")
     int batchInsert(@Param("items") List<OAuthCustomToken> items);
+
+    /**
+     * 删除指定用户在指定应用名下的一条自定义令牌签发记录
+     *
+     * <p>按 uid + client_id + token 三条件删除：uid 限定记录归属的用户，client_id 限定
+     * 调用方应用，token 定位具体一条。三者同时匹配才能删除，避免某个应用凭拿到的 token
+     * 字符串越权吊销其它应用为用户签发的令牌。</p>
+     *
+     * @param uid      用户 uid
+     * @param clientId 调用方应用（OAuth 客户端）ID
+     * @param token    access_token 明文
+     * @return 影响行数（0 表示记录不存在或不属于该用户/该应用）
+     */
+    @Delete("DELETE FROM oauth_custom_token "
+            + "WHERE uid = #{uid} AND client_id = #{clientId} AND token = #{token}")
+    int deleteByUidAndClientIdAndToken(@Param("uid") Long uid,
+                                       @Param("clientId") String clientId,
+                                       @Param("token") String token);
+
+    /**
+     * 删除指定用户名下的一条自定义令牌签发记录（不限定应用）
+     *
+     * <p>按 uid + token 双条件删除：uid 限定记录归属的用户，token 定位具体一条。用于用户
+     * 自助侧吊销——用户是自己所有令牌的归属者，可跨应用吊销名下任意一条，无须指明 client_id。</p>
+     *
+     * @param uid   用户 uid
+     * @param token access_token 明文
+     * @return 影响行数（0 表示记录不存在或不属于该用户）
+     */
+    @Delete("DELETE FROM oauth_custom_token WHERE uid = #{uid} AND token = #{token}")
+    int deleteByUidAndToken(@Param("uid") Long uid, @Param("token") String token);
 }

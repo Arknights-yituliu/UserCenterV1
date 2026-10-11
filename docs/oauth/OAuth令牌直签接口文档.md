@@ -231,6 +231,7 @@ GET /user/oauth/custom-tokens
 - 认证：走用户登录态（`/user/**` 由 `UserAuthInterceptor` 保护），从会话取 `uid`，**无需传参**；非本人数据不返回。
 - 排序：按签发时间 `create_time` 倒序。
 - 过期标注：每条记录返回剩余秒数 `expiresInSeconds`（`TIMESTAMPDIFF(SECOND, NOW(), expire_time)`），**≤0 即已过期**，前端据此展示状态；服务端不做过滤，也没有清理定时任务。
+- 吊销：作废其中一条令牌请用第 12.1 节的 `POST /user/oauth/custom-tokens/revoke`。
 
 响应示例：
 
@@ -285,3 +286,164 @@ Authorization: Bearer {ACCESS_TOKEN}
 - 响应结构与字段与第 10.1 节的用户侧接口完全一致（含 `clientId`、`clientName` 等），其余约定（排序、过期标注）相同。
 - 安全约束同第 8 节：返回的 `token` 为 `access_token` 明文，调用方必须服务端保存，严禁下发到浏览器。
 - 残留风险：本接口不做 scope 收敛校验。若某次签发的 access_token 使用 `/oauth2/token/from-refresh` 收窄过 scope，它仍能读到本应用名下更宽 scope 的自定义令牌明文。直连客户端属于受信后端，故按此设计；如需彻底堵住，须额外按「只返回 scope ⊆ 调用方 scope 的记录」过滤。
+- 吊销：作废其中一条令牌请用第 12.2 节的 `POST /oauth2/custom-tokens/revoke`。
+
+## 11. 查询可用授权范围（公开）
+
+直签请求的 `scope` 参数只能从平台支持的标识中选择（见第 6 节）。为避免调用方自行拼接非法标识，提供一个**无需登录**的公开查询接口：
+
+```http
+GET /open/oauth/scopes
+```
+
+- **无需任何凭证**：公开接口，不校验登录态，也不要求 OAuth `access_token`。
+- **数据来源**：`OAuthScope` 枚举中可自助配置的范围，与《用户授权权限管理接口文档》的 `selectableScopes` 口径一致（每项为 `{code, desc}`）。
+- **不含元范围 `all`**：`all` 仅限管理员手工写库授予，不会出现在本接口。
+- **无用户维度数据**：只返回静态枚举元数据，不含任何用户授权信息；某应用“已授予哪些权限”属用户维度，需登录后走 `GET /user/oauth/grants/scopes`，本接口不提供。
+
+响应：
+
+```json
+{
+  "code": 200,
+  "msg": "操作成功",
+  "data": [
+    { "code": "user.read", "desc": "读取你的用户 ID、昵称和头像" },
+    { "code": "user.profile", "desc": "读取并修改你的个人资料" },
+    { "code": "config.read", "desc": "读取该应用名下的用户配置，以及查看你的排班表" },
+    { "code": "config.write", "desc": "创建、修改或删除该应用名下的用户配置，以及保存或删除你的排班表" },
+    { "code": "gama-data.read", "desc": "读取用户游戏数据" },
+    { "code": "gama-data.write", "desc": "写入用户游戏数据" }
+  ]
+}
+```
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `code` | string | 权限标识，即直签请求 `scope` 参数的合法取值 |
+| `desc` | string | 权限中文描述 |
+
+当前可选范围（6 项）：
+
+| 标识 | 说明 |
+| --- | --- |
+| `user.read` | 读取你的用户 ID、昵称和头像 |
+| `user.profile` | 读取并修改你的个人资料 |
+| `config.read` | 读取该应用名下的用户配置，以及查看你的排班表 |
+| `config.write` | 创建、修改或删除该应用名下的用户配置，以及保存或删除你的排班表 |
+| `gama-data.read` | 读取用户游戏数据 |
+| `gama-data.write` | 写入用户游戏数据 |
+
+**注意**：本接口返回的是“系统全部可选权限”**全集**，仅用于展示可选项；某次直签实际能携带的权限仍受第 6 节收敛规则约束——不得超过凭证自身已有范围，否则返回 `90003`。
+
+## 12. 吊销自定义令牌
+
+第 10 节的两个查询入口各自对应一个**吊销**入口，凭证与第 10 节一一对应：用户侧用登录态，OAuth 侧用 `access_token`。二者都完成「**令牌立即失效 + 删除签发记录**」两步，语义一致，差异仅在**归属口径**与**准入**。
+
+### 12.1 用户侧吊销（登录态）
+
+用户在「我的自定义令牌」列表中主动作废自己名下的一条令牌：
+
+```http
+POST /user/oauth/custom-tokens/revoke
+Authorization: Bearer {UC_SESSION_TOKEN}
+Content-Type: application/json
+
+{ "token": "{ACCESS_TOKEN}" }
+```
+
+- 认证：走用户登录态（`/user/**` 由 `UserAuthInterceptor` 保护），从会话取 `uid`；未登录返回 `80001`。
+- 归属：**只按 `uid` 限定，可跨应用**。用户是自己所有令牌的归属者，因此无需指明 `client_id`，一条请求即可吊销名下任意应用签发的令牌。
+- 准入：**无直连认证能力要求**。这是用户自助操作，非第三方应用身份，不校验 `direct_auth_enabled`。
+- 请求体：`token` 为签发时返回的 `access_token` **明文**，必填，长度 ≤128。
+
+### 12.2 OAuth 侧吊销（access_token，仅限直连客户端）
+
+第三方应用后端用**自己持有的 `access_token`** 吊销本应用为该用户签发的一条令牌，无需用户登录态：
+
+```http
+POST /oauth2/custom-tokens/revoke
+Authorization: Bearer {ACCESS_TOKEN}
+Content-Type: application/json
+
+{ "token": "{ACCESS_TOKEN_TO_REVOKE}" }
+```
+
+也可用 `UC-Token: {ACCESS_TOKEN}` 提交认证凭证。
+
+- 认证：由 `OAuthAuthInterceptor` 完成，使用标准 `access_token`（`refresh_token` 提交会被判为无效令牌）。
+- 归属：**`uid` + `client_id` 双重限定**，只能吊销本应用为该用户签发的令牌。凭 token 字符串无法跨用户、跨应用越权吊销。
+- 准入：同第 10.2 节，服务层强制校验该应用**已启用、已审批且已开通直连认证能力**（`direct_auth_enabled=1`）。未开通返回 `90014`，未审批返回 `90013`，客户端无效返回 `90001`。
+
+### 12.3 共同行为
+
+- **吊销令牌**：从 Redis 删除该 `access_token`（`uc:oauth:access:*`），令牌**立即失效**；同时摘除用户令牌反向索引 `uc:uid:oauth:{uid}` 中的对应成员。
+- **删除记录**：从 `oauth_custom_token` 表删除该签发记录，使其从第 10 节列表中消失。
+- **执行顺序**：先删 Redis（吊销即时生效），再删 DB 记录，与按应用整体撤销授权（`POST /user/oauth/grants/revoke`）一致。
+- **幂等**：令牌不存在、已过期（Redis 无 key）或记录不存在时，均返回成功，不报错——避免被用来探测令牌有效性。
+- **归属校验前置**：删 Redis 前先读取记录比对归属，归属不符则不触碰 Redis；DB 删除同样带归属条件，未命中即幂等成功。
+
+### 12.4 请求与响应
+
+请求体：
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `token` | 是 | 待吊销的 `access_token` 明文，长度 ≤128；两侧接口字段一致 |
+
+`Content-Type: application/json`。
+
+成功响应（空结果）：
+
+```json
+{
+  "code": 200,
+  "msg": "操作成功",
+  "data": null
+}
+```
+
+### 12.5 与「按应用整体撤销授权」的区别
+
+| 维度 | 本接口（吊销单条令牌） | `POST /user/oauth/grants/revoke` |
+| --- | --- | --- |
+| 粒度 | **一条** `access_token` | 某应用下**全部**令牌 + 授权记录 |
+| 依据 | `token` 明文定位 | `client_id` |
+| 台账影响 | **删除**该条 `oauth_custom_token` 记录 | 置该应用台账为已吊销 |
+| 语义 | 作废一条自签令牌 | 撤销我对该应用的授权 |
+
+### 12.6 调用示例
+
+用户侧吊销：
+
+```http
+POST {UC_BASE_URL}/user/oauth/custom-tokens/revoke
+Authorization: Bearer {UC_SESSION_TOKEN}
+Content-Type: application/json
+
+{ "token": "access_token_value" }
+```
+
+OAuth 侧吊销：
+
+```http
+POST {UC_BASE_URL}/oauth2/custom-tokens/revoke
+Authorization: Bearer {ACCESS_TOKEN}
+Content-Type: application/json
+
+{ "token": "access_token_value_to_revoke" }
+```
+
+### 12.7 错误码
+
+除第 7 节通用错误码外：
+
+| HTTP | code | 含义 | 处理建议 |
+| --- | --- | --- | --- |
+| 200 | `10001` | `token` 为空或超过 128 字符 | 修正请求体 |
+| 200 | `80001` | 未登录或登录已失效（用户侧） | 引导用户重新登录后重试 |
+| 200 | `90001` | 客户端不存在或已停用（OAuth 侧） | 检查凭证，停止调用并联系管理员 |
+| 200 | `90013` | 客户端待管理员审批或已被封禁（OAuth 侧） | 联系管理员完成审批或解除封禁 |
+| 200 | `90014` | 客户端未开通直连认证能力（OAuth 侧） | 联系管理员开通该能力 |
+
+**安全提示**：请求体中的 `token` 为明文凭证，调用方必须**服务端保存与传输**，严禁下发到浏览器或写入日志（同第 8 节第 5 条）。

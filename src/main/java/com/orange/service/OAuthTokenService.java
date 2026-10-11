@@ -204,6 +204,40 @@ public interface OAuthTokenService {
     List<OAuthCustomTokenVO> listUserCustomTokensByClient(Long uid, String clientId);
 
     /**
+     * 吊销（删除并失效）本应用为当前用户签发的一条自定义有效期 access_token（OAuth 侧）。
+     *
+     * <p>「吊销令牌」与「删除记录」一步完成：先从 Redis 删除该 access_token 使其立即失效，
+     * 并摘除 uid 反向索引中的残留成员；再删除 oauth_custom_token 表中的签发记录，
+     * 使其从自定义令牌列表中消失。</p>
+     *
+     * <p>归属由 uid（令牌记录的持有用户）+ clientId（调用方应用）双重限定：调用方只能
+     * 吊销本应用为该用户签发的令牌，凭 token 字符串无法跨用户、跨应用越权吊销。准入同
+     * {@link #listUserCustomTokensByClient}，要求客户端已开通直连认证能力。</p>
+     *
+     * <p>幂等：令牌不存在、已过期或记录不存在，都视为吊销成功，不抛异常。</p>
+     *
+     * @param uid      用户 uid（由 access_token 解析得出）
+     * @param clientId 调用方应用（OAuth 客户端）ID（由 access_token 解析得出）
+     * @param token    待吊销的自定义 access_token 明文
+     */
+    void revokeCustomTokenByClient(Long uid, String clientId, String token);
+
+    /**
+     * 吊销（删除并失效）当前用户名下任意一条自定义有效期 access_token（用户自助侧）。
+     *
+     * <p>「吊销令牌」与「删除记录」一步完成，与 {@link #revokeCustomTokenByClient} 行为一致，
+     * 差异仅在归属口径：用户是自己所有令牌的归属者，只按 uid 限定即可跨应用吊销名下任意一条，
+     * 无须指明 client_id，也不要求来源应用开通直连认证能力。典型用于用户在「我的自定义令牌」
+     * 列表里主动作废一条自签令牌。</p>
+     *
+     * <p>幂等：令牌不存在、已过期或记录不存在，都视为吊销成功，不抛异常。</p>
+     *
+     * @param uid   登录用户 uid（来自用户会话认证上下文）
+     * @param token 待吊销的自定义 access_token 明文
+     */
+    void revokeUserCustomToken(Long uid, String token);
+
+    /**
      * 直连登录兑换令牌：为已完成客户端认证与直连权限校验的用户无条件签发
      * access_token 与 refresh_token。
      *

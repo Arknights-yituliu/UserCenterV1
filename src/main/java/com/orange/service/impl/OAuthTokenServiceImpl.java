@@ -1102,6 +1102,76 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     }
 
     /**
+     * 吊销（删除并失效）本应用为当前用户签发的一条自定义有效期 access_token（OAuth 侧）
+     *
+     * <p>先校验来源应用已开通直连认证能力，再委托 {@link #doRevokeCustomToken} 完成吊销。
+     * 归属限定为 uid + clientId：调用方只能吊销本应用为该用户签发的令牌。</p>
+     *
+     * @param uid      用户 uid（由 access_token 解析）
+     * @param clientId 调用方应用 ID（由 access_token 解析）
+     * @param token    待吊销的 access_token 明文
+     */
+    @Override
+    public void revokeCustomTokenByClient(Long uid, String clientId, String token) {
+        if (uid == null || !StringUtils.hasText(clientId) || !StringUtils.hasText(token)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "token 不能为空");
+        }
+        requireDirectAuthEnabledClient(clientId);
+        doRevokeCustomToken(uid, clientId, token);
+        LogUtil.debug(OAuthTokenServiceImpl.class,
+                "[OAuth] 吊销自定义令牌: uid={}, clientId={}", uid, clientId);
+    }
+
+    /**
+     * 吊销（删除并失效）当前用户名下任意一条自定义有效期 access_token（用户自助侧）
+     *
+     * <p>用户是自身所有令牌的归属者，不限定来源应用、也不做直连认证能力校验，直接委托
+     * {@link #doRevokeCustomToken}（clientId 传 null 表示不限应用）。</p>
+     *
+     * @param uid   登录用户 uid（来自用户会话认证上下文）
+     * @param token 待吊销的 access_token 明文
+     */
+    @Override
+    public void revokeUserCustomToken(Long uid, String token) {
+        if (uid == null || !StringUtils.hasText(token)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "token 不能为空");
+        }
+        doRevokeCustomToken(uid, null, token);
+        LogUtil.debug(OAuthTokenServiceImpl.class, "[OAuth] 用户自助吊销自定义令牌: uid={}", uid);
+    }
+
+    /**
+     * 吊销自定义令牌的共用实现：先失效 Redis 令牌，再删除数据库签发记录
+     *
+     * <p>先失效 Redis 中的令牌，再删除数据库签发记录，顺序与 revokeClientAuthorization 一致：
+     * Redis 删除即吊销立即生效，随后清掉台账记录使其从列表消失。归属一律以 uid 限定；
+     * clientId 非空时再叠加应用限定（OAuth 侧防跨应用越权），为空表示不限应用（用户自助侧）。
+     * 任一环节无命中都按幂等成功处理。</p>
+     *
+     * @param uid      令牌归属用户 uid
+     * @param clientId 应用限定；为 null 时表示不限定应用
+     * @param token    待吊销的 access_token 明文
+     */
+    private void doRevokeCustomToken(Long uid, String clientId, String token) {
+        String trimmedToken = token.trim();
+        // 1. 失效 Redis 中的令牌：确认记录归属该用户（及指定应用），否则不触碰
+        Map<String, Object> record = readJsonMap(RedisKeyUtil.oauthAccess(trimmedToken));
+        if (record != null
+                && Objects.equals(uid, numberToLong(record.get("uid")))
+                && (clientId == null || Objects.equals(clientId, record.get("clientId")))) {
+            stringRedisTemplate.delete(RedisKeyUtil.oauthAccess(trimmedToken));
+            stringRedisTemplate.opsForSet().remove(
+                    RedisKeyUtil.uidOauth(uid), OAUTH_ACCESS_MEMBER_PREFIX + trimmedToken);
+        }
+        // 2. 删除签发记录：未命中（不存在/非本人/非指定应用）也幂等成功
+        if (clientId == null) {
+            oauthCustomTokenMapper.deleteByUidAndToken(uid, trimmedToken);
+        } else {
+            oauthCustomTokenMapper.deleteByUidAndClientIdAndToken(uid, clientId, trimmedToken);
+        }
+    }
+
+    /**
      * 直连登录兑换令牌：无条件签发 access_token 与 refresh_token。
      *
      * <p>与授权码流程的差异见接口注释。这里刻意不调用 {@code isGrantAllowed}：

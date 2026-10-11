@@ -9,6 +9,7 @@ import com.orange.entity.dto.user.ChangeEmailRequest;
 import com.orange.entity.dto.user.ClientAuthorizationRevokeRequest;
 import com.orange.entity.dto.user.UpdatePasswordRequest;
 import com.orange.entity.dto.user.UpdateProfileRequest;
+import com.orange.entity.dto.user.UserCustomTokenRevokeRequest;
 import com.orange.entity.dto.user.UserScopeRequest;
 import com.orange.entity.vo.SessionVO;
 import com.orange.entity.vo.UserInfoVO;
@@ -197,6 +198,23 @@ public class UserController {
         LogUtil.debug(UserController.class, "[OAuth] 会话直签 access_token: uid={}, expiresIn={}s",
                 UserContext.getUid(), vo.getExpiresIn());
         return Result.success(vo);
+    }
+
+    /**
+     * 吊销（删除并失效）我的一条自定义有效期令牌
+     *
+     * <p>token 明文放在请求体中。令牌会立即从 Redis 失效，并删除对应签发记录使其从
+     * 「我的自定义令牌」列表中移除。归属只按当前登录用户 uid 限定，可跨应用吊销自己
+     * 名下任意一条令牌；幂等，令牌不存在或不属于自己都视为成功。</p>
+     *
+     * @param request 吊销请求（token 明文）
+     * @return 空结果
+     */
+    @Operation(summary = "吊销我的自定义有效期令牌")
+    @PostMapping("/oauth/custom-tokens/revoke")
+    public Result<Void> revokeCustomToken(@Valid @RequestBody UserCustomTokenRevokeRequest request) {
+        oauthTokenService.revokeUserCustomToken(UserContext.requireUid(), request.getToken());
+        return Result.success(null);
     }
 
     /**

@@ -6,6 +6,7 @@ import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.util.LogUtil;
 import com.orange.common.util.Result;
+import com.orange.entity.dto.oauth.CustomTokenRevokeRequest;
 import com.orange.entity.vo.oauth.ConsentInfoVO;
 import com.orange.entity.vo.oauth.LoginTicketVO;
 import com.orange.entity.vo.oauth.OAuthConsentRequest;
@@ -17,6 +18,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -301,6 +303,27 @@ public class OAuthController {
         LogUtil.debug(OAuthController.class, "[OAuth] 查询本应用自定义令牌: clientId={}, size={}",
                 UserContext.getClientId(), tokens.size());
         return Result.success(tokens);
+    }
+
+    /**
+     * 吊销（删除并失效）本应用为当前用户签发的一条自定义有效期令牌
+     *
+     * <p>认证由 {@code OAuthAuthInterceptor} 完成，使用标准 access_token；uid 与 clientId
+     * 均取自 access_token 记录。待吊销的 access_token 明文放在请求体中，服务层会先使其在
+     * Redis 中立即失效，再删除签发记录使其从列表中移除；归属按 uid + clientId 双重限定，
+     * 只能吊销本应用为该用户签发的令牌，幂等。准入同查询接口，要求客户端已开通直连认证能力。</p>
+     *
+     * @param request 吊销请求（token 明文）
+     * @return 空结果
+     */
+    @Operation(summary = "吊销本应用签发的一条自定义令牌（仅限已开通直连认证的客户端）")
+    @PostMapping("/custom-tokens/revoke")
+    public Result<Void> revokeCustomToken(@Valid @RequestBody CustomTokenRevokeRequest request) {
+        oauthTokenService.revokeCustomTokenByClient(
+                UserContext.requireUid(), UserContext.getClientId(), request.getToken());
+        LogUtil.debug(OAuthController.class, "[OAuth] 吊销自定义令牌: clientId={}",
+                UserContext.getClientId());
+        return Result.success(null);
     }
 
     /**
