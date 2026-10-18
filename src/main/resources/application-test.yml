@@ -126,11 +126,6 @@ user-center:
       # UC 侧只存公钥，从环境变量注入，绝不写进仓库；轮换期可同时配置新旧多把公钥
       verify-keys: ""
 
-# ===== 旧系统只读令牌导入端点（POST /oauth2/internal/import-legacy-tokens）=====
-# 临时接口：仅做固定密钥字符串比对，存量迁移结束后应连同本配置一并删除
-# 调用方密钥：请求头 X-Import-Key 与此值做字符串比对，生产从环境变量注入，不写进仓库
-legacy-import-key: ""
-
 springdoc:
   api-docs:
     enabled: false

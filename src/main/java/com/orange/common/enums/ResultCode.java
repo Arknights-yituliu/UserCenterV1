@@ -106,9 +106,7 @@ public enum ResultCode {
     /** 迁移请求签名校验失败 */
     OAUTH_MIGRATE_SIGN_INVALID(90016, "迁移请求签名校验失败"),
     /** 迁移请求已过期或已被使用 */
-    OAUTH_MIGRATE_REPLAY(90017, "迁移请求已过期或已被使用"),
-    /** 旧系统令牌导入密钥校验失败 */
-    OAUTH_LEGACY_IMPORT_KEY_INVALID(90018, "旧系统令牌导入密钥校验失败");
+    OAUTH_MIGRATE_REPLAY(90017, "迁移请求已过期或已被使用");
 
     /** 状态码 */
     private final int code;
