@@ -5,6 +5,7 @@ import com.orange.common.util.LogUtil;
 import com.orange.common.util.Result;
 import com.orange.controller.oauth.OAuthAkAccountController;
 import com.orange.controller.user.AkAccountController;
+import com.orange.controller.user.EfPlayerDataController;
 import com.orange.entity.vo.akoperator.RetryAfterVO;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -28,7 +29,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
  * @author UserCenter
  */
 @Order(0)
-@RestControllerAdvice(assignableTypes = {AkAccountController.class, OAuthAkAccountController.class})
+@RestControllerAdvice(assignableTypes = {AkAccountController.class, OAuthAkAccountController.class,
+        EfPlayerDataController.class})
 public class AkAccountExceptionHandler {
 
     /**

@@ -70,6 +70,12 @@
 | `/user/ak-accounts/manual-operators` | GET | 是 | 用户会话 | 读取本人手动修改版干员数据（含是否持有），每个用户一份，与 akUid 无关。 |
 | `/user/ak-accounts/manual-operators/save` | POST | 是 | 用户会话 | 保存本人手动修改版干员数据：有则比较更新，无则新增，未传入的不处理。 |
 
+### 终末地玩家数据（`/user/ef-accounts/**`）
+
+| API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
+|---|---|---|---|---|
+| `/user/ef-accounts/player-data/save` | POST | 是 | 用户会话 | 保存终末地玩家数据：整份 JSON 文本直接落库，已有则覆盖，首次上传同时建立角色绑定。 |
+
 ### 第三方应用授权管理（`/user/oauth/**`）
 
 | API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
