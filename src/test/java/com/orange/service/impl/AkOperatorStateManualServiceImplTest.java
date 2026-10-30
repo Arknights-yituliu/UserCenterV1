@@ -1,12 +1,12 @@
 package com.orange.service.impl;
 
 import com.orange.common.exception.BusinessException;
-import com.orange.entity.dto.akoperator.ManualOperatorSaveRequest;
+import com.orange.entity.dto.akoperator.OperatorStateManualSaveRequest;
 import com.orange.entity.dto.akoperator.OperatorItemRequest;
-import com.orange.entity.po.AkOperatorManual;
+import com.orange.entity.po.AkOperatorStateManual;
 import com.orange.entity.vo.akoperator.OperatorSaveResultVO;
 import com.orange.entity.vo.akoperator.OperatorVO;
-import com.orange.mapper.AkOperatorManualMapper;
+import com.orange.mapper.AkOperatorStateManualMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -23,19 +23,19 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class AkOperatorManualServiceImplTest {
+class AkOperatorStateManualServiceImplTest {
 
     private static final long UID = 1001L;
 
     @Mock
-    private AkOperatorManualMapper manualMapper;
+    private AkOperatorStateManualMapper manualMapper;
 
     @Mock
-    private AkOperatorManualSaveExecutor saveExecutor;
+    private AkOperatorStateManualSaveExecutor saveExecutor;
 
     @Test
     void listsManualOperatorsWithOwnedAndZeroDefaults() {
-        AkOperatorManual row = new AkOperatorManual();
+        AkOperatorStateManual row = new AkOperatorStateManual();
         row.setId(9L);
         row.setUid(UID);
         row.setOperatorId("char_002_amiya");
@@ -61,14 +61,14 @@ class AkOperatorManualServiceImplTest {
         OperatorItemRequest item = new OperatorItemRequest();
         item.setId("char_002_amiya");
         item.setOwned(1);
-        ManualOperatorSaveRequest request = new ManualOperatorSaveRequest();
+        OperatorStateManualSaveRequest request = new OperatorStateManualSaveRequest();
         request.setOperators(Collections.singletonList(item));
 
         OperatorSaveResultVO result = service().saveManualOperators(UID, request);
 
-        ArgumentCaptor<List<AkOperatorManual>> captor = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<List<AkOperatorStateManual>> captor = ArgumentCaptor.forClass(List.class);
         verify(saveExecutor).save(eq(UID), captor.capture());
-        AkOperatorManual record = captor.getValue().get(0);
+        AkOperatorStateManual record = captor.getValue().get(0);
         assertThat(record.getUid()).isEqualTo(UID);
         assertThat(record.getOperatorId()).isEqualTo("char_002_amiya");
         assertThat(record.getOwned()).isEqualTo(1);
@@ -82,7 +82,7 @@ class AkOperatorManualServiceImplTest {
         first.setId("char_002_amiya");
         OperatorItemRequest second = new OperatorItemRequest();
         second.setId("char_002_amiya");
-        ManualOperatorSaveRequest request = new ManualOperatorSaveRequest();
+        OperatorStateManualSaveRequest request = new OperatorStateManualSaveRequest();
         request.setOperators(List.of(first, second));
 
         assertThatThrownBy(() -> service().saveManualOperators(UID, request))
@@ -90,7 +90,7 @@ class AkOperatorManualServiceImplTest {
                 .hasFieldOrPropertyWithValue("code", 10002);
     }
 
-    private AkOperatorManualServiceImpl service() {
-        return new AkOperatorManualServiceImpl(manualMapper, saveExecutor);
+    private AkOperatorStateManualServiceImpl service() {
+        return new AkOperatorStateManualServiceImpl(manualMapper, saveExecutor);
     }
 }

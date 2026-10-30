@@ -1,6 +1,6 @@
 package com.orange.service;
 
-import com.orange.entity.dto.akoperator.ManualOperatorSaveRequest;
+import com.orange.entity.dto.akoperator.OperatorStateManualSaveRequest;
 import com.orange.entity.vo.akoperator.OperatorSaveResultVO;
 import com.orange.entity.vo.akoperator.OperatorVO;
 
@@ -14,7 +14,7 @@ import java.util.List;
  *
  * @author UserCenter
  */
-public interface AkOperatorManualService {
+public interface AkOperatorStateManualService {
 
     /**
      * 读取当前用户的手动修改版干员数据
@@ -31,5 +31,5 @@ public interface AkOperatorManualService {
      * @param request 保存参数（干员数组）
      * @return 新增/更新/未变更条数统计
      */
-    OperatorSaveResultVO saveManualOperators(Long uid, ManualOperatorSaveRequest request);
+    OperatorSaveResultVO saveManualOperators(Long uid, OperatorStateManualSaveRequest request);
 }

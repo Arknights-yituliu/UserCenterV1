@@ -1,8 +1,8 @@
 package com.orange.service.impl;
 
-import com.orange.entity.po.AkOperatorManual;
+import com.orange.entity.po.AkOperatorStateManual;
 import com.orange.entity.vo.akoperator.OperatorSaveResultVO;
-import com.orange.mapper.AkOperatorManualMapper;
+import com.orange.mapper.AkOperatorStateManualMapper;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,7 +24,7 @@ import java.util.Map;
  * @author UserCenter
  */
 @Component
-public class AkOperatorManualSaveExecutor {
+public class AkOperatorStateManualSaveExecutor {
 
     /** 提交条数达到该阈值时改为按 uid 全量读取，避免超长 IN 列表 */
     private static final int FULL_SCAN_THRESHOLD = 100;
@@ -32,14 +32,14 @@ public class AkOperatorManualSaveExecutor {
     /** 批量插入每条 SQL 的行数 */
     private static final int INSERT_BATCH_SIZE = 100;
 
-    private final AkOperatorManualMapper manualMapper;
+    private final AkOperatorStateManualMapper manualMapper;
 
     /**
      * 构造器注入 Mapper
      *
      * @param manualMapper 手动修改版干员数据 Mapper
      */
-    public AkOperatorManualSaveExecutor(AkOperatorManualMapper manualMapper) {
+    public AkOperatorStateManualSaveExecutor(AkOperatorStateManualMapper manualMapper) {
         this.manualMapper = manualMapper;
     }
 
@@ -51,15 +51,15 @@ public class AkOperatorManualSaveExecutor {
      * @return 新增/更新/未变更条数统计
      */
     @Transactional(rollbackFor = Exception.class)
-    public OperatorSaveResultVO save(Long uid, List<AkOperatorManual> submitted) {
-        Map<String, AkOperatorManual> existingMap = loadExisting(uid, submitted);
+    public OperatorSaveResultVO save(Long uid, List<AkOperatorStateManual> submitted) {
+        Map<String, AkOperatorStateManual> existingMap = loadExisting(uid, submitted);
         LocalDateTime now = LocalDateTime.now();
-        List<AkOperatorManual> toInsert = new ArrayList<>();
-        List<AkOperatorManual> toUpdate = new ArrayList<>();
+        List<AkOperatorStateManual> toInsert = new ArrayList<>();
+        List<AkOperatorStateManual> toUpdate = new ArrayList<>();
         int unchangedCount = 0;
 
-        for (AkOperatorManual item : submitted) {
-            AkOperatorManual existing = existingMap.get(item.getOperatorId());
+        for (AkOperatorStateManual item : submitted) {
+            AkOperatorStateManual existing = existingMap.get(item.getOperatorId());
             if (existing == null) {
                 item.setUpdatedAt(now);
                 toInsert.add(item);
@@ -78,7 +78,7 @@ public class AkOperatorManualSaveExecutor {
             int to = Math.min(from + INSERT_BATCH_SIZE, toInsert.size());
             manualMapper.batchInsert(toInsert.subList(from, to));
         }
-        for (AkOperatorManual record : toUpdate) {
+        for (AkOperatorStateManual record : toUpdate) {
             manualMapper.updateManual(record);
         }
         return new OperatorSaveResultVO(toInsert.size(), toUpdate.size(), unchangedCount);
@@ -93,19 +93,19 @@ public class AkOperatorManualSaveExecutor {
      * @param submitted 本次提交的干员记录
      * @return 干员编码到现有记录的映射
      */
-    private Map<String, AkOperatorManual> loadExisting(Long uid, List<AkOperatorManual> submitted) {
-        List<AkOperatorManual> rows;
+    private Map<String, AkOperatorStateManual> loadExisting(Long uid, List<AkOperatorStateManual> submitted) {
+        List<AkOperatorStateManual> rows;
         if (submitted.size() >= FULL_SCAN_THRESHOLD) {
             rows = manualMapper.selectByUid(uid);
         } else {
             List<String> operatorIds = new ArrayList<>(submitted.size());
-            for (AkOperatorManual item : submitted) {
+            for (AkOperatorStateManual item : submitted) {
                 operatorIds.add(item.getOperatorId());
             }
             rows = manualMapper.selectByUidAndIds(uid, operatorIds);
         }
-        Map<String, AkOperatorManual> existingMap = new HashMap<>(Math.max(16, rows.size() * 2));
-        for (AkOperatorManual row : rows) {
+        Map<String, AkOperatorStateManual> existingMap = new HashMap<>(Math.max(16, rows.size() * 2));
+        for (AkOperatorStateManual row : rows) {
             existingMap.put(row.getOperatorId(), row);
         }
         return existingMap;
@@ -118,7 +118,7 @@ public class AkOperatorManualSaveExecutor {
      * @param submitted 本次提交值
      * @return 是否无需更新
      */
-    private boolean isSameState(AkOperatorManual existing, AkOperatorManual submitted) {
+    private boolean isSameState(AkOperatorStateManual existing, AkOperatorStateManual submitted) {
         return sameValue(existing.getOwned(), submitted.getOwned())
                 && sameValue(existing.getRarity(), submitted.getRarity())
                 && sameValue(existing.getLevel(), submitted.getLevel())

@@ -3,10 +3,10 @@ package com.orange.controller.oauth;
 import com.orange.common.context.UserContext;
 import com.orange.common.exception.BusinessException;
 import com.orange.controller.user.AkAccountController;
-import com.orange.entity.dto.akoperator.ManualOperatorSaveRequest;
+import com.orange.entity.dto.akoperator.OperatorStateManualSaveRequest;
 import com.orange.entity.dto.akoperator.OperatorSaveRequest;
 import com.orange.service.AkAccountService;
-import com.orange.service.AkOperatorManualService;
+import com.orange.service.AkOperatorStateManualService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -36,7 +36,7 @@ class OAuthGameDataControllerTest {
     @Test
     void accountReadRejectsTokenWithoutGameDataReadScope() {
         AkAccountService accountService = mock(AkAccountService.class);
-        AkOperatorManualService manualService = mock(AkOperatorManualService.class);
+        AkOperatorStateManualService manualService = mock(AkOperatorStateManualService.class);
         OAuthAkAccountController controller = new OAuthAkAccountController(accountService, manualService);
         UserContext.setUid(7L);
         UserContext.setScope("gama-data.write");
@@ -50,7 +50,7 @@ class OAuthGameDataControllerTest {
     @Test
     void accountWriteRequiresGameDataWriteScope() {
         AkAccountService accountService = mock(AkAccountService.class);
-        AkOperatorManualService manualService = mock(AkOperatorManualService.class);
+        AkOperatorStateManualService manualService = mock(AkOperatorStateManualService.class);
         OAuthAkAccountController controller = new OAuthAkAccountController(accountService, manualService);
         UserContext.setUid(7L);
         UserContext.setScope("gama-data.write");
@@ -63,7 +63,7 @@ class OAuthGameDataControllerTest {
     @Test
     void manualOperatorReadRejectsTokenWithoutGameDataReadScope() {
         AkAccountService accountService = mock(AkAccountService.class);
-        AkOperatorManualService manualService = mock(AkOperatorManualService.class);
+        AkOperatorStateManualService manualService = mock(AkOperatorStateManualService.class);
         OAuthAkAccountController controller = new OAuthAkAccountController(accountService, manualService);
         UserContext.setUid(7L);
         UserContext.setScope("gama-data.write");
@@ -77,14 +77,14 @@ class OAuthGameDataControllerTest {
     @Test
     void manualOperatorWriteRequiresGameDataWriteScope() {
         AkAccountService accountService = mock(AkAccountService.class);
-        AkOperatorManualService manualService = mock(AkOperatorManualService.class);
+        AkOperatorStateManualService manualService = mock(AkOperatorStateManualService.class);
         OAuthAkAccountController controller = new OAuthAkAccountController(accountService, manualService);
         UserContext.setUid(7L);
         UserContext.setScope("gama-data.write");
 
-        assertDoesNotThrow(() -> controller.saveManualOperators(new ManualOperatorSaveRequest()));
+        assertDoesNotThrow(() -> controller.saveManualOperators(new OperatorStateManualSaveRequest()));
 
-        verify(manualService).saveManualOperators(eq(7L), any(ManualOperatorSaveRequest.class));
+        verify(manualService).saveManualOperators(eq(7L), any(OperatorStateManualSaveRequest.class));
     }
 
     @Test
@@ -97,7 +97,7 @@ class OAuthGameDataControllerTest {
         Method read = controllerClass.getDeclaredMethod("listOperators", String.class);
         Method save = controllerClass.getDeclaredMethod("saveOperators", OperatorSaveRequest.class);
         Method manualRead = controllerClass.getDeclaredMethod("listManualOperators");
-        Method manualSave = controllerClass.getDeclaredMethod("saveManualOperators", ManualOperatorSaveRequest.class);
+        Method manualSave = controllerClass.getDeclaredMethod("saveManualOperators", OperatorStateManualSaveRequest.class);
 
         assertEquals("/operators", read.getAnnotation(GetMapping.class).value()[0]);
         assertEquals("/operators/save", save.getAnnotation(PostMapping.class).value()[0]);

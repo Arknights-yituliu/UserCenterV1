@@ -3,13 +3,13 @@ package com.orange.service.impl;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.util.LogUtil;
-import com.orange.entity.dto.akoperator.ManualOperatorSaveRequest;
+import com.orange.entity.dto.akoperator.OperatorStateManualSaveRequest;
 import com.orange.entity.dto.akoperator.OperatorItemRequest;
-import com.orange.entity.po.AkOperatorManual;
+import com.orange.entity.po.AkOperatorStateManual;
 import com.orange.entity.vo.akoperator.OperatorSaveResultVO;
 import com.orange.entity.vo.akoperator.OperatorVO;
-import com.orange.mapper.AkOperatorManualMapper;
-import com.orange.service.AkOperatorManualService;
+import com.orange.mapper.AkOperatorStateManualMapper;
+import com.orange.service.AkOperatorStateManualService;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.stereotype.Service;
@@ -31,13 +31,13 @@ import java.util.Set;
  * @author UserCenter
  */
 @Service
-public class AkOperatorManualServiceImpl implements AkOperatorManualService {
+public class AkOperatorStateManualServiceImpl implements AkOperatorStateManualService {
 
     /** 唯一键冲突/死锁时整事务回滚后的最大重试次数（不含首次执行） */
     private static final int SAVE_MAX_RETRY = 2;
 
-    private final AkOperatorManualMapper manualMapper;
-    private final AkOperatorManualSaveExecutor saveExecutor;
+    private final AkOperatorStateManualMapper manualMapper;
+    private final AkOperatorStateManualSaveExecutor saveExecutor;
 
     /**
      * 构造器注入依赖
@@ -45,8 +45,8 @@ public class AkOperatorManualServiceImpl implements AkOperatorManualService {
      * @param manualMapper 手动修改版干员数据 Mapper
      * @param saveExecutor 写事务执行器（独立 Bean 保证 @Transactional 生效）
      */
-    public AkOperatorManualServiceImpl(AkOperatorManualMapper manualMapper,
-                                       AkOperatorManualSaveExecutor saveExecutor) {
+    public AkOperatorStateManualServiceImpl(AkOperatorStateManualMapper manualMapper,
+                                       AkOperatorStateManualSaveExecutor saveExecutor) {
         this.manualMapper = manualMapper;
         this.saveExecutor = saveExecutor;
     }
@@ -59,9 +59,9 @@ public class AkOperatorManualServiceImpl implements AkOperatorManualService {
      */
     @Override
     public List<OperatorVO> listManualOperators(Long uid) {
-        List<AkOperatorManual> rows = manualMapper.selectByUid(uid);
+        List<AkOperatorStateManual> rows = manualMapper.selectByUid(uid);
         List<OperatorVO> items = new ArrayList<>(rows.size());
-        for (AkOperatorManual row : rows) {
+        for (AkOperatorStateManual row : rows) {
             items.add(toManualOperatorVO(row));
         }
         return items;
@@ -75,9 +75,9 @@ public class AkOperatorManualServiceImpl implements AkOperatorManualService {
      * @return 新增/更新/未变更条数统计，三项之和等于传入记录数
      */
     @Override
-    public OperatorSaveResultVO saveManualOperators(Long uid, ManualOperatorSaveRequest request) {
+    public OperatorSaveResultVO saveManualOperators(Long uid, OperatorStateManualSaveRequest request) {
         // 先归一化（缺省/null/空字符串补 0）再校验重复 ID，保证比较语义与落库值一致
-        List<AkOperatorManual> records = normalizeOperators(uid, request.getOperators());
+        List<AkOperatorStateManual> records = normalizeOperators(uid, request.getOperators());
         return saveWithRetry(uid, records);
     }
 
@@ -88,17 +88,17 @@ public class AkOperatorManualServiceImpl implements AkOperatorManualService {
      * @param records 本次提交的手动版干员记录（已归一化）
      * @return 新增/更新/未变更条数统计
      */
-    private OperatorSaveResultVO saveWithRetry(Long uid, List<AkOperatorManual> records) {
+    private OperatorSaveResultVO saveWithRetry(Long uid, List<AkOperatorStateManual> records) {
         for (int attempt = 0; ; attempt++) {
             try {
                 return saveExecutor.save(uid, records);
             } catch (DuplicateKeyException | PessimisticLockingFailureException e) {
                 if (attempt >= SAVE_MAX_RETRY) {
-                    LogUtil.warn(AkOperatorManualServiceImpl.class,
+                    LogUtil.warn(AkOperatorStateManualServiceImpl.class,
                             "手动版干员数据保存冲突重试耗尽, uid={}, attempts={}", uid, attempt + 1, e);
                     throw new BusinessException(ResultCode.OPERATOR_SAVE_CONFLICT);
                 }
-                LogUtil.info(AkOperatorManualServiceImpl.class,
+                LogUtil.info(AkOperatorStateManualServiceImpl.class,
                         "手动版干员数据保存冲突，回滚后重试整个请求, uid={}, attempt={}", uid, attempt + 1);
             }
         }
@@ -111,9 +111,9 @@ public class AkOperatorManualServiceImpl implements AkOperatorManualService {
      * @param items 客户端提交的干员数组（已通过 Bean Validation 的格式与范围校验）
      * @return 可直接落库的手动版干员记录列表
      */
-    private List<AkOperatorManual> normalizeOperators(Long uid, List<OperatorItemRequest> items) {
+    private List<AkOperatorStateManual> normalizeOperators(Long uid, List<OperatorItemRequest> items) {
         Set<String> seenIds = new HashSet<>(Math.max(16, items.size() * 2));
-        List<AkOperatorManual> result = new ArrayList<>(items.size());
+        List<AkOperatorStateManual> result = new ArrayList<>(items.size());
         for (OperatorItemRequest item : items) {
             if (!seenIds.add(item.getId())) {
                 throw new BusinessException(ResultCode.PARAM_VALID_ERROR, "同一请求中干员ID重复：" + item.getId());
@@ -130,8 +130,8 @@ public class AkOperatorManualServiceImpl implements AkOperatorManualService {
      * @param item 客户端提交的干员记录
      * @return 手动版落库实体（id 与 updatedAt 由服务端维护）
      */
-    private AkOperatorManual toManualRecord(Long uid, OperatorItemRequest item) {
-        AkOperatorManual record = new AkOperatorManual();
+    private AkOperatorStateManual toManualRecord(Long uid, OperatorItemRequest item) {
+        AkOperatorStateManual record = new AkOperatorStateManual();
         record.setUid(uid);
         record.setOperatorId(item.getId());
         record.setOwned(zeroIfNull(item.getOwned()));
@@ -157,7 +157,7 @@ public class AkOperatorManualServiceImpl implements AkOperatorManualService {
      * @param row 手动版干员实体
      * @return 手动版干员视图对象
      */
-    private OperatorVO toManualOperatorVO(AkOperatorManual row) {
+    private OperatorVO toManualOperatorVO(AkOperatorStateManual row) {
         OperatorVO vo = new OperatorVO();
         vo.setId(row.getOperatorId());
         vo.setRecordId(row.getId());

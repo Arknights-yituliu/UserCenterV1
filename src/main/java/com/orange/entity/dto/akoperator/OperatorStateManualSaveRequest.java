@@ -13,7 +13,7 @@ import java.util.List;
  *
  * @author UserCenter
  */
-public class ManualOperatorSaveRequest {
+public class OperatorStateManualSaveRequest {
 
     /** 干员数组，空数组拒绝 */
     @NotEmpty(message = "干员数据不能为空")

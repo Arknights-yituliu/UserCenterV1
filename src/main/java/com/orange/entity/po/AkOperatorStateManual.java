@@ -7,18 +7,18 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import java.time.LocalDateTime;
 
 /**
- * 用户手动修改版干员数据实体（ak_operator_manual）：一行一个干员，按用户 uid 归属
+ * 用户手动修改版干员数据实体（ak_operator_state_manual）：一行一个干员，按用户 uid 归属
  *
  * <p>与 {@link AkOperatorState}（游戏账号自动导入、被全部绑定用户共享）不同，本表保存
- * 用户手工调整后的干员数据，并额外记录「是否持有」。一个用户只能有一份手动修改版，
- * 由唯一键 {@code uk_uid_operator_manual (uid, operator_id)} 保证。</p>
+ * 用户手工调整后的干员数据。一个用户只能有一份手动修改版，
+ * 由唯一键 {@code uk_uid_operator_state_manual (uid, operator_id)} 保证。</p>
  *
- * <p>所有数值属性非空，缺省/null/空字符串在保存前统一归一化为 0。</p>
+ * <p>所有数值属性非空，缺省/null/空字符串在保存前统一归一化为 0（owned 手动版缺省归一化为 0）。</p>
  *
  * @author UserCenter
  */
-@TableName("ak_operator_manual")
-public class AkOperatorManual {
+@TableName("ak_operator_state_manual")
+public class AkOperatorStateManual {
 
     /** 主键，响应中称 recordId */
     @TableId(type = IdType.AUTO)
