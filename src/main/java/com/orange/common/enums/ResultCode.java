@@ -63,6 +63,8 @@ public enum ResultCode {
     RATE_LIMITER_UNAVAILABLE(40003, "限流服务不可用，请稍后再试"),
     /** 数据写入冲突且重试次数耗尽（可重试） */
     OPERATOR_SAVE_CONFLICT(40004, "干员数据保存冲突，请重试"),
+    /** 第三方接口（森空岛 / 鹰角通行证）调用失败 */
+    OUTER_API_INVOKE_ERROR(40005, "第三方接口调用失败，请稍后再试"),
 
     // ---------- 8xxxx 认证/权限/签名错误 ----------
     /** 未登录或 token 无效 */
