@@ -64,7 +64,7 @@
 
 | API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
 |---|---|---|---|---|
-| `/user/ak-accounts` | GET | 是 | 用户会话 | 查询当前用户已绑定的游戏账号列表（不含干员正文）。 |
+| `/user/ak-accounts` | GET | 是 | 用户会话 | 查询可用的游戏数据来源列表（森空岛账号 + 手动上传，含来源标识，不含干员正文）。 |
 | `/user/ak-accounts/operators` | GET | 是 | 用户会话 | 全量读取某游戏账号（akUid）的干员数据，响应 Cache-Control 为 private, no-cache。 |
 | `/user/ak-accounts/operators/save` | POST | 是 | 用户会话 | 批量保存角色信息与干员数据：有则比较更新，无则新增，未传入的不处理，返回增/改/未变统计。 |
 | `/user/ak-accounts/manual-operators` | GET | 是 | 用户会话 | 读取本人手动修改版干员数据（含是否持有），每个用户一份，与 akUid 无关。 |
@@ -140,7 +140,7 @@
 
 | API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
 |---|---|---|---|---|
-| `/oauth2/ak-accounts` | GET | 是 | OAuth access_token + `gama-data.read` scope | 查询当前 OAuth 用户在当前客户端下已绑定的游戏账号列表。 |
+| `/oauth2/ak-accounts` | GET | 是 | OAuth access_token + `gama-data.read` scope | 查询当前 OAuth 用户可用的数据来源列表（森空岛账号 + 手动上传，含来源标识）。 |
 | `/oauth2/ak-accounts/operators` | GET | 是 | OAuth access_token + `gama-data.read` scope | 全量读取某游戏账号的干员数据，响应仅允许私人缓存且每次回源校验。 |
 | `/oauth2/ak-accounts/operators/save` | POST | 是 | OAuth access_token + `gama-data.write` scope | 批量保存角色信息与干员数据，目标账号取自请求体 playerInfo.akUid。 |
 | `/oauth2/ak-accounts/manual-operators` | GET | 是 | OAuth access_token + `gama-data.read` scope | 读取当前令牌用户本人的手动修改版干员数据（含是否持有），每个用户一份。 |

@@ -73,7 +73,7 @@ GET /oauth2/ak-accounts
 Authorization: Bearer <access_token>
 ```
 
-需要 `gama-data.read`。返回当前 OAuth 用户已绑定的游戏账号列表，不含干员正文。
+需要 `gama-data.read`。返回当前 OAuth 用户可用的数据来源，包含森空岛自动导入的已绑定账号与手动上传条目，按最近一次变更时间倒序，不含干员正文。
 
 ### 2.1 成功响应
 
@@ -84,16 +84,30 @@ HTTP `200`：
   "code": 200,
   "msg": "操作成功",
   "data": [
-    {"akUid": "123456789"}
+    {
+      "akUid": "123456789",
+      "source": "skland",
+      "createTime": "2026-09-20T10:00:00",
+      "updateTime": "2026-09-28T18:30:00"
+    },
+    {
+      "akUid": "1234567890123456789",
+      "source": "manual",
+      "createTime": null,
+      "updateTime": "2026-09-27T21:15:00"
+    }
   ]
 }
 ```
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `akUid` | string | 游戏账号 UID |
+| `akUid` | string | 森空岛条目为游戏账号 UID；手动上传条目复用用户中心 UID |
+| `source` | string | 数据来源：`skland` 森空岛自动导入，`manual` 用户手动上传 |
+| `createTime` | string / null | 森空岛为绑定关系创建时间；手动上传条目没有创建时间，固定为 `null` |
+| `updateTime` | string | 森空岛为该账号最近一次导入时间；手动版为最近一次保存时间 |
 
-没有绑定任何游戏账号时 `data` 为 `[]`。绑定关系存在但角色信息缺失的账号不会出现在结果中（绑定关系本身仍保留）。
+无森空岛绑定且无手动数据时 `data` 为 `[]`。手动上传条目仅在用户存在手动数据时出现；绑定关系存在但角色信息缺失的账号不会出现在结果中（绑定关系本身仍保留）。调用方需通过 `source` 区分条目：`manual` 条目的干员数据应通过手动版读取接口获取，不能当作游戏账号 `akUid` 使用。
 
 ### 2.2 失败响应
 

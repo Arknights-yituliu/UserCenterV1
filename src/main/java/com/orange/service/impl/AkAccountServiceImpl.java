@@ -11,12 +11,14 @@ import com.orange.entity.dto.akoperator.OperatorSaveRequest;
 import com.orange.entity.po.AkAccountBinding;
 import com.orange.entity.po.AkPlayerInfo;
 import com.orange.entity.po.AkOperatorState;
+import com.orange.entity.po.AkOperatorStateManualSummary;
 import com.orange.entity.vo.akoperator.AkAccountVO;
 import com.orange.entity.vo.akoperator.OperatorListVO;
 import com.orange.entity.vo.akoperator.OperatorSaveResultVO;
 import com.orange.entity.vo.akoperator.OperatorVO;
 import com.orange.mapper.AkAccountBindingMapper;
 import com.orange.mapper.AkPlayerInfoMapper;
+import com.orange.mapper.AkOperatorStateManualMapper;
 import com.orange.mapper.AkOperatorStateMapper;
 import com.orange.service.AkAccountService;
 import org.springframework.dao.DuplicateKeyException;
@@ -27,7 +29,7 @@ import org.springframework.util.StringUtils;
 
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -65,6 +67,7 @@ public class AkAccountServiceImpl implements AkAccountService {
     private final AkAccountBindingMapper bindingMapper;
     private final AkPlayerInfoMapper playerInfoMapper;
     private final AkOperatorStateMapper operatorMapper;
+    private final AkOperatorStateManualMapper manualMapper;
     private final AkOperatorSaveExecutor saveExecutor;
     private final StringRedisTemplate stringRedisTemplate;
 
@@ -74,48 +77,57 @@ public class AkAccountServiceImpl implements AkAccountService {
      * @param bindingMapper       绑定关系 Mapper
      * @param playerInfoMapper    角色信息 Mapper
      * @param operatorMapper      干员数据 Mapper
+     * @param manualMapper        手动版干员数据 Mapper（仅用于账号列表的汇总时间）
      * @param saveExecutor        写事务执行器（独立 Bean 保证 @Transactional 生效）
      * @param stringRedisTemplate Redis 客户端，用于跨实例的原子限流
      */
     public AkAccountServiceImpl(AkAccountBindingMapper bindingMapper,
                                 AkPlayerInfoMapper playerInfoMapper,
                                 AkOperatorStateMapper operatorMapper,
+                                AkOperatorStateManualMapper manualMapper,
                                 AkOperatorSaveExecutor saveExecutor,
                                 StringRedisTemplate stringRedisTemplate) {
         this.bindingMapper = bindingMapper;
         this.playerInfoMapper = playerInfoMapper;
         this.operatorMapper = operatorMapper;
+        this.manualMapper = manualMapper;
         this.saveExecutor = saveExecutor;
         this.stringRedisTemplate = stringRedisTemplate;
     }
 
     /**
-     * 查询当前用户已绑定的游戏账号列表，按最近导入时间倒序
+     * 查询当前用户可展示的数据来源列表，按最近一次变更时间倒序
      *
-     * <p>倒序由 Mapper 的 SQL 保证，前端取首条即可默认展示最新导入的账号数据。</p>
+     * <p>列表由森空岛自动导入的绑定账号与手动上传条目合并而成，统一按 updateTime 倒序，
+     * 前端取首条即可默认展示最新数据。手动上传条目没有游戏账号，akUid 复用用户中心 UID，
+     * 且仅在用户存在手动数据时追加。</p>
      *
      * @param uid 用户中心 UID
-     * @return 已绑定游戏账号列表（含创建时间与最近导入时间），最近的在前，无绑定时返回空列表
+     * @return 数据来源列表（含来源、创建时间与最近变更时间），最近的在前，无数据时返回空列表
      */
     @Override
     public List<AkAccountVO> listBoundAccounts(Long uid) {
         List<AkAccountBinding> bindings = bindingMapper.selectByOwnerOrderByUpdateTime(uid);
-        if (bindings.isEmpty()) {
-            return Collections.emptyList();
-        }
-        List<String> akUids = new ArrayList<>(bindings.size());
-        for (AkAccountBinding binding : bindings) {
-            akUids.add(binding.getAkUid());
-        }
-        Map<String, AkPlayerInfo> infoMap = loadPlayerInfoMap(akUids);
-        List<AkAccountVO> accounts = new ArrayList<>(bindings.size());
-        for (AkAccountBinding binding : bindings) {
-            // 角色信息缺失时不展示，但保留绑定关系本身
-            if (!infoMap.containsKey(binding.getAkUid())) {
-                continue;
+        List<AkAccountVO> accounts = new ArrayList<>(bindings.size() + 1);
+        if (!bindings.isEmpty()) {
+            List<String> akUids = new ArrayList<>(bindings.size());
+            for (AkAccountBinding binding : bindings) {
+                akUids.add(binding.getAkUid());
             }
-            accounts.add(toAccountVO(binding));
+            Map<String, AkPlayerInfo> infoMap = loadPlayerInfoMap(akUids);
+            for (AkAccountBinding binding : bindings) {
+                // 角色信息缺失时不展示，但保留绑定关系本身
+                if (!infoMap.containsKey(binding.getAkUid())) {
+                    continue;
+                }
+                accounts.add(toAccountVO(binding));
+            }
         }
+        AkOperatorStateManualSummary manualSummary = manualMapper.selectSummaryByUid(uid);
+        if (manualSummary != null && manualSummary.getUpdateTime() != null) {
+            accounts.add(toManualAccountVO(uid, manualSummary));
+        }
+        accounts.sort(Comparator.comparing(AkAccountVO::getUpdateTime).reversed());
         return accounts;
     }
 
@@ -296,8 +308,27 @@ public class AkAccountServiceImpl implements AkAccountService {
     private AkAccountVO toAccountVO(AkAccountBinding binding) {
         AkAccountVO vo = new AkAccountVO();
         vo.setAkUid(binding.getAkUid());
+        vo.setSource(AkAccountVO.SOURCE_SKLAND);
         vo.setCreateTime(binding.getCreateTime());
         vo.setUpdateTime(binding.getUpdateTime());
+        return vo;
+    }
+
+    /**
+     * 手动版数据汇总转手动上传条目
+     *
+     * <p>手动数据按用户归属、没有游戏账号，akUid 复用用户中心 UID；手动版没有创建时间，
+     * createTime 留空，updateTime 取该用户手动记录的 MAX(updated_at)。</p>
+     *
+     * @param uid     用户中心 UID
+     * @param summary 手动版数据时间汇总
+     * @return 账号视图对象，source 为 manual
+     */
+    private AkAccountVO toManualAccountVO(Long uid, AkOperatorStateManualSummary summary) {
+        AkAccountVO vo = new AkAccountVO();
+        vo.setAkUid(String.valueOf(uid));
+        vo.setSource(AkAccountVO.SOURCE_MANUAL);
+        vo.setUpdateTime(summary.getUpdateTime());
         return vo;
     }
 

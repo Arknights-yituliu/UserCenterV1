@@ -2,6 +2,7 @@ package com.orange.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.orange.entity.po.AkOperatorStateManual;
+import com.orange.entity.po.AkOperatorStateManualSummary;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -30,6 +31,15 @@ public interface AkOperatorStateManualMapper extends BaseMapper<AkOperatorStateM
      */
     @Select("SELECT * FROM ak_operator_state_manual WHERE uid = #{uid} ORDER BY operator_id")
     List<AkOperatorStateManual> selectByUid(@Param("uid") Long uid);
+
+    /**
+     * 查询某用户手动版数据的最近变更时间（用于账号列表中的手动上传条目）
+     *
+     * @param uid 用户中心 UID
+     * @return 汇总结果；该用户无手动数据时 updateTime 为 null
+     */
+    @Select("SELECT MAX(updated_at) AS updateTime FROM ak_operator_state_manual WHERE uid = #{uid}")
+    AkOperatorStateManualSummary selectSummaryByUid(@Param("uid") Long uid);
 
     /**
      * 点查某用户下指定干员编码的手动版记录（少量提交时使用）
