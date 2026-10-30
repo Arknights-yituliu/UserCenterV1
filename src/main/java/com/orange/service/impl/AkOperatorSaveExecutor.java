@@ -174,7 +174,8 @@ public class AkOperatorSaveExecutor {
      * @return 是否无需更新
      */
     private boolean isSameState(AkOperatorState existing, AkOperatorState submitted) {
-        return sameValue(existing.getRarity(), submitted.getRarity())
+        return sameValue(existing.getOwned(), submitted.getOwned())
+                && sameValue(existing.getRarity(), submitted.getRarity())
                 && sameValue(existing.getLevel(), submitted.getLevel())
                 && sameValue(existing.getEvolvePhase(), submitted.getEvolvePhase())
                 && sameValue(existing.getMainSkillLevel(), submitted.getMainSkillLevel())

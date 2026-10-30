@@ -224,7 +224,7 @@ public class AkAccountServiceImpl implements AkAccountService {
     }
 
     /**
-     * 归一化干员数组：数值字段缺省/null 统一补 0，并拒绝同一请求中的重复干员 ID
+     * 归一化干员数组：数值字段缺省/null 统一补 0（owned 缺省补 1），并拒绝同一请求中的重复干员 ID
      *
      * @param akUid 游戏账号 UID
      * @param items 客户端提交的干员数组（已通过 Bean Validation 的格式与范围校验）
@@ -243,7 +243,7 @@ public class AkAccountServiceImpl implements AkAccountService {
     }
 
     /**
-     * 将单条干员请求转换为落库实体，数值字段 null 归一化为 0
+     * 将单条干员请求转换为落库实体，数值字段 null 归一化为 0（owned 归一化为 1）
      *
      * @param akUid 游戏账号 UID
      * @param item  客户端提交的干员记录
@@ -253,6 +253,7 @@ public class AkAccountServiceImpl implements AkAccountService {
         AkOperatorState record = new AkOperatorState();
         record.setAkUid(akUid);
         record.setOperatorId(item.getId());
+        record.setOwned(ownedIfNull(item.getOwned()));
         record.setRarity(zeroIfNull(item.getRarity()));
         record.setLevel(zeroIfNull(item.getLevel()));
         record.setEvolvePhase(zeroIfNull(item.getEvolvePhase()));
@@ -310,6 +311,7 @@ public class AkAccountServiceImpl implements AkAccountService {
         OperatorVO vo = new OperatorVO();
         vo.setId(row.getOperatorId());
         vo.setRecordId(row.getId());
+        vo.setOwned(zeroIfNull(row.getOwned()));
         vo.setRarity(zeroIfNull(row.getRarity()));
         vo.setLevel(zeroIfNull(row.getLevel()));
         vo.setEvolvePhase(zeroIfNull(row.getEvolvePhase()));
@@ -345,6 +347,16 @@ public class AkAccountServiceImpl implements AkAccountService {
      */
     private Integer zeroIfNull(Integer value) {
         return value == null ? 0 : value;
+    }
+
+    /**
+     * 是否持有归一化：null 视为已持有（自动导入缺省按 1，与历史数据语义一致）
+     *
+     * @param value 原始值
+     * @return 0 或 1
+     */
+    private Integer ownedIfNull(Integer value) {
+        return value == null ? 1 : value;
     }
 
 }

@@ -35,7 +35,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 干员养成数据统计服务实现
  *
  * <p>执行流程：拉取干员实装时间数据 → 按主键键集分页全表扫描 ak_operator_state，边扫边累加
- * 各干员的取值分布，并顺带归集每个游戏账号的最近变更时间（MAX(updated_at)）→
+ * 各干员的取值分布（仅累加 owned=1 的记录，未持有记录不参与统计），并顺带归集每个游戏账号的最近变更时间（MAX(updated_at)）→
  * 扫描结束后按实装时间计算每个干员的有效样本数。</p>
  *
  * <p>内存控制：每批只保留本批记录，累加完成后即可回收，因此批大小决定每批的堆占用峰值
@@ -352,7 +352,10 @@ public class AkOperatorStateStatisticsServiceImpl implements AkOperatorStateStat
     }
 
     /**
-     * 累加单条干员记录：干员取值分布计数 + 顺带归集该账号的最近变更时间
+     * 累加单条干员记录：已持有记录的干员取值分布计数 + 顺带归集该账号的最近变更时间
+     *
+     * <p>只有 owned=1 的记录才计入 own 与各维度分布；owned=0 的记录仍参与账号最近变更时间归集，
+     * 因为该账号的干员数据确实发生过变更。</p>
      *
      * @param aggregates          干员编码 → 累加器
      * @param latestUpdateByAkUid 账号 → 最近一次数据变更时间，按较大值就地更新
@@ -361,18 +364,20 @@ public class AkOperatorStateStatisticsServiceImpl implements AkOperatorStateStat
     private static void accumulate(Map<String, OperatorAggregate> aggregates,
                                    Map<String, LocalDateTime> latestUpdateByAkUid,
                                    AkOperatorState row) {
-        OperatorAggregate aggregate = aggregates.computeIfAbsent(row.getOperatorId(),
-                key -> new OperatorAggregate());
-        aggregate.own++;
-        aggregate.elite.increment(row.getEvolvePhase());
-        aggregate.skill1.increment(row.getSkill1());
-        aggregate.skill2.increment(row.getSkill2());
-        aggregate.skill3.increment(row.getSkill3());
-        aggregate.modA.increment(row.getEquipA());
-        aggregate.modX.increment(row.getEquipX());
-        aggregate.modY.increment(row.getEquipY());
-        aggregate.modD.increment(row.getEquipD());
-        aggregate.modB.increment(row.getEquipB());
+        if (Integer.valueOf(1).equals(row.getOwned())) {
+            OperatorAggregate aggregate = aggregates.computeIfAbsent(row.getOperatorId(),
+                    key -> new OperatorAggregate());
+            aggregate.own++;
+            aggregate.elite.increment(row.getEvolvePhase());
+            aggregate.skill1.increment(row.getSkill1());
+            aggregate.skill2.increment(row.getSkill2());
+            aggregate.skill3.increment(row.getSkill3());
+            aggregate.modA.increment(row.getEquipA());
+            aggregate.modX.increment(row.getEquipX());
+            aggregate.modY.increment(row.getEquipY());
+            aggregate.modD.increment(row.getEquipD());
+            aggregate.modB.increment(row.getEquipB());
+        }
 
         latestUpdateByAkUid.merge(row.getAkUid(), row.getUpdatedAt(),
                 (existing, candidate) -> candidate.isAfter(existing) ? candidate : existing);

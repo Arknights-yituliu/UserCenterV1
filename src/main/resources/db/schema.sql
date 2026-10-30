@@ -252,6 +252,7 @@ CREATE TABLE `ak_operator_state` (
     `id`               BIGINT      NOT NULL AUTO_INCREMENT COMMENT '数据库自增行ID，响应中称recordId',
     `ak_uid`           VARCHAR(32) NOT NULL COMMENT '游戏账号UID，按此账号读取与更新',
     `operator_id`      VARCHAR(64) NOT NULL COMMENT '稳定干员编码，对应JSON中的id',
+    `owned`            TINYINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '是否持有：0否，1是；历史数据均为已持有，默认1',
     `rarity`           TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '干员星级，0表示未提供；业务代码筛选',
     `level`            SMALLINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '干员等级',
     `evolve_phase`     TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '精英化阶段',
@@ -269,7 +270,7 @@ CREATE TABLE `ak_operator_state` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_ak_operator` (`ak_uid`, `operator_id`) COMMENT '一个游戏账号下每个干员编码仅一条记录，支持全量读取'
 ) ENGINE = InnoDB
-  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '游戏账号干员养成状态，一行一个干员';
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '游戏账号干员养成状态（含是否持有），一行一个干员';
 
 -- -------------------------------------------------------------
 -- 13. 用户排班表

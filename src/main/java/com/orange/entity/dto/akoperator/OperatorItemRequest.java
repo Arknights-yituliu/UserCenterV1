@@ -9,7 +9,8 @@ import jakarta.validation.constraints.Pattern;
  * 单条干员数据请求参数
  *
  * <p>数值字段允许缺省/JSON null/空字符串，服务端统一归一化为整数 0（与显式传 0 等价，
- * 不表示沿用旧值）；负数与超出列范围的值由 Bean Validation 拒绝，返回业务码 10002。</p>
+ * 不表示沿用旧值）；owned 自动导入缺省按 1、手动版缺省按 0 处理。负数与超出列范围的值由
+ * Bean Validation 拒绝，返回业务码 10002。</p>
  *
  * @author UserCenter
  */
@@ -19,6 +20,11 @@ public class OperatorItemRequest {
     @NotBlank(message = "干员ID不能为空")
     @Pattern(regexp = "^[\\x21-\\x7E]{1,64}$", message = "干员ID必须为不超过64位的可见ASCII字符")
     private String id;
+
+    /** 是否持有：0 否，1 是；自动导入缺省按 1 处理，手动版缺省按 0 处理 */
+    @Min(value = 0, message = "owned不能为负数")
+    @Max(value = 1, message = "owned取值范围为0~1")
+    private Integer owned;
 
     /** 干员星级，0 表示未提供；5/6 星筛选由调用方完成 */
     @Min(value = 0, message = "rarity不能为负数")
@@ -91,6 +97,14 @@ public class OperatorItemRequest {
 
     public void setId(String id) {
         this.id = id;
+    }
+
+    public Integer getOwned() {
+        return owned;
+    }
+
+    public void setOwned(Integer owned) {
+        this.owned = owned;
     }
 
     public Integer getRarity() {

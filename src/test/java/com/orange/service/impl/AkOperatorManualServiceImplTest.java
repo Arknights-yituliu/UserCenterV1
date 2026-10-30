@@ -1,11 +1,11 @@
 package com.orange.service.impl;
 
 import com.orange.common.exception.BusinessException;
-import com.orange.entity.dto.akoperator.ManualOperatorItemRequest;
 import com.orange.entity.dto.akoperator.ManualOperatorSaveRequest;
+import com.orange.entity.dto.akoperator.OperatorItemRequest;
 import com.orange.entity.po.AkOperatorManual;
-import com.orange.entity.vo.akoperator.ManualOperatorVO;
 import com.orange.entity.vo.akoperator.OperatorSaveResultVO;
+import com.orange.entity.vo.akoperator.OperatorVO;
 import com.orange.mapper.AkOperatorManualMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -43,7 +43,7 @@ class AkOperatorManualServiceImplTest {
         row.setRarity(null);
         when(manualMapper.selectByUid(UID)).thenReturn(Collections.singletonList(row));
 
-        List<ManualOperatorVO> result = service().listManualOperators(UID);
+        List<OperatorVO> result = service().listManualOperators(UID);
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getId()).isEqualTo("char_002_amiya");
@@ -58,7 +58,7 @@ class AkOperatorManualServiceImplTest {
         when(saveExecutor.save(eq(UID), org.mockito.ArgumentMatchers.anyList()))
                 .thenReturn(new OperatorSaveResultVO(1, 0, 0));
 
-        ManualOperatorItemRequest item = new ManualOperatorItemRequest();
+        OperatorItemRequest item = new OperatorItemRequest();
         item.setId("char_002_amiya");
         item.setOwned(1);
         ManualOperatorSaveRequest request = new ManualOperatorSaveRequest();
@@ -78,9 +78,9 @@ class AkOperatorManualServiceImplTest {
 
     @Test
     void rejectsDuplicateOperatorIdInSameRequest() {
-        ManualOperatorItemRequest first = new ManualOperatorItemRequest();
+        OperatorItemRequest first = new OperatorItemRequest();
         first.setId("char_002_amiya");
-        ManualOperatorItemRequest second = new ManualOperatorItemRequest();
+        OperatorItemRequest second = new OperatorItemRequest();
         second.setId("char_002_amiya");
         ManualOperatorSaveRequest request = new ManualOperatorSaveRequest();
         request.setOperators(List.of(first, second));

@@ -16,6 +16,9 @@ public class OperatorVO {
     /** 数据库自增行 ID */
     private Long recordId;
 
+    /** 是否持有：0 否，1 是 */
+    private Integer owned;
+
     /** 干员星级，0 表示未提供 */
     private Integer rarity;
 
@@ -69,6 +72,14 @@ public class OperatorVO {
 
     public void setRecordId(Long recordId) {
         this.recordId = recordId;
+    }
+
+    public Integer getOwned() {
+        return owned;
+    }
+
+    public void setOwned(Integer owned) {
+        this.owned = owned;
     }
 
     public Integer getRarity() {

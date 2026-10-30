@@ -131,6 +131,7 @@ HTTP `200`，并携带响应头 `Cache-Control: private, no-cache`：
       {
         "id": "char_002_amiya",
         "recordId": 90001,
+        "owned": 1,
         "rarity": 5,
         "level": 80,
         "evolvePhase": 2,
@@ -156,6 +157,7 @@ HTTP `200`，并携带响应头 `Cache-Control: private, no-cache`：
 | `items` | array | 干员记录列表，无数据时为空数组 |
 | `items[].id` | string | 稳定干员编码，业务关联请使用该字段 |
 | `items[].recordId` | integer | 数据库自增行 ID，仅供排查 |
+| `items[].owned` | integer | 是否持有，`1` 是、`0` 否 |
 | `items[].rarity` | integer | 干员星级，`0` 表示未提供 |
 | `items[].level` | integer | 干员等级 |
 | `items[].evolvePhase` | integer | 精英化阶段 |
@@ -193,6 +195,7 @@ Authorization: Bearer <access_token>
 | `playerInfo.akUid` | string | 是 | 目标游戏账号 UID，不超过 32 位可见 ASCII 字符 |
 | `operators` | array | 是 | 干员数组，不能为空 |
 | `operators[].id` | string | 是 | 稳定干员编码，1-64 位可见 ASCII 字符 |
+| `operators[].owned` | integer | 否 | 是否持有，0~1，缺省按 `1` |
 | `operators[].rarity` | integer | 否 | 干员星级，0~6 |
 | `operators[].level` | integer | 否 | 干员等级，0~65535 |
 | `operators[].evolvePhase` | integer | 否 | 精英化阶段，0~255 |
@@ -201,7 +204,7 @@ Authorization: Bearer <access_token>
 | `operators[].equipX` / `equipY` / `equipD` / `equipA` / `equipB` | integer | 否 | 各模组数值，0~255 |
 | `operators[].potentialRank` | integer | 否 | 潜能等级，0~255 |
 
-数值字段可以省略、传 `null` 或空字符串，服务端统一按 `0` 落库（与显式传 `0` 等价，**不表示沿用旧值**）。负数或超出上述范围会返回 `code=10002`。
+数值字段可以省略、传 `null` 或空字符串，服务端统一按 `0` 落库（与显式传 `0` 等价，**不表示沿用旧值**）；`owned` 缺省按 `1` 落库。负数或超出上述范围会返回 `code=10002`。
 
 ### 4.2 请求示例
 
@@ -213,6 +216,7 @@ Authorization: Bearer <access_token>
   "operators": [
     {
       "id": "char_002_amiya",
+      "owned": 1,
       "rarity": 5,
       "level": 80,
       "evolvePhase": 2,
@@ -233,7 +237,7 @@ Authorization: Bearer <access_token>
 
 ### 4.3 保存语义
 
-- 传入的干员 `id` 已存在则按属性比较后更新，不存在则新增；**请求中未出现的干员不会被删除**，需要删除请走用户侧接口。
+- 传入的干员 `id` 已存在则按属性（含 `owned`）比较后更新，不存在则新增；**请求中未出现的干员不会被删除**，需要删除请走用户侧接口。
 - 同一个请求中的干员 `id` 不能重复，重复返回 `code=10002`。
 - 当前用户首次上传某个游戏账号时直接建立绑定关系，无需预先绑定。
 - 同一游戏账号 2 秒内只接受一次保存请求，命中限流返回 `code=30006`，建议等待秒数在 `data.retryAfterSeconds` 中。
@@ -288,7 +292,7 @@ HTTP `200`：
 
 ## 5. 手动修改版干员数据
 
-手动修改版是用户对自己干员数据的个人副本，**每个用户只有一份**，与具体游戏账号（`akUid`）无关；自动导入的干员数据仍按游戏账号共享，两侧互不影响。相比导入数据，手动版额外包含 `owned`（是否持有）。用户身份始终取自 access_token，不能通过请求参数指定。
+手动修改版是用户对自己干员数据的个人副本，**每个用户只有一份**，与具体游戏账号（`akUid`）无关；自动导入的干员数据仍按游戏账号共享，两侧互不影响。两侧字段一致，均包含 `owned`（是否持有）；区别仅在缺省值：自动导入缺省按 `1`，手动版缺省按 `0`。用户身份始终取自 access_token，不能通过请求参数指定。
 
 ### 5.1 读取手动修改版
 
@@ -297,7 +301,7 @@ GET /oauth2/ak-accounts/manual-operators
 Authorization: Bearer <access_token>
 ```
 
-需要 `gama-data.read`。响应体与 `GET /user/ak-accounts/manual-operators` 完全一致：`data` 为干员数组，字段与 [3.2](#32-成功响应) 相同，额外包含 `owned`（`1` 是、`0` 否，缺省按 `0`）；响应头同为 `Cache-Control: private, no-cache`。
+需要 `gama-data.read`。响应体与 `GET /user/ak-accounts/manual-operators` 完全一致：`data` 为干员数组，字段与 [3.2](#32-成功响应) 相同（含 `owned`，手动版缺省按 `0`）；响应头同为 `Cache-Control: private, no-cache`。
 
 ### 5.2 保存手动修改版
 

@@ -9,8 +9,8 @@ import java.time.LocalDateTime;
 /**
  * 干员养成状态实体（ak_operator_state）：一行一个干员，按 ak_uid 归属
  *
- * <p>记录某游戏账号下每个干员的当前养成状态（等级、精英化、技能、模组、潜能）。
- * 所有数值属性非空，缺省/null/空字符串在保存前统一归一化为 0。</p>
+ * <p>记录某游戏账号下每个干员的当前养成状态（是否持有、等级、精英化、技能、模组、潜能）。
+ * 所有数值属性非空，缺省/null/空字符串在保存前统一归一化为 0（owned 缺省归一化为 1）。</p>
  *
  * @author UserCenter
  */
@@ -26,6 +26,9 @@ public class AkOperatorState {
 
     /** 稳定干员编码，对应 JSON 中的 id */
     private String operatorId;
+
+    /** 是否持有：0 否，1 是 */
+    private Integer owned;
 
     /** 干员星级，0 表示未提供 */
     private Integer rarity;
@@ -91,6 +94,14 @@ public class AkOperatorState {
 
     public void setOperatorId(String operatorId) {
         this.operatorId = operatorId;
+    }
+
+    public Integer getOwned() {
+        return owned;
+    }
+
+    public void setOwned(Integer owned) {
+        this.owned = owned;
     }
 
     public Integer getRarity() {

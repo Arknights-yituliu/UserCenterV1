@@ -18,13 +18,13 @@ public class ManualOperatorSaveRequest {
     /** 干员数组，空数组拒绝 */
     @NotEmpty(message = "干员数据不能为空")
     @Valid
-    private List<ManualOperatorItemRequest> operators;
+    private List<OperatorItemRequest> operators;
 
-    public List<ManualOperatorItemRequest> getOperators() {
+    public List<OperatorItemRequest> getOperators() {
         return operators;
     }
 
-    public void setOperators(List<ManualOperatorItemRequest> operators) {
+    public void setOperators(List<OperatorItemRequest> operators) {
         this.operators = operators;
     }
 }

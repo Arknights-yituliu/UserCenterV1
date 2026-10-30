@@ -6,9 +6,9 @@ import com.orange.common.util.Result;
 import com.orange.entity.dto.akoperator.ManualOperatorSaveRequest;
 import com.orange.entity.dto.akoperator.OperatorSaveRequest;
 import com.orange.entity.vo.akoperator.AkAccountVO;
-import com.orange.entity.vo.akoperator.ManualOperatorVO;
 import com.orange.entity.vo.akoperator.OperatorListVO;
 import com.orange.entity.vo.akoperator.OperatorSaveResultVO;
+import com.orange.entity.vo.akoperator.OperatorVO;
 import com.orange.service.AkAccountService;
 import com.orange.service.AkOperatorManualService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -98,9 +98,9 @@ public class OAuthAkAccountController {
      */
     @Operation(summary = "读取本人的手动修改版干员数据（OAuth）")
     @GetMapping("/manual-operators")
-    public ResponseEntity<Result<List<ManualOperatorVO>>> listManualOperators() {
+    public ResponseEntity<Result<List<OperatorVO>>> listManualOperators() {
         UserContext.requireScope(OAuthScope.GAMA_DATA_READ);
-        List<ManualOperatorVO> data = akOperatorManualService.listManualOperators(UserContext.requireUid());
+        List<OperatorVO> data = akOperatorManualService.listManualOperators(UserContext.requireUid());
         return ResponseEntity.ok()
                 .header(HttpHeaders.CACHE_CONTROL, OPERATOR_CACHE_CONTROL)
                 .body(Result.success(data));

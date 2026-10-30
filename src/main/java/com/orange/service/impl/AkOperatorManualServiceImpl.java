@@ -3,11 +3,11 @@ package com.orange.service.impl;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.util.LogUtil;
-import com.orange.entity.dto.akoperator.ManualOperatorItemRequest;
 import com.orange.entity.dto.akoperator.ManualOperatorSaveRequest;
+import com.orange.entity.dto.akoperator.OperatorItemRequest;
 import com.orange.entity.po.AkOperatorManual;
-import com.orange.entity.vo.akoperator.ManualOperatorVO;
 import com.orange.entity.vo.akoperator.OperatorSaveResultVO;
+import com.orange.entity.vo.akoperator.OperatorVO;
 import com.orange.mapper.AkOperatorManualMapper;
 import com.orange.service.AkOperatorManualService;
 import org.springframework.dao.DuplicateKeyException;
@@ -58,9 +58,9 @@ public class AkOperatorManualServiceImpl implements AkOperatorManualService {
      * @return 手动版干员列表，无数据时返回空列表
      */
     @Override
-    public List<ManualOperatorVO> listManualOperators(Long uid) {
+    public List<OperatorVO> listManualOperators(Long uid) {
         List<AkOperatorManual> rows = manualMapper.selectByUid(uid);
-        List<ManualOperatorVO> items = new ArrayList<>(rows.size());
+        List<OperatorVO> items = new ArrayList<>(rows.size());
         for (AkOperatorManual row : rows) {
             items.add(toManualOperatorVO(row));
         }
@@ -111,10 +111,10 @@ public class AkOperatorManualServiceImpl implements AkOperatorManualService {
      * @param items 客户端提交的干员数组（已通过 Bean Validation 的格式与范围校验）
      * @return 可直接落库的手动版干员记录列表
      */
-    private List<AkOperatorManual> normalizeOperators(Long uid, List<ManualOperatorItemRequest> items) {
+    private List<AkOperatorManual> normalizeOperators(Long uid, List<OperatorItemRequest> items) {
         Set<String> seenIds = new HashSet<>(Math.max(16, items.size() * 2));
         List<AkOperatorManual> result = new ArrayList<>(items.size());
-        for (ManualOperatorItemRequest item : items) {
+        for (OperatorItemRequest item : items) {
             if (!seenIds.add(item.getId())) {
                 throw new BusinessException(ResultCode.PARAM_VALID_ERROR, "同一请求中干员ID重复：" + item.getId());
             }
@@ -130,7 +130,7 @@ public class AkOperatorManualServiceImpl implements AkOperatorManualService {
      * @param item 客户端提交的干员记录
      * @return 手动版落库实体（id 与 updatedAt 由服务端维护）
      */
-    private AkOperatorManual toManualRecord(Long uid, ManualOperatorItemRequest item) {
+    private AkOperatorManual toManualRecord(Long uid, OperatorItemRequest item) {
         AkOperatorManual record = new AkOperatorManual();
         record.setUid(uid);
         record.setOperatorId(item.getId());
@@ -157,8 +157,8 @@ public class AkOperatorManualServiceImpl implements AkOperatorManualService {
      * @param row 手动版干员实体
      * @return 手动版干员视图对象
      */
-    private ManualOperatorVO toManualOperatorVO(AkOperatorManual row) {
-        ManualOperatorVO vo = new ManualOperatorVO();
+    private OperatorVO toManualOperatorVO(AkOperatorManual row) {
+        OperatorVO vo = new OperatorVO();
         vo.setId(row.getOperatorId());
         vo.setRecordId(row.getId());
         vo.setOwned(zeroIfNull(row.getOwned()));

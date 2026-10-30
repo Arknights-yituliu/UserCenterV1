@@ -1,8 +1,8 @@
 package com.orange.service;
 
 import com.orange.entity.dto.akoperator.ManualOperatorSaveRequest;
-import com.orange.entity.vo.akoperator.ManualOperatorVO;
 import com.orange.entity.vo.akoperator.OperatorSaveResultVO;
+import com.orange.entity.vo.akoperator.OperatorVO;
 
 import java.util.List;
 
@@ -22,7 +22,7 @@ public interface AkOperatorManualService {
      * @param uid 用户中心 UID
      * @return 手动版干员列表，无数据时返回空列表
      */
-    List<ManualOperatorVO> listManualOperators(Long uid);
+    List<OperatorVO> listManualOperators(Long uid);
 
     /**
      * 保存当前用户的手动修改版干员数据：有则按属性比较后更新，无则新增，未传入的记录不处理
