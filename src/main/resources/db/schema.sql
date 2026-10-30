@@ -358,3 +358,35 @@ CREATE TABLE `oauth_custom_token` (
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '用户自定义有效期的access_token签发记录';
 
+-- -------------------------------------------------------------
+-- 17. 用户手动修改版干员数据（一行一个干员，按 uid 归属，每个用户一份）
+--
+-- 与 ak_operator_state（游戏账号自动导入、被全部绑定用户共享）不同，本表按用户维度
+-- 保存用户手工调整后的干员数据，并额外记录「是否持有」。一个 uid 只能有一份手动修改版，
+-- 由唯一键 uk_uid_operator_manual 保证，不存在版本号或历史表。
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `ak_operator_manual`;
+CREATE TABLE `ak_operator_manual` (
+    `id`               BIGINT          NOT NULL AUTO_INCREMENT COMMENT '主键，响应中称recordId',
+    `uid`              BIGINT          NOT NULL COMMENT '用户中心UID，手动修改版按用户归属',
+    `operator_id`      VARCHAR(64)     NOT NULL COMMENT '稳定干员编码，对应JSON中的id',
+    `owned`            TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '是否持有：0否，1是',
+    `rarity`           TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '干员星级，0表示未提供；业务代码筛选',
+    `level`            SMALLINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '干员等级',
+    `evolve_phase`     TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '精英化阶段',
+    `main_skill_level` TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '基础技能等级',
+    `skill1`           TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '技能1等级或状态',
+    `skill2`           TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '技能2等级或状态',
+    `skill3`           TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '技能3等级或状态',
+    `equip_x`          TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'X模组数值',
+    `equip_y`          TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Y模组数值',
+    `equip_d`          TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'D模组数值',
+    `equip_a`          TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'A模组数值',
+    `equip_b`          TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'B模组数值',
+    `potential_rank`   TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '潜能等级，不是星级',
+    `updated_at`       DATETIME(3)     NOT NULL COMMENT '该干员手动版最后一次实际变更时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_uid_operator_manual` (`uid`, `operator_id`) COMMENT '一个用户下每个干员编码仅一条手动记录'
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '用户手动修改版干员数据，一行一个干员，每个用户一份';
+

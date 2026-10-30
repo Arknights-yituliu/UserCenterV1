@@ -286,7 +286,56 @@ HTTP `200`：
 }
 ```
 
-## 5. 常见错误总览
+## 5. 手动修改版干员数据
+
+手动修改版是用户对自己干员数据的个人副本，**每个用户只有一份**，与具体游戏账号（`akUid`）无关；自动导入的干员数据仍按游戏账号共享，两侧互不影响。相比导入数据，手动版额外包含 `owned`（是否持有）。用户身份始终取自 access_token，不能通过请求参数指定。
+
+### 5.1 读取手动修改版
+
+```http
+GET /oauth2/ak-accounts/manual-operators
+Authorization: Bearer <access_token>
+```
+
+需要 `gama-data.read`。响应体与 `GET /user/ak-accounts/manual-operators` 完全一致：`data` 为干员数组，字段与 [3.2](#32-成功响应) 相同，额外包含 `owned`（`1` 是、`0` 否，缺省按 `0`）；响应头同为 `Cache-Control: private, no-cache`。
+
+### 5.2 保存手动修改版
+
+```http
+POST /oauth2/ak-accounts/manual-operators/save
+Content-Type: application/json
+Authorization: Bearer <access_token>
+```
+
+需要 `gama-data.write`。请求体只需要干员数组，结构与 `POST /user/ak-accounts/manual-operators/save` 完全一致：
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `operators` | array | 是 | 干员数组，不能为空 |
+| `operators[].id` | string | 是 | 稳定干员编码，1-64 位可见 ASCII 字符 |
+| `operators[].owned` | integer | 否 | 是否持有，0~1，缺省按 `0` |
+| 其余字段 | - | 否 | 与 [4.1](#41-请求字段) 中的数值字段范围一致 |
+
+保存语义：
+
+- 传入的干员 `id` 已存在则按属性（含 `owned`）比较后更新，不存在则新增；**请求中未出现的干员不会被删除**。
+- 同一个请求中的干员 `id` 不能重复，重复返回 `code=10002`。
+- 保存过程遇到唯一键冲突或死锁时，服务端整事务回滚后重试，最多 2 次；仍失败返回 `code=40004`。
+- 本接口不占用游戏账号的上传限流名额，因此不会返回 `30006`。
+
+成功响应与 [4.4](#44-成功响应) 一致，返回 `createdCount` / `updatedCount` / `unchangedCount`。
+
+### 5.3 失败响应
+
+| HTTP 状态 | `code` | 含义 | 处理建议 |
+| --- | --- | --- | --- |
+| `200` | `80001` | access token 缺失、无效或已过期 | 刷新或重新获取 access token |
+| `200` | `80008` | 缺少 `gama-data.read` / `gama-data.write` | 在授权请求中申请对应 scope |
+| `200` | `10002` | 字段缺失、格式错误、数值越界或干员 `id` 重复 | 修正请求后重试 |
+| `200` | `40004` | 手动版数据保存冲突 | 重试整个请求 |
+| `200` | `40001` | 服务端内部错误 | 稍后重试并保留请求信息 |
+
+## 6. 常见错误总览
 
 | `code` | 含义 | 出现场景 |
 | --- | --- | --- |

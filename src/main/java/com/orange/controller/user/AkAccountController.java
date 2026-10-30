@@ -2,11 +2,14 @@ package com.orange.controller.user;
 
 import com.orange.common.context.UserContext;
 import com.orange.common.util.Result;
+import com.orange.entity.dto.akoperator.ManualOperatorSaveRequest;
 import com.orange.entity.dto.akoperator.OperatorSaveRequest;
 import com.orange.entity.vo.akoperator.AkAccountVO;
+import com.orange.entity.vo.akoperator.ManualOperatorVO;
 import com.orange.entity.vo.akoperator.OperatorListVO;
 import com.orange.entity.vo.akoperator.OperatorSaveResultVO;
 import com.orange.service.AkAccountService;
+import com.orange.service.AkOperatorManualService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -40,13 +43,18 @@ public class AkAccountController {
 
     private final AkAccountService akAccountService;
 
+    private final AkOperatorManualService akOperatorManualService;
+
     /**
      * 构造器注入服务
      *
-     * @param akAccountService 游戏账号与干员数据服务
+     * @param akAccountService        游戏账号与干员数据服务
+     * @param akOperatorManualService 用户手动修改版干员数据服务
      */
-    public AkAccountController(AkAccountService akAccountService) {
+    public AkAccountController(AkAccountService akAccountService,
+                               AkOperatorManualService akOperatorManualService) {
         this.akAccountService = akAccountService;
+        this.akOperatorManualService = akOperatorManualService;
     }
 
     /**
@@ -85,5 +93,31 @@ public class AkAccountController {
     @PostMapping("/operators/save")
     public Result<OperatorSaveResultVO> saveOperators(@Valid @RequestBody OperatorSaveRequest request) {
         return Result.success(akAccountService.saveOperators(UserContext.requireUid(), request));
+    }
+
+    /**
+     * 读取当前用户本人的手动修改版干员数据：每个用户一份，与具体游戏账号无关
+     *
+     * @return 手动版干员列表，响应仅允许私人缓存
+     */
+    @Operation(summary = "读取本人的手动修改版干员数据")
+    @GetMapping("/manual-operators")
+    public ResponseEntity<Result<List<ManualOperatorVO>>> listManualOperators() {
+        List<ManualOperatorVO> data = akOperatorManualService.listManualOperators(UserContext.requireUid());
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CACHE_CONTROL, OPERATOR_CACHE_CONTROL)
+                .body(Result.success(data));
+    }
+
+    /**
+     * 保存当前用户本人的手动修改版干员数据：传入的干员 ID 有则按属性比较后更新，无则新增，未传入的记录不处理
+     *
+     * @param request 保存参数（非空干员数组）
+     * @return 新增/更新/未变更条数统计
+     */
+    @Operation(summary = "保存本人的手动修改版干员数据")
+    @PostMapping("/manual-operators/save")
+    public Result<OperatorSaveResultVO> saveManualOperators(@Valid @RequestBody ManualOperatorSaveRequest request) {
+        return Result.success(akOperatorManualService.saveManualOperators(UserContext.requireUid(), request));
     }
 }
