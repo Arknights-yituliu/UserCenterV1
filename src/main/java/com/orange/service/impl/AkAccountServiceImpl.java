@@ -21,6 +21,7 @@ import com.orange.mapper.AkPlayerInfoMapper;
 import com.orange.mapper.AkOperatorStateManualMapper;
 import com.orange.mapper.AkOperatorStateMapper;
 import com.orange.service.AkAccountService;
+import com.orange.service.AkOperatorStateManualService;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -68,29 +69,33 @@ public class AkAccountServiceImpl implements AkAccountService {
     private final AkPlayerInfoMapper playerInfoMapper;
     private final AkOperatorStateMapper operatorMapper;
     private final AkOperatorStateManualMapper manualMapper;
+    private final AkOperatorStateManualService manualOperatorService;
     private final AkOperatorSaveExecutor saveExecutor;
     private final StringRedisTemplate stringRedisTemplate;
 
     /**
      * 构造器注入依赖
      *
-     * @param bindingMapper       绑定关系 Mapper
-     * @param playerInfoMapper    角色信息 Mapper
-     * @param operatorMapper      干员数据 Mapper
-     * @param manualMapper        手动版干员数据 Mapper（仅用于账号列表的汇总时间）
-     * @param saveExecutor        写事务执行器（独立 Bean 保证 @Transactional 生效）
-     * @param stringRedisTemplate Redis 客户端，用于跨实例的原子限流
+     * @param bindingMapper         绑定关系 Mapper
+     * @param playerInfoMapper      角色信息 Mapper
+     * @param operatorMapper        干员数据 Mapper
+     * @param manualMapper          手动版干员数据 Mapper（仅用于账号列表的汇总时间）
+     * @param manualOperatorService 手动版干员数据服务，读取手动条目时复用其字段映射
+     * @param saveExecutor          写事务执行器（独立 Bean 保证 @Transactional 生效）
+     * @param stringRedisTemplate   Redis 客户端，用于跨实例的原子限流
      */
     public AkAccountServiceImpl(AkAccountBindingMapper bindingMapper,
                                 AkPlayerInfoMapper playerInfoMapper,
                                 AkOperatorStateMapper operatorMapper,
                                 AkOperatorStateManualMapper manualMapper,
+                                AkOperatorStateManualService manualOperatorService,
                                 AkOperatorSaveExecutor saveExecutor,
                                 StringRedisTemplate stringRedisTemplate) {
         this.bindingMapper = bindingMapper;
         this.playerInfoMapper = playerInfoMapper;
         this.operatorMapper = operatorMapper;
         this.manualMapper = manualMapper;
+        this.manualOperatorService = manualOperatorService;
         this.saveExecutor = saveExecutor;
         this.stringRedisTemplate = stringRedisTemplate;
     }
@@ -132,15 +137,41 @@ public class AkAccountServiceImpl implements AkAccountService {
     }
 
     /**
-     * 全量读取某游戏账号的干员数据，读取前先核对本人绑定关系
+     * 全量读取干员数据，手动条目与自动数据分别走不同数据表
      *
-     * @param uid   用户中心 UID
-     * @param akUid 游戏账号 UID
-     * @return 该账号全部干员数据，无数据时 items 为空数组
+     * <p>归属：手动数据只读当前登录用户本人那一份，因此 {@code source=manual} 时还要求
+     * {@code akUid} 等于当前用户中心 UID，避免客户端拿别人的 akUid 取回本人手动数据；
+     * {@code source} 为空时按 akUid 自动识别，手动版无记录再回落到绑定关系鉴权的自动数据。</p>
+     *
+     * @param uid    用户中心 UID
+     * @param akUid  数据条目 UID：自动数据为游戏账号 UID，手动数据复用用户中心 UID
+     * @param source 数据来源，可选：manual 手动版，skland 森空岛自动导入，为空时自动识别
+     * @return 对应来源的全部干员数据，无数据时 items 为空数组
      */
     @Override
-    public OperatorListVO listOperators(Long uid, String akUid) {
+    public OperatorListVO listOperators(Long uid, String akUid, String source) {
         validateAkUid(akUid);
+        // 手动条目没有游戏账号，akUid 复用用户中心 UID
+        String manualAkUid = String.valueOf(uid);
+        if (StringUtils.hasText(source)) {
+            if (AkAccountVO.SOURCE_MANUAL.equals(source)) {
+                if (!manualAkUid.equals(akUid)) {
+                    throw new BusinessException(ResultCode.PARAM_VALID_ERROR, "手动数据来源的 akUid 必须为当前用户中心UID");
+                }
+                return new OperatorListVO(akUid, manualOperatorService.listManualOperators(uid));
+            }
+            if (!AkAccountVO.SOURCE_SKLAND.equals(source)) {
+                throw new BusinessException(ResultCode.PARAM_VALID_ERROR, "source 仅支持 manual 或 skland");
+            }
+        } else if (manualAkUid.equals(akUid)) {
+            // 未显式指定来源时按 akUid 识别手动条目；手动版无记录则回落到自动数据，
+            // 兼容游戏账号 akUid 恰好与用户中心 UID 撞号的情况
+            List<OperatorVO> manualItems = manualOperatorService.listManualOperators(uid);
+            if (!manualItems.isEmpty()) {
+                return new OperatorListVO(akUid, manualItems);
+            }
+        }
+
         requireBinding(akUid, uid);
         List<AkOperatorState> rows = operatorMapper.selectByAkUid(akUid);
         List<OperatorVO> items = new ArrayList<>(rows.size());

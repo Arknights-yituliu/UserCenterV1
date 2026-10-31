@@ -17,6 +17,7 @@ import java.lang.reflect.Method;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -61,20 +62,6 @@ class OAuthGameDataControllerTest {
     }
 
     @Test
-    void manualOperatorReadRejectsTokenWithoutGameDataReadScope() {
-        AkAccountService accountService = mock(AkAccountService.class);
-        AkOperatorStateManualService manualService = mock(AkOperatorStateManualService.class);
-        OAuthAkAccountController controller = new OAuthAkAccountController(accountService, manualService);
-        UserContext.setUid(7L);
-        UserContext.setScope("gama-data.write");
-
-        BusinessException exception = assertThrows(BusinessException.class, controller::listManualOperators);
-
-        assertEquals(80008, exception.getCode());
-        verify(manualService, never()).listManualOperators(any());
-    }
-
-    @Test
     void manualOperatorWriteRequiresGameDataWriteScope() {
         AkAccountService accountService = mock(AkAccountService.class);
         AkOperatorStateManualService manualService = mock(AkOperatorStateManualService.class);
@@ -94,15 +81,16 @@ class OAuthGameDataControllerTest {
     }
 
     private void assertAccountRoutes(Class<?> controllerClass) throws NoSuchMethodException {
-        Method read = controllerClass.getDeclaredMethod("listOperators", String.class);
+        Method read = controllerClass.getDeclaredMethod("listOperators", String.class, String.class);
         Method save = controllerClass.getDeclaredMethod("saveOperators", OperatorSaveRequest.class);
-        Method manualRead = controllerClass.getDeclaredMethod("listManualOperators");
         Method manualSave = controllerClass.getDeclaredMethod("saveManualOperators", OperatorStateManualSaveRequest.class);
 
         assertEquals("/operators", read.getAnnotation(GetMapping.class).value()[0]);
         assertEquals("/operators/save", save.getAnnotation(PostMapping.class).value()[0]);
-        assertEquals("/manual-operators", manualRead.getAnnotation(GetMapping.class).value()[0]);
         assertEquals("/manual-operators/save", manualSave.getAnnotation(PostMapping.class).value()[0]);
         assertEquals("akUid", read.getParameters()[0].getAnnotation(RequestParam.class).value());
+        assertEquals("source", read.getParameters()[1].getAnnotation(RequestParam.class).value());
+        // 来源参数可空：不传时后端按 akUid 是否等于当前用户 UID 自动识别
+        assertFalse(read.getParameters()[1].getAnnotation(RequestParam.class).required());
     }
 }

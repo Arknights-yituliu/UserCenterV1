@@ -119,17 +119,21 @@ HTTP `200`：
 ## 3. 干员数据
 
 ```http
-GET /oauth2/ak-accounts/operators?akUid={akUid}
+GET /oauth2/ak-accounts/operators?akUid={akUid}&source={source}
 Authorization: Bearer <access_token>
 ```
 
-需要 `gama-data.read`。全量返回该游戏账号的干员数据，星级筛选由调用方完成。
+需要 `gama-data.read`。全量返回该数据条目的干员数据，星级筛选由调用方完成。数据来源由 `source` 决定：
+
+- 自动导入数据（`source=skland`，或省略 `source` 且未命中手动条目）：`akUid` 必须是当前令牌用户名下的游戏账号；
+- 手动修改版（`source=manual`）：`akUid` 传当前令牌用户的用户中心 UID，读取本人唯一的手动副本，不校验游戏账号绑定关系。
 
 ### 3.1 查询参数
 
 | 参数 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `akUid` | string | 是 | 游戏账号 UID，不超过 32 位可见 ASCII 字符 |
+| `akUid` | string | 是 | 数据条目 UID：自动数据为游戏账号 UID，手动数据为用户中心 UID，不超过 32 位可见 ASCII 字符 |
+| `source` | string | 否 | 数据来源：`manual` 手动修改版、`skland` 森空岛自动导入；省略时按 `akUid` 是否等于当前令牌用户 UID 自动识别 |
 
 ### 3.2 成功响应
 
@@ -308,16 +312,9 @@ HTTP `200`：
 
 手动修改版是用户对自己干员数据的个人副本，**每个用户只有一份**，与具体游戏账号（`akUid`）无关；自动导入的干员数据仍按游戏账号共享，两侧互不影响。两侧字段一致，均包含 `owned`（是否持有）；区别仅在缺省值：自动导入缺省按 `1`，手动版缺省按 `0`。用户身份始终取自 access_token，不能通过请求参数指定。
 
-### 5.1 读取手动修改版
+读取手动修改版统一使用 [3. 干员数据](#3-干员数据)：传入 `source=manual`，`akUid` 取当前令牌用户的用户中心 UID（即 `GET /oauth2/ak-accounts` 返回的手动条目中的 `akUid`），响应结构为 `data.akUid` + `data.items`。
 
-```http
-GET /oauth2/ak-accounts/manual-operators
-Authorization: Bearer <access_token>
-```
-
-需要 `gama-data.read`。响应体与 `GET /user/ak-accounts/manual-operators` 完全一致：`data` 为干员数组，字段与 [3.2](#32-成功响应) 相同（含 `owned`，手动版缺省按 `0`）；响应头同为 `Cache-Control: private, no-cache`。
-
-### 5.2 保存手动修改版
+### 5.1 保存手动修改版
 
 ```http
 POST /oauth2/ak-accounts/manual-operators/save
@@ -343,12 +340,12 @@ Authorization: Bearer <access_token>
 
 成功响应与 [4.4](#44-成功响应) 一致，返回 `createdCount` / `updatedCount` / `unchangedCount`。
 
-### 5.3 失败响应
+### 5.2 失败响应
 
 | HTTP 状态 | `code` | 含义 | 处理建议 |
 | --- | --- | --- | --- |
 | `200` | `80001` | access token 缺失、无效或已过期 | 刷新或重新获取 access token |
-| `200` | `80008` | 缺少 `gama-data.read` / `gama-data.write` | 在授权请求中申请对应 scope |
+| `200` | `80008` | 缺少 `gama-data.write` | 在授权请求中申请对应 scope |
 | `200` | `10002` | 字段缺失、格式错误、数值越界或干员 `id` 重复 | 修正请求后重试 |
 | `200` | `40004` | 手动版数据保存冲突 | 重试整个请求 |
 | `200` | `40001` | 服务端内部错误 | 稍后重试并保留请求信息 |

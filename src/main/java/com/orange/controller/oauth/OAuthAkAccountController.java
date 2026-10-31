@@ -8,7 +8,6 @@ import com.orange.entity.dto.akoperator.OperatorSaveRequest;
 import com.orange.entity.vo.akoperator.AkAccountVO;
 import com.orange.entity.vo.akoperator.OperatorListVO;
 import com.orange.entity.vo.akoperator.OperatorSaveResultVO;
-import com.orange.entity.vo.akoperator.OperatorVO;
 import com.orange.service.AkAccountService;
 import com.orange.service.AkOperatorStateManualService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -63,16 +62,19 @@ public class OAuthAkAccountController {
     }
 
     /**
-     * 全量读取某游戏账号的干员数据。
+     * 全量读取干员数据：数据来源可由 source 显式指定，不传时按 akUid 自动识别手动条目。
      *
-     * @param akUid 游戏账号 UID
+     * @param akUid  数据条目 UID：自动数据为游戏账号 UID，手动数据复用用户中心 UID
+     * @param source 数据来源，可选：manual 手动版，skland 森空岛自动导入
      * @return 干员全量数据
      */
-    @Operation(summary = "全量读取游戏账号的干员数据（OAuth）")
+    @Operation(summary = "全量读取干员数据（OAuth）")
     @GetMapping("/operators")
-    public ResponseEntity<Result<OperatorListVO>> listOperators(@RequestParam("akUid") String akUid) {
+    public ResponseEntity<Result<OperatorListVO>> listOperators(
+            @RequestParam("akUid") String akUid,
+            @RequestParam(value = "source", required = false) String source) {
         UserContext.requireScope(OAuthScope.GAMA_DATA_READ);
-        OperatorListVO data = akAccountService.listOperators(UserContext.requireUid(), akUid);
+        OperatorListVO data = akAccountService.listOperators(UserContext.requireUid(), akUid, source);
         return ResponseEntity.ok()
                 .header(HttpHeaders.CACHE_CONTROL, OPERATOR_CACHE_CONTROL)
                 .body(Result.success(data));
@@ -89,21 +91,6 @@ public class OAuthAkAccountController {
     public Result<OperatorSaveResultVO> saveOperators(@Valid @RequestBody OperatorSaveRequest request) {
         UserContext.requireScope(OAuthScope.GAMA_DATA_WRITE);
         return Result.success(akAccountService.saveOperators(UserContext.requireUid(), request));
-    }
-
-    /**
-     * 读取当前 OAuth 用户本人的手动修改版干员数据：每个用户一份，与具体游戏账号无关。
-     *
-     * @return 手动版干员列表
-     */
-    @Operation(summary = "读取本人的手动修改版干员数据（OAuth）")
-    @GetMapping("/manual-operators")
-    public ResponseEntity<Result<List<OperatorVO>>> listManualOperators() {
-        UserContext.requireScope(OAuthScope.GAMA_DATA_READ);
-        List<OperatorVO> data = akOperatorStateManualService.listManualOperators(UserContext.requireUid());
-        return ResponseEntity.ok()
-                .header(HttpHeaders.CACHE_CONTROL, OPERATOR_CACHE_CONTROL)
-                .body(Result.success(data));
     }
 
     /**

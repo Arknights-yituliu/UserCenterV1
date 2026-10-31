@@ -7,7 +7,6 @@ import com.orange.entity.dto.akoperator.OperatorSaveRequest;
 import com.orange.entity.vo.akoperator.AkAccountVO;
 import com.orange.entity.vo.akoperator.OperatorListVO;
 import com.orange.entity.vo.akoperator.OperatorSaveResultVO;
-import com.orange.entity.vo.akoperator.OperatorVO;
 import com.orange.service.AkAccountService;
 import com.orange.service.AkOperatorStateManualService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -69,15 +68,21 @@ public class AkAccountController {
     }
 
     /**
-     * 全量读取某游戏账号的干员数据：始终返回该账号全部干员，星级筛选由调用方完成
+     * 全量读取干员数据：始终返回该条目全部干员，星级筛选由调用方完成
      *
-     * @param akUid 游戏账号 UID
+     * <p>数据来源可由 {@code source} 显式指定；不传时后端按 {@code akUid}
+     * 是否等于当前用户中心 UID 自动识别手动条目。</p>
+     *
+     * @param akUid  数据条目 UID：自动数据为游戏账号 UID，手动数据复用用户中心 UID
+     * @param source 数据来源，可选：manual 手动版，skland 森空岛自动导入
      * @return 干员全量数据，响应仅允许私人缓存
      */
-    @Operation(summary = "全量读取游戏账号的干员数据")
+    @Operation(summary = "全量读取干员数据")
     @GetMapping("/operators")
-    public ResponseEntity<Result<OperatorListVO>> listOperators(@RequestParam("akUid") String akUid) {
-        OperatorListVO data = akAccountService.listOperators(UserContext.requireUid(), akUid);
+    public ResponseEntity<Result<OperatorListVO>> listOperators(
+            @RequestParam("akUid") String akUid,
+            @RequestParam(value = "source", required = false) String source) {
+        OperatorListVO data = akAccountService.listOperators(UserContext.requireUid(), akUid, source);
         return ResponseEntity.ok()
                 .header(HttpHeaders.CACHE_CONTROL, OPERATOR_CACHE_CONTROL)
                 .body(Result.success(data));
@@ -93,20 +98,6 @@ public class AkAccountController {
     @PostMapping("/operators/save")
     public Result<OperatorSaveResultVO> saveOperators(@Valid @RequestBody OperatorSaveRequest request) {
         return Result.success(akAccountService.saveOperators(UserContext.requireUid(), request));
-    }
-
-    /**
-     * 读取当前用户本人的手动修改版干员数据：每个用户一份，与具体游戏账号无关
-     *
-     * @return 手动版干员列表，响应仅允许私人缓存
-     */
-    @Operation(summary = "读取本人的手动修改版干员数据")
-    @GetMapping("/manual-operators")
-    public ResponseEntity<Result<List<OperatorVO>>> listManualOperators() {
-        List<OperatorVO> data = akOperatorStateManualService.listManualOperators(UserContext.requireUid());
-        return ResponseEntity.ok()
-                .header(HttpHeaders.CACHE_CONTROL, OPERATOR_CACHE_CONTROL)
-                .body(Result.success(data));
     }
 
     /**
