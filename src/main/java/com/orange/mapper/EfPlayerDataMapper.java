@@ -5,6 +5,7 @@ import com.orange.entity.po.EfPlayerData;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 import java.time.LocalDateTime;
 
@@ -35,4 +36,15 @@ public interface EfPlayerDataMapper extends BaseMapper<EfPlayerData> {
                          @Param("serverId") String serverId,
                          @Param("playerData") String playerData,
                          @Param("updatedAt") LocalDateTime updatedAt);
+
+    /**
+     * 按角色定位查询玩家数据
+     *
+     * @param roleId   终末地游戏内角色 UID
+     * @param serverId 服务器 ID（已归一化，非 null）
+     * @return 玩家数据行，不存在时返回 null
+     */
+    @Select("SELECT * FROM ef_player_data WHERE role_id = #{roleId} AND server_id = #{serverId}")
+    EfPlayerData selectByRoleAndServer(@Param("roleId") String roleId,
+                                       @Param("serverId") String serverId);
 }

@@ -10,7 +10,11 @@ import com.orange.common.util.LogUtil;
 import com.orange.common.util.RedisKeyUtil;
 import com.orange.common.util.SignUtil;
 import com.orange.entity.dto.efplayer.EfPlayerDataSaveRequest;
+import com.orange.entity.po.EfAccountBinding;
+import com.orange.entity.po.EfPlayerData;
+import com.orange.entity.vo.efplayer.EfAccountVO;
 import com.orange.entity.vo.efplayer.EfPlayerDataSaveResultVO;
+import com.orange.entity.vo.efplayer.EfPlayerDataVO;
 import com.orange.mapper.EfAccountBindingMapper;
 import com.orange.mapper.EfPlayerDataMapper;
 import com.orange.service.EfPlayerDataService;
@@ -21,6 +25,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Pattern;
 
 /**
@@ -70,6 +76,81 @@ public class EfPlayerDataServiceImpl implements EfPlayerDataService {
         this.playerDataMapper = playerDataMapper;
         this.objectMapper = objectMapper;
         this.stringRedisTemplate = stringRedisTemplate;
+    }
+
+    /**
+     * 查询当前用户已绑定的终末地角色列表，按最近导入时间倒序
+     *
+     * @param uid 用户中心 UID
+     * @return 已绑定角色列表（不含玩家数据正文），无绑定关系时返回空列表
+     */
+    @Override
+    public List<EfAccountVO> listBoundAccounts(Long uid) {
+        List<EfAccountBinding> bindings = bindingMapper.selectByOwnerOrderByUpdateTime(uid);
+        List<EfAccountVO> accounts = new ArrayList<>(bindings.size());
+        for (EfAccountBinding binding : bindings) {
+            accounts.add(toAccountVO(binding));
+        }
+        return accounts;
+    }
+
+    /**
+     * 读取指定角色的玩家数据：先校验绑定归属，再把 JSON 文本解析为对象返回
+     *
+     * <p>绑定关系不存在时返回业务码 80008，避免用户读取他人角色数据；
+     * 绑定存在但数据行缺失（异常清理场景）时返回 null。</p>
+     *
+     * @param uid      用户中心 UID
+     * @param roleId   终末地游戏内角色 UID
+     * @param serverId 服务器 ID，可省略（按空串处理）
+     * @return 玩家数据；绑定存在但数据行缺失时返回 null
+     */
+    @Override
+    public EfPlayerDataVO getPlayerData(Long uid, String roleId, String serverId) {
+        String normalizedServerId = normalizeServerId(serverId);
+        validateIdentity(roleId, normalizedServerId);
+        if (bindingMapper.countBinding(roleId, normalizedServerId, uid) == 0) {
+            throw new BusinessException(ResultCode.FORBIDDEN);
+        }
+        EfPlayerData data = playerDataMapper.selectByRoleAndServer(roleId, normalizedServerId);
+        if (data == null) {
+            return null;
+        }
+        return new EfPlayerDataVO(roleId, normalizedServerId, parsePlayerData(data), data.getUpdateTime());
+    }
+
+    /**
+     * 绑定关系转列表视图对象
+     *
+     * @param binding 绑定关系
+     * @return 不含玩家数据正文的角色视图
+     */
+    private EfAccountVO toAccountVO(EfAccountBinding binding) {
+        EfAccountVO account = new EfAccountVO();
+        account.setRoleId(binding.getRoleId());
+        account.setServerId(binding.getServerId());
+        account.setCreateTime(binding.getCreateTime());
+        account.setUpdateTime(binding.getUpdateTime());
+        return account;
+    }
+
+    /**
+     * 把落库的 JSON 文本解析为 JSON 对象
+     *
+     * <p>写入时已保证文本是合法 JSON 对象，此处解析失败只可能是数据被人工改动，
+     * 按系统错误返回而不是静默返回空数据。</p>
+     *
+     * @param data 玩家数据行
+     * @return 解析后的 JSON 对象
+     */
+    private JsonNode parsePlayerData(EfPlayerData data) {
+        try {
+            return objectMapper.readTree(data.getPlayerData());
+        } catch (JsonProcessingException e) {
+            LogUtil.error(EfPlayerDataServiceImpl.class, "终末地玩家数据解析失败, roleId={}, serverId={}",
+                    data.getRoleId(), data.getServerId(), e);
+            throw new BusinessException(ResultCode.SYSTEM_ERROR, "玩家数据解析失败");
+        }
     }
 
     /**

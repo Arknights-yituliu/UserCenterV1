@@ -73,6 +73,8 @@
 
 | API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
 |---|---|---|---|---|
+| `/user/ef-accounts` | GET | 是 | 用户会话 | 查询已绑定的终末地角色列表（不含玩家数据正文），按最近导入时间倒序。 |
+| `/user/ef-accounts/player-data` | GET | 是 | 用户会话 | 读取指定角色的玩家数据：`roleId` 必填、`serverId` 可选，须已绑定到当前用户；响应 Cache-Control 为 private, no-cache。 |
 | `/user/ef-accounts/player-data/save` | POST | 是 | 用户会话 | 保存终末地玩家数据：整份 JSON 文本直接落库，已有则覆盖，首次上传同时建立角色绑定。 |
 
 ### 第三方应用授权管理（`/user/oauth/**`）
