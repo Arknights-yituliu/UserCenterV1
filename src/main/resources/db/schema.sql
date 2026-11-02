@@ -273,7 +273,26 @@ CREATE TABLE `ak_operator_state` (
   DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '游戏账号干员养成状态（含是否持有），一行一个干员';
 
 -- -------------------------------------------------------------
--- 13. 用户排班表
+-- 13. 游戏账号物品存量（一行一个账号，整份 JSON 文本存储）
+--
+-- 与 ak_operator_state「一行一个干员、按业务字段拆列」不同，物品数量每次上报几乎
+-- 全量变化，按行拆表需要先比对再逐行写入，成本高且没有行级读取需求，因此把
+-- items 数组整体序列化为一个 JSON 文本列，每次携带 items 时整体覆盖。
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `ak_item_data`;
+CREATE TABLE `ak_item_data` (
+    `id`          BIGINT      NOT NULL AUTO_INCREMENT COMMENT '数据库自增行ID',
+    `ak_uid`      VARCHAR(32) NOT NULL COMMENT '游戏账号UID，与绑定表及干员表采用相同类型和排序规则',
+    `item_data`   LONGTEXT    NOT NULL COMMENT '物品存量JSON文本，items数组整体序列化，元素形如{"itemId":"3001","count":111}',
+    `create_time` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '首次保存时间',
+    `update_time` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '最近一次携带items的上传时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_item_ak_uid` (`ak_uid`) COMMENT '每个游戏账号只保存一份物品数据'
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '游戏账号物品存量，整份JSON文本存储，一行一个账号';
+
+-- -------------------------------------------------------------
+-- 14. 用户排班表
 -- -------------------------------------------------------------
 DROP TABLE IF EXISTS `user_schedule`;
 CREATE TABLE `user_schedule` (
@@ -288,7 +307,7 @@ CREATE TABLE `user_schedule` (
   DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '用户排班表，每个用户最多 5 条由业务层控制';
 
 -- -------------------------------------------------------------
--- 14. 干员养成数据统计结果表
+-- 15. 干员养成数据统计结果表
 -- -------------------------------------------------------------
 DROP TABLE IF EXISTS `ak_operator_state_statistics`;
 CREATE TABLE `ak_operator_state_statistics` (
@@ -314,7 +333,7 @@ CREATE TABLE `ak_operator_state_statistics` (
   DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '干员养成数据统计结果，一行一个干员，只保留最新一轮';
 
 -- -------------------------------------------------------------
--- 15. 用户自定义 OAuth 授权范围表
+-- 16. 用户自定义 OAuth 授权范围表
 --
 -- 与 oauth_grant（每次签发的令牌台账，一行一次授权）不同，本表是
 -- 「用户维度 × 客户端」的唯一偏好：用户主动挑选愿意授予该应用的权限集合。
@@ -335,7 +354,7 @@ CREATE TABLE `oauth_user_scope` (
   DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '用户自定义OAuth授权范围，一行一个用户与应用组合';
 
 -- -------------------------------------------------------------
--- 16. 用户自定义有效期的 access_token 签发记录表
+-- 17. 用户自定义有效期的 access_token 签发记录表
 --
 -- 与 oauth_grant（refresh_token 台账，只存摘要）不同，本表记录
 -- POST /user/oauth/custom-tokens 或 POST /oauth2/token/from-refresh 现场签发的短时 access_token，供用户在
@@ -360,7 +379,7 @@ CREATE TABLE `oauth_custom_token` (
   DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '用户自定义有效期的access_token签发记录';
 
 -- -------------------------------------------------------------
--- 17. 用户手动修改版干员数据（一行一个干员，按 uid 归属，每个用户一份）
+-- 18. 用户手动修改版干员数据（一行一个干员，按 uid 归属，每个用户一份）
 --
 -- 与 ak_operator_state（游戏账号自动导入、被全部绑定用户共享）不同，本表按用户维度
 -- 保存用户手工调整后的干员数据。一个 uid 只能有一份手动修改版，
@@ -392,7 +411,7 @@ CREATE TABLE `ak_operator_state_manual` (
   DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '用户手动修改版干员数据，一行一个干员，每个用户一份';
 
 -- -------------------------------------------------------------
--- 18. 终末地玩家数据（一行一个角色，按 role_id + server_id 去重，全部绑定用户共享）
+-- 19. 终末地玩家数据（一行一个角色，按 role_id + server_id 去重，全部绑定用户共享）
 --
 -- 与 ak_operator_state「一行一个干员、按业务字段拆列」不同，终末地角色卡片是
 -- 结构多变的大块 JSON（base/chars/domain/...），拆列成本高且随游戏版本频繁变化，
@@ -412,7 +431,7 @@ CREATE TABLE `ef_player_data` (
   DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '终末地玩家数据，一行一个角色，整份JSON文本存储';
 
 -- -------------------------------------------------------------
--- 19. 终末地角色与用户中心账号的绑定关系
+-- 20. 终末地角色与用户中心账号的绑定关系
 --
 -- 与 ak_account_binding 同构：一个 uid 可绑定多个角色，一个角色也可被多个 uid 绑定；
 -- 玩家数据按角色存一份，绑定表只存授权关系，供后续读取接口做归属校验。

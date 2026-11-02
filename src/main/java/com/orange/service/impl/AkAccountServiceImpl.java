@@ -1,22 +1,30 @@
 package com.orange.service.impl;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.exception.RateLimitedException;
 import com.orange.common.util.LogUtil;
 import com.orange.common.util.RedisKeyUtil;
 import com.orange.common.util.SignUtil;
+import com.orange.entity.dto.akoperator.ItemEntryRequest;
 import com.orange.entity.dto.akoperator.OperatorItemRequest;
 import com.orange.entity.dto.akoperator.OperatorSaveRequest;
 import com.orange.entity.po.AkAccountBinding;
+import com.orange.entity.po.AkItemData;
 import com.orange.entity.po.AkPlayerInfo;
 import com.orange.entity.po.AkOperatorState;
 import com.orange.entity.po.AkOperatorStateManualSummary;
 import com.orange.entity.vo.akoperator.AkAccountVO;
+import com.orange.entity.vo.akoperator.ItemListVO;
+import com.orange.entity.vo.akoperator.ItemVO;
 import com.orange.entity.vo.akoperator.OperatorListVO;
 import com.orange.entity.vo.akoperator.OperatorSaveResultVO;
 import com.orange.entity.vo.akoperator.OperatorVO;
 import com.orange.mapper.AkAccountBindingMapper;
+import com.orange.mapper.AkItemDataMapper;
 import com.orange.mapper.AkPlayerInfoMapper;
 import com.orange.mapper.AkOperatorStateManualMapper;
 import com.orange.mapper.AkOperatorStateMapper;
@@ -28,6 +36,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -65,13 +74,18 @@ public class AkAccountServiceImpl implements AkAccountService {
     /** 唯一键冲突/死锁时整事务回滚后的最大重试次数（不含首次执行） */
     private static final int SAVE_MAX_RETRY = 2;
 
+    /** 物品数据 JSON 文本大小上限（字节），防止单条数据过大占用存储 */
+    private static final long MAX_ITEM_DATA_BYTES = 2L * 1024 * 1024;
+
     private final AkAccountBindingMapper bindingMapper;
     private final AkPlayerInfoMapper playerInfoMapper;
     private final AkOperatorStateMapper operatorMapper;
+    private final AkItemDataMapper itemDataMapper;
     private final AkOperatorStateManualMapper manualMapper;
     private final AkOperatorStateManualService manualOperatorService;
     private final AkOperatorSaveExecutor saveExecutor;
     private final StringRedisTemplate stringRedisTemplate;
+    private final ObjectMapper objectMapper;
 
     /**
      * 构造器注入依赖
@@ -79,25 +93,31 @@ public class AkAccountServiceImpl implements AkAccountService {
      * @param bindingMapper         绑定关系 Mapper
      * @param playerInfoMapper      角色信息 Mapper
      * @param operatorMapper        干员数据 Mapper
+     * @param itemDataMapper        物品存量 Mapper，读取整份 JSON 快照
      * @param manualMapper          手动版干员数据 Mapper（仅用于账号列表的汇总时间）
      * @param manualOperatorService 手动版干员数据服务，读取手动条目时复用其字段映射
      * @param saveExecutor          写事务执行器（独立 Bean 保证 @Transactional 生效）
      * @param stringRedisTemplate   Redis 客户端，用于跨实例的原子限流
+     * @param objectMapper          JSON 序列化器，用于物品数据整体落库与读取解析
      */
     public AkAccountServiceImpl(AkAccountBindingMapper bindingMapper,
                                 AkPlayerInfoMapper playerInfoMapper,
                                 AkOperatorStateMapper operatorMapper,
+                                AkItemDataMapper itemDataMapper,
                                 AkOperatorStateManualMapper manualMapper,
                                 AkOperatorStateManualService manualOperatorService,
                                 AkOperatorSaveExecutor saveExecutor,
-                                StringRedisTemplate stringRedisTemplate) {
+                                StringRedisTemplate stringRedisTemplate,
+                                ObjectMapper objectMapper) {
         this.bindingMapper = bindingMapper;
         this.playerInfoMapper = playerInfoMapper;
         this.operatorMapper = operatorMapper;
+        this.itemDataMapper = itemDataMapper;
         this.manualMapper = manualMapper;
         this.manualOperatorService = manualOperatorService;
         this.saveExecutor = saveExecutor;
         this.stringRedisTemplate = stringRedisTemplate;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -182,11 +202,32 @@ public class AkAccountServiceImpl implements AkAccountService {
     }
 
     /**
-     * 批量保存某游戏账号的角色信息与干员数据
+     * 全量读取游戏账号物品存量：校验绑定归属后返回该账号最近一次上报的完整物品快照
+     *
+     * <p>物品是自动导入侧的全量快照，没有手动/自动来源之分；
+     * 该账号从未携带 items 上传时返回空数组与 null 时间。</p>
+     *
+     * @param uid   用户中心 UID
+     * @param akUid 游戏账号 UID
+     * @return 物品全量数据与最近上传时间
+     */
+    @Override
+    public ItemListVO listItems(Long uid, String akUid) {
+        validateAkUid(akUid);
+        requireBinding(akUid, uid);
+        AkItemData data = itemDataMapper.selectByAkUid(akUid);
+        if (data == null) {
+            return new ItemListVO(akUid, new ArrayList<>(), null);
+        }
+        return new ItemListVO(akUid, parseItems(data), data.getUpdateTime());
+    }
+
+    /**
+     * 批量保存某游戏账号的角色信息、干员数据与物品存量
      *
      * @param uid     用户中心 UID
-     * @param request 保存参数（角色信息 + 干员数组），目标游戏账号取自 request.playerInfo.akUid
-     * @return 新增/更新/未变更条数统计，三项之和等于传入记录数
+     * @param request 保存参数（角色信息 + 干员数组 + 可选物品数组），目标游戏账号取自 request.playerInfo.akUid
+     * @return 新增/更新/未变更条数统计，三项之和等于传入干员记录数
      */
     @Override
     public OperatorSaveResultVO saveOperators(Long uid, OperatorSaveRequest request) {
@@ -194,11 +235,12 @@ public class AkAccountServiceImpl implements AkAccountService {
         validateAkUid(akUid);
         // 先归一化（缺省/null/空字符串补 0）再校验重复 ID，保证比较语义与落库值一致
         List<AkOperatorState> operators = normalizeOperators(akUid, request.getOperators());
+        String itemData = serializeItems(request.getItems());
 
         // 参数校验通过后占用该 ak_uid 的限流名额；首次上传不做凭据校验，绑定关系由写事务建立
         acquireSaveQuota(akUid);
 
-        return saveWithRetry(akUid, uid, operators);
+        return saveWithRetry(akUid, uid, operators, itemData);
     }
 
     /**
@@ -209,14 +251,16 @@ public class AkAccountServiceImpl implements AkAccountService {
      * @param akUid     游戏账号 UID
      * @param uid       用户中心 UID
      * @param operators 本次提交的干员记录（已归一化）
+     * @param itemData  本次上报的物品 JSON 文本，null 表示不上报物品
      * @return 新增/更新/未变更条数统计
      */
     private OperatorSaveResultVO saveWithRetry(String akUid,
                                                Long uid,
-                                               List<AkOperatorState> operators) {
+                                               List<AkOperatorState> operators,
+                                               String itemData) {
         for (int attempt = 0; ; attempt++) {
             try {
-                return saveExecutor.save(akUid, uid, operators);
+                return saveExecutor.save(akUid, uid, operators, itemData);
             } catch (DuplicateKeyException | PessimisticLockingFailureException e) {
                 if (attempt >= SAVE_MAX_RETRY) {
                     LogUtil.warn(AkAccountServiceImpl.class, "干员数据保存冲突重试耗尽, akUidHash={}, attempts={}",
@@ -311,6 +355,58 @@ public class AkAccountServiceImpl implements AkAccountService {
         record.setEquipB(zeroIfNull(item.getEquipB()));
         record.setPotentialRank(zeroIfNull(item.getPotentialRank()));
         return record;
+    }
+
+    /**
+     * 校验并序列化物品数组：拒绝重复物品编码，序列化后的 JSON 文本不超过大小上限
+     *
+     * <p>物品数据按账号整份保存：客户端数组整体序列化为一个 JSON 文本，
+     * 每次携带 items 时覆盖该账号已有的物品数据。</p>
+     *
+     * @param items 客户端提交的物品数组，可为空表示本次不上报物品
+     * @return 可直接落库的 JSON 文本，未上报时返回 null
+     */
+    private String serializeItems(List<ItemEntryRequest> items) {
+        if (items == null || items.isEmpty()) {
+            return null;
+        }
+        Set<String> seenIds = new HashSet<>(Math.max(16, items.size() * 2));
+        for (ItemEntryRequest item : items) {
+            if (!seenIds.add(item.getItemId())) {
+                throw new BusinessException(ResultCode.PARAM_VALID_ERROR, "同一请求中物品ID重复：" + item.getItemId());
+            }
+        }
+        String json;
+        try {
+            json = objectMapper.writeValueAsString(items);
+        } catch (JsonProcessingException e) {
+            LogUtil.error(AkAccountServiceImpl.class, "物品数据序列化失败", e);
+            throw new BusinessException(ResultCode.SYSTEM_ERROR, "物品数据序列化失败");
+        }
+        if (json.getBytes(StandardCharsets.UTF_8).length > MAX_ITEM_DATA_BYTES) {
+            throw new BusinessException(ResultCode.PARAM_VALID_ERROR, "物品数据不能超过2MB");
+        }
+        return json;
+    }
+
+    /**
+     * 把落库的物品 JSON 文本解析为读取结果列表
+     *
+     * <p>写入时已保证文本是合法的 items 数组，此处解析失败只可能是数据被人工改动，
+     * 按系统错误返回而不是静默返回空数据。</p>
+     *
+     * @param data 物品数据行
+     * @return 解析后的物品列表
+     */
+    private List<ItemVO> parseItems(AkItemData data) {
+        try {
+            return objectMapper.readValue(data.getItemData(), new TypeReference<List<ItemVO>>() {
+            });
+        } catch (JsonProcessingException e) {
+            LogUtil.error(AkAccountServiceImpl.class, "物品数据解析失败, akUidHash={}",
+                    SignUtil.sha256(data.getAkUid()), e);
+            throw new BusinessException(ResultCode.SYSTEM_ERROR, "物品数据解析失败");
+        }
     }
 
     /**

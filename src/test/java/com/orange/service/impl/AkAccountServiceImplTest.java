@@ -1,5 +1,6 @@
 package com.orange.service.impl;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.orange.common.exception.BusinessException;
 import com.orange.entity.po.AkOperatorStateManualSummary;
 import com.orange.entity.vo.akoperator.AkAccountVO;
@@ -41,6 +42,9 @@ class AkAccountServiceImplTest {
 
     @Mock
     private AkOperatorStateMapper operatorMapper;
+
+    @Mock
+    private com.orange.mapper.AkItemDataMapper itemDataMapper;
 
     @Mock
     private AkOperatorStateManualMapper manualMapper;
@@ -92,6 +96,47 @@ class AkAccountServiceImplTest {
     }
 
     @Test
+    void rejectsItemsWhenAkUidIsNotBound() {
+        when(bindingMapper.countBinding("ak-1", UID)).thenReturn(0);
+
+        assertThatThrownBy(() -> service().listItems(UID, "ak-1"))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("code", 80008);
+        verify(itemDataMapper, never()).selectByAkUid(anyString());
+    }
+
+    @Test
+    void returnsEmptyItemsWhenAccountNeverUploadedItems() {
+        when(bindingMapper.countBinding("ak-1", UID)).thenReturn(1);
+        when(itemDataMapper.selectByAkUid("ak-1")).thenReturn(null);
+
+        com.orange.entity.vo.akoperator.ItemListVO result = service().listItems(UID, "ak-1");
+
+        assertThat(result.getAkUid()).isEqualTo("ak-1");
+        assertThat(result.getItems()).isEmpty();
+        assertThat(result.getUpdateTime()).isNull();
+    }
+
+    @Test
+    void parsesItemsFromStoredJsonSnapshot() {
+        when(bindingMapper.countBinding("ak-1", UID)).thenReturn(1);
+        com.orange.entity.po.AkItemData data = new com.orange.entity.po.AkItemData();
+        data.setAkUid("ak-1");
+        data.setItemData("[{\"itemId\":\"3001\",\"count\":111},{\"itemId\":\"3003\",\"count\":5}]");
+        data.setUpdateTime(LocalDateTime.of(2026, 11, 2, 12, 0));
+        when(itemDataMapper.selectByAkUid("ak-1")).thenReturn(data);
+
+        com.orange.entity.vo.akoperator.ItemListVO result = service().listItems(UID, "ak-1");
+
+        assertThat(result.getItems()).hasSize(2);
+        assertThat(result.getItems().get(0).getItemId()).isEqualTo("3001");
+        assertThat(result.getItems().get(0).getCount()).isEqualTo(111L);
+        assertThat(result.getItems().get(1).getItemId()).isEqualTo("3003");
+        assertThat(result.getItems().get(1).getCount()).isEqualTo(5L);
+        assertThat(result.getUpdateTime()).isEqualTo(data.getUpdateTime());
+    }
+
+    @Test
     void readsManualOperatorsWhenSourceIsManualAndAkUidEqualsUserUid() {
         OperatorVO item = new OperatorVO();
         item.setId("char-1");
@@ -138,6 +183,7 @@ class AkAccountServiceImplTest {
 
     private AkAccountServiceImpl service() {
         return new AkAccountServiceImpl(bindingMapper, playerInfoMapper, operatorMapper,
-                manualMapper, manualOperatorService, saveExecutor, stringRedisTemplate);
+                itemDataMapper, manualMapper, manualOperatorService, saveExecutor,
+                stringRedisTemplate, new ObjectMapper());
     }
 }

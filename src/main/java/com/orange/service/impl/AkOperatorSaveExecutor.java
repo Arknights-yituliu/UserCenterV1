@@ -1,9 +1,11 @@
 package com.orange.service.impl;
 
+import com.orange.entity.po.AkItemData;
 import com.orange.entity.po.AkPlayerInfo;
 import com.orange.entity.po.AkOperatorState;
 import com.orange.entity.vo.akoperator.OperatorSaveResultVO;
 import com.orange.mapper.AkAccountBindingMapper;
+import com.orange.mapper.AkItemDataMapper;
 import com.orange.mapper.AkPlayerInfoMapper;
 import com.orange.mapper.AkOperatorStateMapper;
 import org.springframework.stereotype.Component;
@@ -21,7 +23,8 @@ import java.util.Map;
  * <p>独立成 Bean 是为了让 {@code @Transactional} 生效（Spring 自调用不走代理），
  * 并由调用方在唯一键冲突/死锁时整事务回滚后重试。</p>
  *
- * <p>单个事务内依次完成：核对/创建本人绑定 → 角色信息比对更新或插入 → 干员比对后增量写入。</p>
+ * <p>单个事务内依次完成：核对/创建本人绑定 → 角色信息比对更新或插入 → 干员比对后增量写入 →
+ * 物品存量 JSON 整份覆盖写入。</p>
  *
  * @author UserCenter
  */
@@ -37,6 +40,7 @@ public class AkOperatorSaveExecutor {
     private final AkAccountBindingMapper bindingMapper;
     private final AkPlayerInfoMapper playerInfoMapper;
     private final AkOperatorStateMapper operatorMapper;
+    private final AkItemDataMapper itemMapper;
 
     /**
      * 构造器注入 Mapper
@@ -44,29 +48,35 @@ public class AkOperatorSaveExecutor {
      * @param bindingMapper    绑定关系 Mapper
      * @param playerInfoMapper 角色信息 Mapper
      * @param operatorMapper   干员数据 Mapper
+     * @param itemMapper       物品存量 Mapper
      */
     public AkOperatorSaveExecutor(AkAccountBindingMapper bindingMapper,
                                   AkPlayerInfoMapper playerInfoMapper,
-                                  AkOperatorStateMapper operatorMapper) {
+                                  AkOperatorStateMapper operatorMapper,
+                                  AkItemDataMapper itemMapper) {
         this.bindingMapper = bindingMapper;
         this.playerInfoMapper = playerInfoMapper;
         this.operatorMapper = operatorMapper;
+        this.itemMapper = itemMapper;
     }
 
     /**
-     * 在一个写事务内保存绑定关系、角色信息与干员数据
+     * 在一个写事务内保存绑定关系、角色信息、干员数据与物品存量
      *
      * @param akUid              游戏账号 UID
      * @param uid                用户中心 UID
      * @param submittedOperators 本次提交的干员记录（已归一化，数值字段非空）
-     * @return 新增/更新/未变更条数统计
+     * @param itemData           本次上报的物品 JSON 文本，null 表示不上报物品
+     * @return 新增/更新/未变更条数统计（仅统计干员）
      */
     @Transactional(rollbackFor = Exception.class)
     public OperatorSaveResultVO save(String akUid,
                                      Long uid,
-                                     List<AkOperatorState> submittedOperators) {
+                                     List<AkOperatorState> submittedOperators,
+                                     String itemData) {
         ensureBinding(akUid, uid);
         savePlayerInfo(akUid);
+        saveItems(akUid, itemData);
         return saveOperators(akUid, submittedOperators);
     }
 
@@ -136,6 +146,21 @@ public class AkOperatorSaveExecutor {
             operatorMapper.updateState(record);
         }
         return new OperatorSaveResultVO(toInsert.size(), toUpdate.size(), unchangedCount);
+    }
+
+    /**
+     * 保存物品存量 JSON：携带 items 时整份覆盖该账号的物品数据，省略时保持原数据不变
+     *
+     * <p>物品数据不做行级拆分与比对，每次携带 items 都以全量快照覆盖，一条 upsert 完成写入。</p>
+     *
+     * @param akUid    游戏账号 UID
+     * @param itemData 服务端已校验并序列化的物品 JSON 文本，null 表示本次不上报物品
+     */
+    private void saveItems(String akUid, String itemData) {
+        if (itemData == null) {
+            return;
+        }
+        itemMapper.upsertItemData(akUid, itemData, LocalDateTime.now());
     }
 
     /**

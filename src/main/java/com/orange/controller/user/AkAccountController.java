@@ -5,6 +5,7 @@ import com.orange.common.util.Result;
 import com.orange.entity.dto.akoperator.OperatorStateManualSaveRequest;
 import com.orange.entity.dto.akoperator.OperatorSaveRequest;
 import com.orange.entity.vo.akoperator.AkAccountVO;
+import com.orange.entity.vo.akoperator.ItemListVO;
 import com.orange.entity.vo.akoperator.OperatorListVO;
 import com.orange.entity.vo.akoperator.OperatorSaveResultVO;
 import com.orange.service.AkAccountService;
@@ -83,6 +84,21 @@ public class AkAccountController {
             @RequestParam("akUid") String akUid,
             @RequestParam(value = "source", required = false) String source) {
         OperatorListVO data = akAccountService.listOperators(UserContext.requireUid(), akUid, source);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CACHE_CONTROL, OPERATOR_CACHE_CONTROL)
+                .body(Result.success(data));
+    }
+
+    /**
+     * 全量读取游戏账号物品存量：返回该账号最近一次上报的完整物品快照
+     *
+     * @param akUid 游戏账号 UID，必须是当前用户已绑定的账号
+     * @return 物品全量数据与最近上传时间，响应仅允许私人缓存
+     */
+    @Operation(summary = "全量读取物品存量")
+    @GetMapping("/items")
+    public ResponseEntity<Result<ItemListVO>> listItems(@RequestParam("akUid") String akUid) {
+        ItemListVO data = akAccountService.listItems(UserContext.requireUid(), akUid);
         return ResponseEntity.ok()
                 .header(HttpHeaders.CACHE_CONTROL, OPERATOR_CACHE_CONTROL)
                 .body(Result.success(data));

@@ -196,7 +196,67 @@ HTTP `200`，并携带响应头 `Cache-Control: private, no-cache`：
 
 查询他人账号与查询不存在的账号返回同一个 `80008`，服务端不区分、不暴露账号是否存在。
 
-## 4. 保存角色信息与干员数据
+## 4. 全量读取物品存量
+
+```http
+GET /oauth2/ak-accounts/items?akUid={akUid}
+Authorization: Bearer <access_token>
+```
+
+需要 `gama-data.read`。返回该游戏账号最近一次上报的完整物品快照。物品没有手动/自动来源之分，`akUid` 必须是当前令牌用户名下的游戏账号。
+
+### 4.1 查询参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `akUid` | string | 是 | 游戏账号 UID，不超过 32 位可见 ASCII 字符 |
+
+### 4.2 成功响应
+
+HTTP `200`，并携带响应头 `Cache-Control: private, no-cache`：
+
+```json
+{
+  "code": 200,
+  "msg": "操作成功",
+  "data": {
+    "akUid": "123456789",
+    "items": [
+      {
+        "itemId": "3001",
+        "count": 111
+      },
+      {
+        "itemId": "3003",
+        "count": 5
+      }
+    ],
+    "updateTime": "2026-11-02T12:00:00"
+  }
+}
+```
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `akUid` | string | 游戏账号 UID |
+| `items` | array | 物品记录列表，无数据时为空数组 |
+| `items[].itemId` | string | 稳定物品编码 |
+| `items[].count` | integer | 物品数量 |
+| `updateTime` | string / null | 最近一次携带 `items` 的上传时间；该账号从未上报过物品时为 `null` |
+
+### 4.3 失败响应
+
+| HTTP 状态 | `code` | 含义 |
+| --- | --- | --- |
+| `200` | `80002` | access token 缺失、无效或已过期 |
+| `200` | `80003` | 缺少 `gama-data.read` 授权 |
+| `200` | `80008` | 该游戏账号不在当前令牌用户名下 |
+| `200` | `10002` | `akUid` 未携带或格式非法 |
+| `200` | `40001` | 服务端内部错误 |
+
+查询他人账号与查询不存在的账号返回同一个 `80008`，服务端不区分、不暴露账号是否存在。
+
+## 5. 保存角色信息与干员数据
 
 ```http
 POST /oauth2/ak-accounts/operators/save
@@ -206,7 +266,7 @@ Authorization: Bearer <access_token>
 
 需要 `gama-data.write`。目标游戏账号取自请求体 `playerInfo.akUid`；请求体和响应结构与 `POST /user/ak-accounts/operators/save` 完全一致。
 
-### 4.1 请求字段
+### 5.1 请求字段
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
@@ -221,10 +281,13 @@ Authorization: Bearer <access_token>
 | `operators[].skill1` / `skill2` / `skill3` | integer | 否 | 技能等级或状态，0~255 |
 | `operators[].equipX` / `equipY` / `equipD` / `equipA` / `equipB` | integer | 否 | 各模组数值，0~255 |
 | `operators[].potentialRank` | integer | 否 | 潜能等级，0~255 |
+| `items` | array | 否 | 物品存量数组，可省略；缺省或空数组表示本次不上报物品 |
+| `items[].itemId` | string | 是 | 稳定物品编码，1-64 位可见 ASCII 字符 |
+| `items[].count` | integer | 是 | 物品数量，非负整数，最大 18 位十进制 |
 
 数值字段可以省略、传 `null` 或空字符串，服务端统一按 `0` 落库（与显式传 `0` 等价，**不表示沿用旧值**）；`owned` 缺省按 `1` 落库。负数或超出上述范围会返回 `code=10002`。
 
-### 4.2 请求示例
+### 5.2 请求示例
 
 ```json
 {
@@ -249,18 +312,25 @@ Authorization: Bearer <access_token>
       "equipB": 0,
       "potentialRank": 2
     }
+  ],
+  "items": [
+    {
+      "itemId": "3001",
+      "count": 111
+    }
   ]
 }
 ```
 
-### 4.3 保存语义
+### 5.3 保存语义
 
 - 传入的干员 `id` 已存在则按属性（含 `owned`）比较后更新，不存在则新增；**请求中未出现的干员不会被删除**，需要删除请走用户侧接口。
-- 同一个请求中的干员 `id` 不能重复，重复返回 `code=10002`。
+- `items` 与干员数据在同一事务内保存：物品为全量快照，携带 `items` 即整体覆盖该账号的物品数据；`items` 省略或为空数组时已有物品数据保持不变。
+- 同一个请求中的干员 `id` 不能重复，物品 `itemId` 也不能重复，重复返回 `code=10002`。
 - 当前用户首次上传某个游戏账号时直接建立绑定关系，无需预先绑定。
 - 同一游戏账号 2 秒内只接受一次保存请求，命中限流返回 `code=30006`，建议等待秒数在 `data.retryAfterSeconds` 中。
 
-### 4.4 成功响应
+### 5.4 成功响应
 
 HTTP `200`：
 
@@ -284,7 +354,7 @@ HTTP `200`：
 
 三项之和等于本次请求传入的干员记录数。
 
-### 4.5 失败响应
+### 5.5 失败响应
 
 | HTTP 状态 | `code` | 含义 | 处理建议 |
 | --- | --- | --- | --- |
@@ -308,13 +378,13 @@ HTTP `200`：
 }
 ```
 
-## 5. 手动修改版干员数据
+## 6. 手动修改版干员数据
 
 手动修改版是用户对自己干员数据的个人副本，**每个用户只有一份**，与具体游戏账号（`akUid`）无关；自动导入的干员数据仍按游戏账号共享，两侧互不影响。两侧字段一致，均包含 `owned`（是否持有）；区别仅在缺省值：自动导入缺省按 `1`，手动版缺省按 `0`。用户身份始终取自 access_token，不能通过请求参数指定。
 
 读取手动修改版统一使用 [3. 干员数据](#3-干员数据)：传入 `source=manual`，`akUid` 取当前令牌用户的用户中心 UID（即 `GET /oauth2/ak-accounts` 返回的手动条目中的 `akUid`），响应结构为 `data.akUid` + `data.items`。
 
-### 5.1 保存手动修改版
+### 6.1 保存手动修改版
 
 ```http
 POST /oauth2/ak-accounts/manual-operators/save
@@ -338,9 +408,9 @@ Authorization: Bearer <access_token>
 - 保存过程遇到唯一键冲突或死锁时，服务端整事务回滚后重试，最多 2 次；仍失败返回 `code=40004`。
 - 本接口不占用游戏账号的上传限流名额，因此不会返回 `30006`。
 
-成功响应与 [4.4](#44-成功响应) 一致，返回 `createdCount` / `updatedCount` / `unchangedCount`。
+成功响应与 [5.4](#54-成功响应) 一致，返回 `createdCount` / `updatedCount` / `unchangedCount`。
 
-### 5.2 失败响应
+### 6.2 失败响应
 
 | HTTP 状态 | `code` | 含义 | 处理建议 |
 | --- | --- | --- | --- |
@@ -350,7 +420,7 @@ Authorization: Bearer <access_token>
 | `200` | `40004` | 手动版数据保存冲突 | 重试整个请求 |
 | `200` | `40001` | 服务端内部错误 | 稍后重试并保留请求信息 |
 
-## 6. 常见错误总览
+## 7. 常见错误总览
 
 | `code` | 含义 | 出现场景 |
 | --- | --- | --- |
