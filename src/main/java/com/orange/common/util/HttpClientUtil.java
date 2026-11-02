@@ -2,6 +2,7 @@ package com.orange.common.util;
 
 import java.io.IOException;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -51,6 +52,36 @@ public final class HttpClientUtil {
                 .timeout(REQUEST_TIMEOUT)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(jsonBody, StandardCharsets.UTF_8));
+        applyHeaders(builder, headers);
+        return execute(builder.build());
+    }
+
+    /**
+     * 发送表单 POST 请求（application/x-www-form-urlencoded）
+     *
+     * @param url        请求地址
+     * @param formParams 表单参数，可为空
+     * @param headers    请求头，可为空
+     * @return 响应体原文；网络异常时返回 null
+     */
+    public static String postForm(String url, Map<String, String> formParams, Map<String, String> headers) {
+        StringBuilder body = new StringBuilder();
+        if (formParams != null) {
+            for (Map.Entry<String, String> entry : formParams.entrySet()) {
+                if (body.length() > 0) {
+                    body.append('&');
+                }
+                body.append(URLEncoder.encode(entry.getKey(), StandardCharsets.UTF_8))
+                        .append('=')
+                        .append(URLEncoder.encode(entry.getValue() == null ? "" : entry.getValue(),
+                                StandardCharsets.UTF_8));
+            }
+        }
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(REQUEST_TIMEOUT)
+                .header("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8")
+                .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8));
         applyHeaders(builder, headers);
         return execute(builder.build());
     }
