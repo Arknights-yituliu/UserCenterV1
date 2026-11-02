@@ -247,4 +247,4 @@ curl "http://localhost:8080/ef/pool-record/character/list?taskId=task12345678901
 
 - 干员数据：`https://ef-webview.hypergryph.com/api/record/char`
 - 武器数据：`https://ef-webview.hypergryph.com/api/record/weapon`
-- token 换取：`http://127.0.0.1:10086/token`（可用 `user-center.ef.pool-record.token-service-url` 覆盖），入参 `hgToken`，返回 `u8Token / roleId / uid / nickName`
+- token 换取：由内置工具类 `EfTokenExchangeUtil` 直接调用鹰角通行证接口完成（OAuth2 grant → binding_list → u8_token_by_uid），入参 `hgToken`，返回 `u8Token / roleId / uid / nickName`

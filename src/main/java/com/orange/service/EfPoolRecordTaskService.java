@@ -1,12 +1,9 @@
 package com.orange.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
-import com.orange.common.util.HttpClientUtil;
+import com.orange.common.util.EfTokenExchangeUtil;
 import com.orange.common.util.IdGenerator;
 import com.orange.common.util.LogUtil;
 import com.orange.common.util.RedisKeyUtil;
@@ -20,20 +17,18 @@ import com.orange.entity.po.EfWeaponPoolRecord;
 import com.orange.entity.vo.efpool.EfPoolRecordVO;
 import com.orange.mapper.EfEndministratorInfoMapper;
 import com.orange.mapper.EfPoolRecordTaskMapper;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.util.Date;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 寻访记录导入任务服务
  *
  * <p>对外提供创建任务、查询任务状态与读取寻访结果的入口；后台每秒取一条未开始的任务，
- * 通过 token 换取服务拿到角色信息后，依次导入干员与武器寻访记录，最后标记任务完成。
+ * 通过内置的 token 换取工具类拿到角色信息后，依次导入干员与武器寻访记录，最后标记任务完成。
  * 当前接口暂不做用户鉴权，任务归属完全由 taskId 控制。</p>
  *
  * @author UserCenter
@@ -67,11 +62,7 @@ public class EfPoolRecordTaskService {
     private final EfCharacterPoolRecordService characterPoolRecordService;
     private final EfWeaponPoolRecordService weaponPoolRecordService;
     private final StringRedisTemplate stringRedisTemplate;
-    private final ObjectMapper objectMapper;
     private final IdGenerator idGenerator = IdGenerator.getInstance();
-
-    /** 本机 token 换取服务地址：入参 hgToken，返回 u8Token / roleId / uid / nickName */
-    private final String tokenServiceUrl;
 
     /**
      * 构造器注入依赖
@@ -81,24 +72,17 @@ public class EfPoolRecordTaskService {
      * @param characterPoolRecordService  干员寻访记录导入服务
      * @param weaponPoolRecordService     武器寻访记录导入服务
      * @param stringRedisTemplate         Redis 客户端，用于创建任务限流
-     * @param objectMapper                JSON 序列化器
-     * @param tokenServiceUrl             token 换取服务地址
      */
     public EfPoolRecordTaskService(EfPoolRecordTaskMapper poolRecordTaskMapper,
                                    EfEndministratorInfoMapper endministratorInfoMapper,
                                    EfCharacterPoolRecordService characterPoolRecordService,
                                    EfWeaponPoolRecordService weaponPoolRecordService,
-                                   StringRedisTemplate stringRedisTemplate,
-                                   ObjectMapper objectMapper,
-                                   @Value("${user-center.ef.pool-record.token-service-url:http://127.0.0.1:10086/token}")
-                                   String tokenServiceUrl) {
+                                   StringRedisTemplate stringRedisTemplate) {
         this.poolRecordTaskMapper = poolRecordTaskMapper;
         this.endministratorInfoMapper = endministratorInfoMapper;
         this.characterPoolRecordService = characterPoolRecordService;
         this.weaponPoolRecordService = weaponPoolRecordService;
         this.stringRedisTemplate = stringRedisTemplate;
-        this.objectMapper = objectMapper;
-        this.tokenServiceUrl = tokenServiceUrl;
     }
 
     /**
@@ -224,28 +208,17 @@ public class EfPoolRecordTaskService {
     }
 
     /**
-     * 调用本机 token 换取服务，把 hgToken 换成 u8Token 与角色信息
+     * 调用内置 token 换取工具类，把 hgToken 换成 u8Token 与角色信息
      *
      * @param task 任务记录，token 字段为 hgToken
      * @return 玩家角色信息
      */
     private EfEndfieldUserInfoDTO getPlayerInfo(EfPoolRecordTask task) {
-        String responseText = HttpClientUtil.postForm(tokenServiceUrl,
-                Map.of("hgToken", task.getToken() == null ? "" : task.getToken()), null);
-        if (responseText == null) {
+        EfEndfieldUserInfoDTO userInfo = EfTokenExchangeUtil.exchange(task.getToken());
+        if (userInfo == null) {
             throw new BusinessException(ResultCode.OUTER_API_INVOKE_ERROR, "换取终末地角色信息失败");
         }
-        try {
-            JsonNode root = objectMapper.readTree(responseText);
-            JsonNode data = root.path("data");
-            if (data.isMissingNode() || data.isNull()) {
-                throw new BusinessException(ResultCode.OUTER_API_INVOKE_ERROR, "换取终末地角色信息失败");
-            }
-            return objectMapper.treeToValue(data, EfEndfieldUserInfoDTO.class);
-        } catch (JsonProcessingException e) {
-            LogUtil.error(EfPoolRecordTaskService.class, "token 换取服务响应解析失败", e);
-            throw new BusinessException(ResultCode.OUTER_API_INVOKE_ERROR, "换取终末地角色信息失败");
-        }
+        return userInfo;
     }
 
     /**
