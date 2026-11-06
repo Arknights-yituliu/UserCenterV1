@@ -1,6 +1,7 @@
 package com.orange.controller.open;
 
 import com.orange.common.util.Result;
+import com.orange.entity.vo.akoperator.OperatorStatisticsV2VO;
 import com.orange.entity.vo.akoperator.OperatorStatisticsVO;
 import com.orange.service.AkOperatorStateStatisticsService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -50,5 +51,18 @@ public class AkOperatorStateStatisticsController {
         return Result.success(statisticsService.getOperatorStatistics());
     }
 
+    /**
+     * 查询最近一轮干员统计结果（V2）
+     *
+     * <p>数据内容与 V1 一致，仅模组分布字段由 {@code mod*} 改名为 {@code equip*}，
+     * 与源表 {@code equip_a} 等列名对齐。</p>
+     *
+     * @return 统一响应，data 为按干员编码升序排列的统计结果；尚未跑过统计时 data 为空列表
+     */
+    @Operation(summary = "查询干员数据统计结果（V2）")
+    @GetMapping("/ak-operator-statistics/v2/result")
+    public Result<List<OperatorStatisticsV2VO>> listV2() {
+        return Result.success(statisticsService.getOperatorStatisticsV2());
+    }
 
 }

@@ -1,5 +1,6 @@
 package com.orange.service;
 
+import com.orange.entity.vo.akoperator.OperatorStatisticsV2VO;
 import com.orange.entity.vo.akoperator.OperatorStatisticsVO;
 
 import java.util.List;
@@ -50,4 +51,14 @@ public interface AkOperatorStateStatisticsService {
      * @return 按干员编码升序排列的统计结果，尚未跑过统计时返回空列表
      */
     List<OperatorStatisticsVO> getOperatorStatistics();
+
+    /**
+     * 读取最近一轮干员统计结果（V2 字段命名）
+     *
+     * <p>数据内容与 {@link #getOperatorStatistics()} 一致，仅模组分布字段由 {@code mod*} 改名为
+     * {@code equip*}，与源表列名对齐。</p>
+     *
+     * @return 按干员编码升序排列的统计结果，尚未跑过统计时返回空列表
+     */
+    List<OperatorStatisticsV2VO> getOperatorStatisticsV2();
 }

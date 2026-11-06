@@ -7,6 +7,7 @@ import com.orange.common.exception.BusinessException;
 import com.orange.common.util.LogUtil;
 import com.orange.entity.po.AkOperatorState;
 import com.orange.entity.po.AkOperatorStateStatistics;
+import com.orange.entity.vo.akoperator.OperatorStatisticsV2VO;
 import com.orange.entity.vo.akoperator.OperatorStatisticsVO;
 import com.orange.mapper.AkOperatorStateMapper;
 import com.orange.mapper.AkOperatorStateStatisticsMapper;
@@ -281,6 +282,23 @@ public class AkOperatorStateStatisticsServiceImpl implements AkOperatorStateStat
             result.add(toVO(row));
         }
         result.sort(Comparator.comparing(OperatorStatisticsVO::getCharId));
+        return result;
+    }
+
+    /**
+     * 读取最近一轮干员统计结果（V2 字段命名）
+     *
+     * <p>复用 V1 的读表与排序逻辑，只把模组分布字段由 {@code mod*} 改名为 {@code equip*}。</p>
+     *
+     * @return 按干员编码升序排列的统计结果，尚未跑过统计时返回空列表
+     */
+    @Override
+    public List<OperatorStatisticsV2VO> getOperatorStatisticsV2() {
+        List<OperatorStatisticsVO> rows = getOperatorStatistics();
+        List<OperatorStatisticsV2VO> result = new ArrayList<>(rows.size());
+        for (OperatorStatisticsVO row : rows) {
+            result.add(toV2VO(row));
+        }
         return result;
     }
 
@@ -588,6 +606,31 @@ public class AkOperatorStateStatisticsServiceImpl implements AkOperatorStateStat
         vo.setModD(entity.getModD());
         vo.setModB(entity.getModB());
         return vo;
+    }
+
+    /**
+     * 统计结果 VO 转 V2 字段命名
+     *
+     * <p>把模组分布字段由 {@code mod*} 改名为 {@code equip*}，其余字段原样复制。</p>
+     *
+     * @param source V1 统计结果
+     * @return V2 统计结果
+     */
+    private static OperatorStatisticsV2VO toV2VO(OperatorStatisticsVO source) {
+        OperatorStatisticsV2VO target = new OperatorStatisticsV2VO();
+        target.setCharId(source.getCharId());
+        target.setOwn(source.getOwn());
+        target.setSampleSize(source.getSampleSize());
+        target.setElite(source.getElite());
+        target.setSkill1(source.getSkill1());
+        target.setSkill2(source.getSkill2());
+        target.setSkill3(source.getSkill3());
+        target.setEquipA(source.getModA());
+        target.setEquipX(source.getModX());
+        target.setEquipY(source.getModY());
+        target.setEquipD(source.getModD());
+        target.setEquipB(source.getModB());
+        return target;
     }
 
     /**
