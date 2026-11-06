@@ -2,6 +2,7 @@ package com.orange.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.orange.entity.po.AkAccountBinding;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -64,4 +65,15 @@ public interface AkAccountBindingMapper extends BaseMapper<AkAccountBinding> {
     @Select("SELECT * FROM ak_account_binding WHERE owner_uid = #{ownerUid} "
             + "ORDER BY update_time DESC, ak_uid ASC")
     List<AkAccountBinding> selectByOwnerOrderByUpdateTime(@Param("ownerUid") Long ownerUid);
+
+    /**
+     * 删除当前用户对某游戏账号的绑定关系
+     *
+     * @param akUid    游戏账号 UID
+     * @param ownerUid 用户中心 UID
+     * @return 影响行数，0 表示原本未绑定
+     */
+    @Delete("DELETE FROM ak_account_binding WHERE ak_uid = #{akUid} AND owner_uid = #{ownerUid}")
+    int deleteBinding(@Param("akUid") String akUid,
+                      @Param("ownerUid") Long ownerUid);
 }

@@ -73,7 +73,7 @@ GET /oauth2/ak-accounts
 Authorization: Bearer <access_token>
 ```
 
-需要 `gama-data.read`。返回当前 OAuth 用户可用的数据来源，包含森空岛自动导入的已绑定账号与手动上传条目，按最近一次变更时间倒序，不含干员正文。
+需要 `gama-data.read`。返回当前 OAuth 用户可用的数据来源，包含森空岛自动导入的已绑定账号与手动上传条目。用户设置的默认来源（`defaultFlag=true`）排在最前，其余按最近一次变更时间倒序，不含干员正文。
 
 ### 2.1 成功响应
 
@@ -87,12 +87,14 @@ HTTP `200`：
     {
       "akUid": "123456789",
       "source": "skland",
+      "defaultFlag": true,
       "createTime": "2026-09-20T10:00:00",
       "updateTime": "2026-09-28T18:30:00"
     },
     {
       "akUid": "1234567890123456789",
       "source": "manual",
+      "defaultFlag": false,
       "createTime": null,
       "updateTime": "2026-09-27T21:15:00"
     }
@@ -104,10 +106,11 @@ HTTP `200`：
 | --- | --- | --- |
 | `akUid` | string | 森空岛条目为游戏账号 UID；手动上传条目复用用户中心 UID |
 | `source` | string | 数据来源：`skland` 森空岛自动导入，`manual` 用户手动上传 |
+| `defaultFlag` | boolean | 是否为用户设置的默认数据来源；读取干员数据不传 `akUid` 时默认返回该条目 |
 | `createTime` | string / null | 森空岛为绑定关系创建时间；手动上传条目没有创建时间，固定为 `null` |
 | `updateTime` | string | 森空岛为该账号最近一次导入时间；手动版为最近一次保存时间 |
 
-无森空岛绑定且无手动数据时 `data` 为 `[]`。手动上传条目仅在用户存在手动数据时出现；绑定关系存在但角色信息缺失的账号不会出现在结果中（绑定关系本身仍保留）。调用方需通过 `source` 区分条目：`manual` 条目的干员数据应通过手动版读取接口获取，不能当作游戏账号 `akUid` 使用。
+无森空岛绑定且无手动数据时 `data` 为 `[]`。手动上传条目仅在用户存在手动数据时出现；绑定关系存在但角色信息缺失的账号不会出现在结果中（绑定关系本身仍保留）。调用方需通过 `source` 区分条目：`manual` 条目的干员数据应通过手动版读取接口获取，不能当作游戏账号 `akUid` 使用。未设置默认来源或默认来源已失效时，所有条目 `defaultFlag=false`，顺序回退为最近变更时间倒序。
 
 ### 2.2 失败响应
 
@@ -115,6 +118,83 @@ HTTP `200`：
 | --- | --- | --- |
 | `200` | `80001` | access token 缺失、无效或已过期 |
 | `200` | `80008` | 缺少 `gama-data.read` |
+
+### 2.3 设置默认数据来源
+
+```http
+POST /oauth2/ak-accounts/default/update
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+需要 `gama-data.write`。设置读取干员数据不传 `akUid` 时默认返回的条目。每个用户只保留一条默认偏好，重复设置直接覆盖。
+
+```json
+{
+  "akUid": "123456789",
+  "source": "skland"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `akUid` | string | 是 | 数据条目 UID：`skland` 为游戏账号 UID，`manual` 为当前令牌用户的用户中心 UID，不超过 32 位可见 ASCII 字符 |
+| `source` | string | 是 | 数据来源：`skland` 森空岛自动导入，`manual` 用户手动上传 |
+
+设置语义：
+
+- `source=skland` 要求 `akUid` 为当前令牌用户已绑定的游戏账号；
+- `source=manual` 要求 `akUid` 为当前令牌用户的用户中心 UID，且本人已存在手动修改版干员数据；
+- 设置成功后，该条目在 [2. 游戏账号](#2-游戏账号) 中 `defaultFlag=true` 并排在最前；[3. 干员数据](#3-干员数据) 不传 `akUid` 时返回该条目。
+
+成功响应：
+
+```json
+{
+  "code": 200,
+  "msg": "操作成功",
+  "data": null
+}
+```
+
+失败响应：
+
+| HTTP 状态 | `code` | 含义 |
+| --- | --- | --- |
+| `200` | `80001` | access token 缺失、无效或已过期 |
+| `200` | `80008` | 缺少 `gama-data.write`，或游戏账号不在当前令牌用户名下 |
+| `200` | `10002` | `akUid` 格式非法、`source` 不受支持，或手动修改版数据不存在 |
+
+### 2.4 解除游戏账号绑定
+
+```http
+DELETE /oauth2/ak-accounts?akUid={akUid}
+Authorization: Bearer <access_token>
+```
+
+需要 `gama-data.write`。解除当前令牌用户与指定游戏账号的绑定。
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `akUid` | string | 是 | 游戏账号 UID，必须是当前令牌用户已绑定的账号 |
+
+解绑语义：
+
+- 删除当前令牌用户与该账号的绑定关系；
+- 若用户默认来源恰好是该账号，同时清除默认偏好，之后不传 `akUid` 读取会回退到最近变更的条目；
+- `ak_player_info`、`ak_operator_state`、`ak_item_data` 按 `ak_uid` 由所有绑定用户共享，**解绑不删除这些数据**，其他绑定用户与后续重新导入均不受影响；
+- 解绑后当前令牌用户无法再读取该账号的数据，重新导入会重新建立绑定；
+- 手动修改版数据（`source=manual`）不涉及账号绑定，不受本接口影响。
+
+成功响应同 [2.3](#23-设置默认数据来源)。
+
+失败响应：
+
+| HTTP 状态 | `code` | 含义 |
+| --- | --- | --- |
+| `200` | `80001` | access token 缺失、无效或已过期 |
+| `200` | `80008` | 缺少 `gama-data.write`，或游戏账号不在当前令牌用户名下 |
+| `200` | `10002` | `akUid` 未携带或格式非法 |
 
 ## 3. 干员数据
 
@@ -125,6 +205,7 @@ Authorization: Bearer <access_token>
 
 需要 `gama-data.read`。全量返回该数据条目的干员数据，星级筛选由调用方完成。数据来源由 `source` 决定：
 
+- 省略 `akUid`：返回用户设置的默认来源（`defaultFlag=true` 的条目）；未设置或默认来源已失效时取最近变更的条目。此时不能同时传 `source`；
 - 自动导入数据（`source=skland`，或省略 `source` 且未命中手动条目）：`akUid` 必须是当前令牌用户名下的游戏账号；
 - 手动修改版（`source=manual`）：`akUid` 传当前令牌用户的用户中心 UID，读取本人唯一的手动副本，不校验游戏账号绑定关系。
 
@@ -132,8 +213,8 @@ Authorization: Bearer <access_token>
 
 | 参数 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `akUid` | string | 是 | 数据条目 UID：自动数据为游戏账号 UID，手动数据为用户中心 UID，不超过 32 位可见 ASCII 字符 |
-| `source` | string | 否 | 数据来源：`manual` 手动修改版、`skland` 森空岛自动导入；省略时按 `akUid` 是否等于当前令牌用户 UID 自动识别 |
+| `akUid` | string | 否 | 数据条目 UID：自动数据为游戏账号 UID，手动数据为用户中心 UID，不超过 32 位可见 ASCII 字符；省略时返回默认来源 |
+| `source` | string | 否 | 数据来源：`manual` 手动修改版、`skland` 森空岛自动导入；省略时按 `akUid` 是否等于当前令牌用户 UID 自动识别，省略 `akUid` 时必须为空 |
 
 ### 3.2 成功响应
 
@@ -192,7 +273,7 @@ HTTP `200`，并携带响应头 `Cache-Control: private, no-cache`：
 | --- | --- | --- |
 | `200` | `80001` | access token 缺失、无效或已过期 |
 | `200` | `80008` | 缺少 `gama-data.read`，或该游戏账号不在当前用户名下 |
-| `200` | `10002` | `akUid` 未携带或格式非法 |
+| `200` | `10002` | `akUid` 格式非法、未传 `akUid` 时又指定了 `source`，或当前用户没有任何可用的数据来源 |
 
 查询他人账号与查询不存在的账号返回同一个 `80008`，服务端不区分、不暴露账号是否存在。
 

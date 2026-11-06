@@ -5,7 +5,8 @@ import java.time.LocalDateTime;
 /**
  * 当前用户已绑定的游戏账号视图对象（不含干员正文）
  *
- * <p>列表按 {@code updateTime} 倒序返回，前端取首条即可默认展示最新的数据。
+ * <p>列表把用户设置的默认来源排在首位，其余按 {@code updateTime} 倒序，
+ * 因此不指定账号时前端取首条即可展示默认数据。
  * 条目来源由 {@code source} 区分：森空岛自动导入的账号使用游戏账号 UID；
  * 手动上传条目没有游戏账号，{@code akUid} 复用用户中心 UID，且仅在用户存在手动数据时返回。</p>
  *
@@ -30,6 +31,9 @@ public class AkAccountVO {
 
     /** 数据最近一次变更时间：森空岛为最近一次导入时间，手动版为最近一次保存时间 */
     private LocalDateTime updateTime;
+
+    /** 是否为用户设置的默认数据来源：true 表示读取干员数据不传 akUid 时默认返回该条目 */
+    private boolean defaultFlag;
 
     public String getAkUid() {
         return akUid;
@@ -61,5 +65,23 @@ public class AkAccountVO {
 
     public void setUpdateTime(LocalDateTime updateTime) {
         this.updateTime = updateTime;
+    }
+
+    /**
+     * 是否为用户设置的默认数据来源
+     *
+     * @return true 表示该条目是默认来源
+     */
+    public boolean isDefaultFlag() {
+        return defaultFlag;
+    }
+
+    /**
+     * 设置是否为用户设置的默认数据来源
+     *
+     * @param defaultFlag true 表示该条目是默认来源
+     */
+    public void setDefaultFlag(boolean defaultFlag) {
+        this.defaultFlag = defaultFlag;
     }
 }

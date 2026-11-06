@@ -2,6 +2,7 @@ package com.orange.controller.user;
 
 import com.orange.common.context.UserContext;
 import com.orange.common.util.Result;
+import com.orange.entity.dto.akoperator.AkDefaultSourceRequest;
 import com.orange.entity.dto.akoperator.OperatorStateManualSaveRequest;
 import com.orange.entity.dto.akoperator.OperatorSaveRequest;
 import com.orange.entity.vo.akoperator.AkAccountVO;
@@ -15,6 +16,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -71,22 +73,51 @@ public class AkAccountController {
     /**
      * 全量读取干员数据：始终返回该条目全部干员，星级筛选由调用方完成
      *
-     * <p>数据来源可由 {@code source} 显式指定；不传时后端按 {@code akUid}
-     * 是否等于当前用户中心 UID 自动识别手动条目。</p>
+     * <p>数据来源可由 {@code source} 显式指定；不传 {@code akUid} 时按用户设置的默认来源读取，
+     * 未设置默认来源时回退到最近变更的条目。</p>
      *
-     * @param akUid  数据条目 UID：自动数据为游戏账号 UID，手动数据复用用户中心 UID
-     * @param source 数据来源，可选：manual 手动版，skland 森空岛自动导入
+     * @param akUid  数据条目 UID：自动数据为游戏账号 UID，手动数据复用用户中心 UID，不传则取默认来源
+     * @param source 数据来源，可选：manual 手动版，skland 森空岛自动导入，传 akUid 时省略由后端自动识别
      * @return 干员全量数据，响应仅允许私人缓存
      */
     @Operation(summary = "全量读取干员数据")
     @GetMapping("/operators")
     public ResponseEntity<Result<OperatorListVO>> listOperators(
-            @RequestParam("akUid") String akUid,
+            @RequestParam(value = "akUid", required = false) String akUid,
             @RequestParam(value = "source", required = false) String source) {
         OperatorListVO data = akAccountService.listOperators(UserContext.requireUid(), akUid, source);
         return ResponseEntity.ok()
                 .header(HttpHeaders.CACHE_CONTROL, OPERATOR_CACHE_CONTROL)
                 .body(Result.success(data));
+    }
+
+    /**
+     * 设置当前用户的默认数据来源：读取干员数据不传 akUid 时返回该条目
+     *
+     * @param request 设置参数（source + 对应来源的 akUid）
+     * @return 操作结果
+     */
+    @Operation(summary = "设置默认展示的数据来源")
+    @PostMapping("/default/update")
+    public Result<Void> setDefaultSource(@Valid @RequestBody AkDefaultSourceRequest request) {
+        akAccountService.setDefaultSource(UserContext.requireUid(), request.getAkUid(), request.getSource());
+        return Result.success();
+    }
+
+    /**
+     * 解除当前用户与森空岛游戏账号的绑定
+     *
+     * <p>只解除绑定关系并清除指向该账号的默认偏好；角色信息、干员数据与物品存量按
+     * ak_uid 共享，不随解绑删除，其他绑定用户与后续重新导入不受影响。</p>
+     *
+     * @param akUid 游戏账号 UID，必须是当前用户已绑定的账号
+     * @return 操作结果
+     */
+    @Operation(summary = "解除游戏账号绑定")
+    @DeleteMapping
+    public Result<Void> unbindAccount(@RequestParam("akUid") String akUid) {
+        akAccountService.unbindAccount(UserContext.requireUid(), akUid);
+        return Result.success();
     }
 
     /**

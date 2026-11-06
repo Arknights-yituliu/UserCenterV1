@@ -13,6 +13,7 @@ import com.orange.entity.dto.akoperator.ItemEntryRequest;
 import com.orange.entity.dto.akoperator.OperatorItemRequest;
 import com.orange.entity.dto.akoperator.OperatorSaveRequest;
 import com.orange.entity.po.AkAccountBinding;
+import com.orange.entity.po.AkDefaultSource;
 import com.orange.entity.po.AkItemData;
 import com.orange.entity.po.AkPlayerInfo;
 import com.orange.entity.po.AkOperatorState;
@@ -24,6 +25,7 @@ import com.orange.entity.vo.akoperator.OperatorListVO;
 import com.orange.entity.vo.akoperator.OperatorSaveResultVO;
 import com.orange.entity.vo.akoperator.OperatorVO;
 import com.orange.mapper.AkAccountBindingMapper;
+import com.orange.mapper.AkDefaultSourceMapper;
 import com.orange.mapper.AkItemDataMapper;
 import com.orange.mapper.AkPlayerInfoMapper;
 import com.orange.mapper.AkOperatorStateManualMapper;
@@ -38,6 +40,7 @@ import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -77,13 +80,34 @@ public class AkAccountServiceImpl implements AkAccountService {
     /** 物品数据 JSON 文本大小上限（字节），防止单条数据过大占用存储 */
     private static final long MAX_ITEM_DATA_BYTES = 2L * 1024 * 1024;
 
+    /** 账号列表排序：用户设置的默认来源在前，其余按最近变更时间倒序，时间缺失的排最后 */
+    private static final Comparator<AkAccountVO> ACCOUNT_ORDER = (left, right) -> {
+        if (left.isDefaultFlag() != right.isDefaultFlag()) {
+            return left.isDefaultFlag() ? -1 : 1;
+        }
+        LocalDateTime leftTime = left.getUpdateTime();
+        LocalDateTime rightTime = right.getUpdateTime();
+        if (leftTime == null && rightTime == null) {
+            return 0;
+        }
+        if (leftTime == null) {
+            return 1;
+        }
+        if (rightTime == null) {
+            return -1;
+        }
+        return rightTime.compareTo(leftTime);
+    };
+
     private final AkAccountBindingMapper bindingMapper;
+    private final AkDefaultSourceMapper defaultSourceMapper;
     private final AkPlayerInfoMapper playerInfoMapper;
     private final AkOperatorStateMapper operatorMapper;
     private final AkItemDataMapper itemDataMapper;
     private final AkOperatorStateManualMapper manualMapper;
     private final AkOperatorStateManualService manualOperatorService;
     private final AkOperatorSaveExecutor saveExecutor;
+    private final AkAccountUnbindExecutor unbindExecutor;
     private final StringRedisTemplate stringRedisTemplate;
     private final ObjectMapper objectMapper;
 
@@ -91,47 +115,55 @@ public class AkAccountServiceImpl implements AkAccountService {
      * 构造器注入依赖
      *
      * @param bindingMapper         绑定关系 Mapper
+     * @param defaultSourceMapper   默认数据来源偏好 Mapper
      * @param playerInfoMapper      角色信息 Mapper
      * @param operatorMapper        干员数据 Mapper
      * @param itemDataMapper        物品存量 Mapper，读取整份 JSON 快照
      * @param manualMapper          手动版干员数据 Mapper（仅用于账号列表的汇总时间）
      * @param manualOperatorService 手动版干员数据服务，读取手动条目时复用其字段映射
-     * @param saveExecutor          写事务执行器（独立 Bean 保证 @Transactional 生效）
+     * @param saveExecutor          保存写事务执行器（独立 Bean 保证 @Transactional 生效）
+     * @param unbindExecutor        解绑写事务执行器（独立 Bean 保证 @Transactional 生效）
      * @param stringRedisTemplate   Redis 客户端，用于跨实例的原子限流
      * @param objectMapper          JSON 序列化器，用于物品数据整体落库与读取解析
      */
     public AkAccountServiceImpl(AkAccountBindingMapper bindingMapper,
+                                AkDefaultSourceMapper defaultSourceMapper,
                                 AkPlayerInfoMapper playerInfoMapper,
                                 AkOperatorStateMapper operatorMapper,
                                 AkItemDataMapper itemDataMapper,
                                 AkOperatorStateManualMapper manualMapper,
                                 AkOperatorStateManualService manualOperatorService,
                                 AkOperatorSaveExecutor saveExecutor,
+                                AkAccountUnbindExecutor unbindExecutor,
                                 StringRedisTemplate stringRedisTemplate,
                                 ObjectMapper objectMapper) {
         this.bindingMapper = bindingMapper;
+        this.defaultSourceMapper = defaultSourceMapper;
         this.playerInfoMapper = playerInfoMapper;
         this.operatorMapper = operatorMapper;
         this.itemDataMapper = itemDataMapper;
         this.manualMapper = manualMapper;
         this.manualOperatorService = manualOperatorService;
         this.saveExecutor = saveExecutor;
+        this.unbindExecutor = unbindExecutor;
         this.stringRedisTemplate = stringRedisTemplate;
         this.objectMapper = objectMapper;
     }
 
     /**
-     * 查询当前用户可展示的数据来源列表，按最近一次变更时间倒序
+     * 查询当前用户可展示的数据来源列表，默认来源在前，其余按最近一次变更时间倒序
      *
-     * <p>列表由森空岛自动导入的绑定账号与手动上传条目合并而成，统一按 updateTime 倒序，
-     * 前端取首条即可默认展示最新数据。手动上传条目没有游戏账号，akUid 复用用户中心 UID，
-     * 且仅在用户存在手动数据时追加。</p>
+     * <p>列表由森空岛自动导入的绑定账号与手动上传条目合并而成。用户设置的默认来源
+     * （见 {@code ak_default_source}）标记为 {@code defaultFlag} 并排在最前；未设置或
+     * 默认来源已失效时不做标记，整体回退为按 {@code updateTime} 倒序。手动上传条目没有
+     * 游戏账号，akUid 复用用户中心 UID，且仅在用户存在手动数据时追加。</p>
      *
      * @param uid 用户中心 UID
-     * @return 数据来源列表（含来源、创建时间与最近变更时间），最近的在前，无数据时返回空列表
+     * @return 数据来源列表（含来源、默认标记、创建时间与最近变更时间），默认项在前，无数据时返回空列表
      */
     @Override
     public List<AkAccountVO> listBoundAccounts(Long uid) {
+        AkDefaultSource defaultSource = defaultSourceMapper.selectByUid(uid);
         List<AkAccountBinding> bindings = bindingMapper.selectByOwnerOrderByUpdateTime(uid);
         List<AkAccountVO> accounts = new ArrayList<>(bindings.size() + 1);
         if (!bindings.isEmpty()) {
@@ -145,14 +177,18 @@ public class AkAccountServiceImpl implements AkAccountService {
                 if (!infoMap.containsKey(binding.getAkUid())) {
                     continue;
                 }
-                accounts.add(toAccountVO(binding));
+                AkAccountVO account = toAccountVO(binding);
+                account.setDefaultFlag(matchesDefault(defaultSource, account.getSource(), account.getAkUid()));
+                accounts.add(account);
             }
         }
         AkOperatorStateManualSummary manualSummary = manualMapper.selectSummaryByUid(uid);
         if (manualSummary != null && manualSummary.getUpdateTime() != null) {
-            accounts.add(toManualAccountVO(uid, manualSummary));
+            AkAccountVO account = toManualAccountVO(uid, manualSummary);
+            account.setDefaultFlag(matchesDefault(defaultSource, account.getSource(), account.getAkUid()));
+            accounts.add(account);
         }
-        accounts.sort(Comparator.comparing(AkAccountVO::getUpdateTime).reversed());
+        accounts.sort(ACCOUNT_ORDER);
         return accounts;
     }
 
@@ -161,15 +197,19 @@ public class AkAccountServiceImpl implements AkAccountService {
      *
      * <p>归属：手动数据只读当前登录用户本人那一份，因此 {@code source=manual} 时还要求
      * {@code akUid} 等于当前用户中心 UID，避免客户端拿别人的 akUid 取回本人手动数据；
-     * {@code source} 为空时按 akUid 自动识别，手动版无记录再回落到绑定关系鉴权的自动数据。</p>
+     * {@code source} 为空时按 akUid 自动识别，手动版无记录再回落到绑定关系鉴权的自动数据。
+     * 未传 {@code akUid} 时按用户设置的默认来源读取，未设置或默认来源失效则取最近变更的条目。</p>
      *
      * @param uid    用户中心 UID
-     * @param akUid  数据条目 UID：自动数据为游戏账号 UID，手动数据复用用户中心 UID
+     * @param akUid  数据条目 UID：自动数据为游戏账号 UID，手动数据复用用户中心 UID，可为空
      * @param source 数据来源，可选：manual 手动版，skland 森空岛自动导入，为空时自动识别
      * @return 对应来源的全部干员数据，无数据时 items 为空数组
      */
     @Override
     public OperatorListVO listOperators(Long uid, String akUid, String source) {
+        if (akUid == null || akUid.isEmpty()) {
+            return listDefaultOperators(uid, source);
+        }
         validateAkUid(akUid);
         // 手动条目没有游戏账号，akUid 复用用户中心 UID
         String manualAkUid = String.valueOf(uid);
@@ -199,6 +239,96 @@ public class AkAccountServiceImpl implements AkAccountService {
             items.add(toOperatorVO(row));
         }
         return new OperatorListVO(akUid, items);
+    }
+
+    /**
+     * 未指定 akUid 时按默认来源读取：默认项优先，未设置或默认项已失效时取最近变更的条目
+     *
+     * @param uid    用户中心 UID
+     * @param source 数据来源，必须为空（默认来源由服务端决定，不接受客户端同时指定）
+     * @return 默认条目的全部干员数据
+     */
+    private OperatorListVO listDefaultOperators(Long uid, String source) {
+        if (StringUtils.hasText(source)) {
+            throw new BusinessException(ResultCode.PARAM_VALID_ERROR, "未指定 akUid 时不能指定 source");
+        }
+        List<AkAccountVO> accounts = listBoundAccounts(uid);
+        if (accounts.isEmpty()) {
+            throw new BusinessException(ResultCode.PARAM_VALID_ERROR, "当前用户暂无可用的明日方舟数据来源");
+        }
+        // listBoundAccounts 已保证默认来源排首位、其余按最近变更倒序，首条即本次要读取的条目
+        AkAccountVO account = accounts.get(0);
+        return listOperators(uid, account.getAkUid(), account.getSource());
+    }
+
+    /**
+     * 设置当前用户的默认数据来源
+     *
+     * <p>先校验目标来源归属再落库：manual 只允许指向本人且已有手动数据，skland 只允许
+     * 指向本人已绑定的游戏账号；偏好按用户唯一，重复设置直接覆盖，不保留历史。</p>
+     *
+     * @param uid    用户中心 UID
+     * @param akUid  数据条目 UID
+     * @param source 数据来源：manual 或 skland
+     */
+    @Override
+    public void setDefaultSource(Long uid, String akUid, String source) {
+        validateAkUid(akUid);
+        if (AkAccountVO.SOURCE_MANUAL.equals(source)) {
+            requireManualSource(uid, akUid);
+        } else if (AkAccountVO.SOURCE_SKLAND.equals(source)) {
+            requireBinding(akUid, uid);
+        } else {
+            throw new BusinessException(ResultCode.PARAM_VALID_ERROR, "source 仅支持 manual 或 skland");
+        }
+        defaultSourceMapper.upsert(uid, source, akUid);
+    }
+
+    /**
+     * 解除当前用户与森空岛游戏账号的绑定：只删绑定与默认偏好，共享数据保留
+     *
+     * <p>{@code ak_player_info / ak_operator_state / ak_item_data} 按 ak_uid 由全部
+     * 绑定用户共享，解绑不触碰这些表，其他用户与后续重新导入不受影响。</p>
+     *
+     * @param uid   用户中心 UID
+     * @param akUid 游戏账号 UID
+     */
+    @Override
+    public void unbindAccount(Long uid, String akUid) {
+        validateAkUid(akUid);
+        // 未绑定与账号不存在都返回同一权限码，不暴露账号是否存在
+        requireBinding(akUid, uid);
+        unbindExecutor.unbind(uid, akUid);
+    }
+
+    /**
+     * 校验手动来源的目标：akUid 必须是本人用户中心 UID，且本人已存在手动修改版数据
+     *
+     * @param uid   用户中心 UID
+     * @param akUid 数据条目 UID
+     */
+    private void requireManualSource(Long uid, String akUid) {
+        if (!String.valueOf(uid).equals(akUid)) {
+            throw new BusinessException(ResultCode.PARAM_VALID_ERROR, "手动数据来源的 akUid 必须为当前用户中心UID");
+        }
+        AkOperatorStateManualSummary summary = manualMapper.selectSummaryByUid(uid);
+        if (summary == null || summary.getUpdateTime() == null) {
+            throw new BusinessException(ResultCode.PARAM_VALID_ERROR, "手动修改版干员数据不存在");
+        }
+    }
+
+    /**
+     * 判断账号条目是否为用户设置的默认来源
+     *
+     * @param defaultSource 用户默认来源偏好，可能为 null（未设置）
+     * @param source        条目数据来源
+     * @param akUid         条目归属键
+     * @return 是否命中默认来源
+     */
+    private boolean matchesDefault(AkDefaultSource defaultSource, String source, String akUid) {
+        return defaultSource != null
+                && source.equals(defaultSource.getSource())
+                && akUid.equals(defaultSource.getAkUid());
     }
 
     /**

@@ -2,11 +2,15 @@ package com.orange.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.orange.common.exception.BusinessException;
+import com.orange.entity.po.AkAccountBinding;
+import com.orange.entity.po.AkDefaultSource;
 import com.orange.entity.po.AkOperatorStateManualSummary;
+import com.orange.entity.po.AkPlayerInfo;
 import com.orange.entity.vo.akoperator.AkAccountVO;
 import com.orange.entity.vo.akoperator.OperatorListVO;
 import com.orange.entity.vo.akoperator.OperatorVO;
 import com.orange.mapper.AkAccountBindingMapper;
+import com.orange.mapper.AkDefaultSourceMapper;
 import com.orange.mapper.AkPlayerInfoMapper;
 import com.orange.mapper.AkOperatorStateManualMapper;
 import com.orange.mapper.AkOperatorStateMapper;
@@ -23,6 +27,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -36,6 +41,9 @@ class AkAccountServiceImplTest {
 
     @Mock
     private AkAccountBindingMapper bindingMapper;
+
+    @Mock
+    private AkDefaultSourceMapper defaultSourceMapper;
 
     @Mock
     private AkPlayerInfoMapper playerInfoMapper;
@@ -54,6 +62,9 @@ class AkAccountServiceImplTest {
 
     @Mock
     private AkOperatorSaveExecutor saveExecutor;
+
+    @Mock
+    private AkAccountUnbindExecutor unbindExecutor;
 
     @Mock
     private StringRedisTemplate stringRedisTemplate;
@@ -181,9 +192,158 @@ class AkAccountServiceImplTest {
         verify(bindingMapper).countBinding(String.valueOf(UID), UID);
     }
 
+    @Test
+    void putsDefaultSourceFirstEvenWhenAnotherEntryChangedLater() {
+        AkAccountBinding binding = new AkAccountBinding();
+        binding.setAkUid("ak-1");
+        binding.setOwnerUid(UID);
+        binding.setCreateTime(LocalDateTime.of(2026, 1, 1, 0, 0));
+        binding.setUpdateTime(LocalDateTime.of(2026, 1, 2, 0, 0));
+        when(bindingMapper.selectByOwnerOrderByUpdateTime(UID)).thenReturn(List.of(binding));
+
+        AkPlayerInfo info = new AkPlayerInfo();
+        info.setAkUid("ak-1");
+        when(playerInfoMapper.selectByAkUids(anyList())).thenReturn(List.of(info));
+
+        AkOperatorStateManualSummary summary = new AkOperatorStateManualSummary();
+        summary.setUpdateTime(LocalDateTime.of(2026, 1, 3, 0, 0));
+        when(manualMapper.selectSummaryByUid(UID)).thenReturn(summary);
+
+        AkDefaultSource preference = new AkDefaultSource();
+        preference.setUid(UID);
+        preference.setSource(AkAccountVO.SOURCE_SKLAND);
+        preference.setAkUid("ak-1");
+        when(defaultSourceMapper.selectByUid(UID)).thenReturn(preference);
+
+        List<AkAccountVO> accounts = service().listBoundAccounts(UID);
+
+        assertThat(accounts).hasSize(2);
+        assertThat(accounts.get(0).getAkUid()).isEqualTo("ak-1");
+        assertThat(accounts.get(0).isDefaultFlag()).isTrue();
+        assertThat(accounts.get(1).getAkUid()).isEqualTo(String.valueOf(UID));
+        assertThat(accounts.get(1).isDefaultFlag()).isFalse();
+    }
+
+    @Test
+    void leavesNoDefaultFlagWhenPreferenceTargetIsMissing() {
+        AkOperatorStateManualSummary summary = new AkOperatorStateManualSummary();
+        summary.setUpdateTime(LocalDateTime.of(2026, 1, 3, 0, 0));
+        when(manualMapper.selectSummaryByUid(UID)).thenReturn(summary);
+
+        AkDefaultSource preference = new AkDefaultSource();
+        preference.setUid(UID);
+        preference.setSource(AkAccountVO.SOURCE_SKLAND);
+        preference.setAkUid("ak-missing");
+        when(defaultSourceMapper.selectByUid(UID)).thenReturn(preference);
+
+        List<AkAccountVO> accounts = service().listBoundAccounts(UID);
+
+        assertThat(accounts).hasSize(1);
+        assertThat(accounts.get(0).isDefaultFlag()).isFalse();
+    }
+
+    @Test
+    void readsDefaultSourceWhenAkUidIsAbsent() {
+        AkDefaultSource preference = new AkDefaultSource();
+        preference.setUid(UID);
+        preference.setSource(AkAccountVO.SOURCE_MANUAL);
+        preference.setAkUid(String.valueOf(UID));
+        when(defaultSourceMapper.selectByUid(UID)).thenReturn(preference);
+        when(bindingMapper.selectByOwnerOrderByUpdateTime(UID)).thenReturn(Collections.emptyList());
+
+        AkOperatorStateManualSummary summary = new AkOperatorStateManualSummary();
+        summary.setUpdateTime(LocalDateTime.of(2026, 1, 2, 0, 0));
+        when(manualMapper.selectSummaryByUid(UID)).thenReturn(summary);
+
+        OperatorVO item = new OperatorVO();
+        item.setId("char-1");
+        when(manualOperatorService.listManualOperators(UID)).thenReturn(List.of(item));
+
+        OperatorListVO result = service().listOperators(UID, null, null);
+
+        assertThat(result.getAkUid()).isEqualTo(String.valueOf(UID));
+        assertThat(result.getItems()).containsExactly(item);
+    }
+
+    @Test
+    void rejectsSourceWhenAkUidIsAbsent() {
+        assertThatThrownBy(() -> service().listOperators(UID, null, AkAccountVO.SOURCE_MANUAL))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("code", 10002);
+        verify(bindingMapper, never()).selectByOwnerOrderByUpdateTime(UID);
+    }
+
+    @Test
+    void rejectsDefaultReadWhenUserHasNoSource() {
+        when(bindingMapper.selectByOwnerOrderByUpdateTime(UID)).thenReturn(Collections.emptyList());
+
+        assertThatThrownBy(() -> service().listOperators(UID, null, null))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("code", 10002);
+    }
+
+    @Test
+    void setsSklandDefaultAfterOwnershipCheck() {
+        when(bindingMapper.countBinding("ak-1", UID)).thenReturn(1);
+
+        service().setDefaultSource(UID, "ak-1", AkAccountVO.SOURCE_SKLAND);
+
+        verify(defaultSourceMapper).upsert(UID, AkAccountVO.SOURCE_SKLAND, "ak-1");
+    }
+
+    @Test
+    void rejectsSklandDefaultWhenAccountNotBound() {
+        when(bindingMapper.countBinding("ak-1", UID)).thenReturn(0);
+
+        assertThatThrownBy(() -> service().setDefaultSource(UID, "ak-1", AkAccountVO.SOURCE_SKLAND))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("code", 80008);
+        verify(defaultSourceMapper, never()).upsert(eq(UID), anyString(), anyString());
+    }
+
+    @Test
+    void setsManualDefaultWhenManualDataExists() {
+        AkOperatorStateManualSummary summary = new AkOperatorStateManualSummary();
+        summary.setUpdateTime(LocalDateTime.of(2026, 1, 2, 0, 0));
+        when(manualMapper.selectSummaryByUid(UID)).thenReturn(summary);
+
+        service().setDefaultSource(UID, String.valueOf(UID), AkAccountVO.SOURCE_MANUAL);
+
+        verify(defaultSourceMapper).upsert(UID, AkAccountVO.SOURCE_MANUAL, String.valueOf(UID));
+    }
+
+    @Test
+    void rejectsManualDefaultWhenManualDataMissing() {
+        when(manualMapper.selectSummaryByUid(UID)).thenReturn(null);
+
+        assertThatThrownBy(() -> service().setDefaultSource(UID, String.valueOf(UID), AkAccountVO.SOURCE_MANUAL))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("code", 10002);
+        verify(defaultSourceMapper, never()).upsert(eq(UID), anyString(), anyString());
+    }
+
+    @Test
+    void rejectsUnbindWhenAccountNotBound() {
+        when(bindingMapper.countBinding("ak-1", UID)).thenReturn(0);
+
+        assertThatThrownBy(() -> service().unbindAccount(UID, "ak-1"))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("code", 80008);
+        verify(unbindExecutor, never()).unbind(UID, "ak-1");
+    }
+
+    @Test
+    void unbindsAccountWhenBound() {
+        when(bindingMapper.countBinding("ak-1", UID)).thenReturn(1);
+
+        service().unbindAccount(UID, "ak-1");
+
+        verify(unbindExecutor).unbind(UID, "ak-1");
+    }
+
     private AkAccountServiceImpl service() {
-        return new AkAccountServiceImpl(bindingMapper, playerInfoMapper, operatorMapper,
-                itemDataMapper, manualMapper, manualOperatorService, saveExecutor,
+        return new AkAccountServiceImpl(bindingMapper, defaultSourceMapper, playerInfoMapper, operatorMapper,
+                itemDataMapper, manualMapper, manualOperatorService, saveExecutor, unbindExecutor,
                 stringRedisTemplate, new ObjectMapper());
     }
 }

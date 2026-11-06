@@ -454,3 +454,25 @@ CREATE TABLE `ef_account_binding` (
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '终末地角色与用户中心账号绑定关系及角色档案';
 
+-- -------------------------------------------------------------
+-- 21. 用户默认展示的明日方舟数据来源偏好
+--
+-- 与 ak_account_binding（授权关系，多对多、可共享）不同，本表是用户维度的展示偏好：
+-- 每个用户最多一条，用于标记「读取干员数据不传 akUid 时返回哪一个来源」。
+-- source 取值与接口一致：skland 森空岛自动导入、manual 用户手动上传；
+-- ak_uid 为对应来源的归属键：skland 存游戏账号 UID，manual 存用户中心 UID。
+-- 偏好只存指向、不复制数据；目标来源失效时读取侧回退到最近变更的条目，不阻断请求。
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `ak_default_source`;
+CREATE TABLE `ak_default_source` (
+    `id`          BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `uid`         BIGINT      NOT NULL COMMENT '用户中心UID',
+    `source`      VARCHAR(16) NOT NULL COMMENT '来源：skland 森空岛自动导入 / manual 用户手动上传',
+    `ak_uid`      VARCHAR(32) NOT NULL COMMENT '对应来源的归属键：skland 为游戏账号UID，manual 为用户中心UID',
+    `create_time` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '首次设置默认来源的时间',
+    `update_time` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '最近一次修改默认来源的时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_default_source_uid` (`uid`) COMMENT '每个用户只保留一条默认来源偏好'
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '用户默认展示的明日方舟数据来源偏好，一行一个用户';
+
