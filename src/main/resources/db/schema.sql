@@ -438,15 +438,19 @@ CREATE TABLE `ef_player_data` (
 -- -------------------------------------------------------------
 DROP TABLE IF EXISTS `ef_account_binding`;
 CREATE TABLE `ef_account_binding` (
-    `id`          BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键',
-    `role_id`     VARCHAR(32) NOT NULL COMMENT '终末地游戏内角色UID',
-    `server_id`   VARCHAR(16) NOT NULL DEFAULT '' COMMENT '服务器ID',
-    `owner_uid`   BIGINT      NOT NULL COMMENT '绑定该角色的用户中心UID',
-    `create_time` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '绑定创建时间：首次导入该角色数据时写入',
-    `update_time` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '该角色数据最近一次导入时间',
+    `id`                   BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `role_id`              VARCHAR(32) NOT NULL COMMENT '终末地游戏内角色UID',
+    `server_id`            VARCHAR(16) NOT NULL DEFAULT '' COMMENT '服务器ID；寻访记录导入不区分服务器，固定为空串',
+    `owner_uid`            BIGINT      NOT NULL COMMENT '绑定该角色的用户中心UID；0 表示匿名导入档案，不对应任何用户',
+    `hg_uid`               VARCHAR(64) NOT NULL DEFAULT '' COMMENT '鹰角通行证UID（原 endministrator_info.uid）',
+    `nick_name`            VARCHAR(64) NOT NULL DEFAULT '' COMMENT '玩家昵称（原 endministrator_info.nick_name）',
+    `player_data_imported` TINYINT     NOT NULL DEFAULT 0 COMMENT '该角色是否已导入过玩家数据（角色详情）：0否 1是',
+    `pool_record_imported` TINYINT     NOT NULL DEFAULT 0 COMMENT '该角色是否已导入过寻访记录：0否 1是',
+    `create_time`          DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '绑定创建时间：首次导入该角色数据时写入',
+    `update_time`          DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '该角色数据最近一次导入时间',
     PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_ef_owner` (`role_id`, `server_id`, `owner_uid`) COMMENT '同一角色与用户只保留一条绑定关系',
+    UNIQUE KEY `uk_ef_owner` (`role_id`, `server_id`, `owner_uid`) COMMENT '同一角色、服务器与用户只保留一条绑定关系',
     KEY `idx_ef_owner_update` (`owner_uid`, `update_time`) COMMENT '按用户查询已绑定角色并按最近导入时间倒序'
 ) ENGINE = InnoDB
-  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '终末地角色与用户中心账号多对多绑定关系';
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '终末地角色与用户中心账号绑定关系及角色档案';
 

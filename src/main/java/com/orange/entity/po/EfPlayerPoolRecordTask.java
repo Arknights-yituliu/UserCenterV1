@@ -7,15 +7,15 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import java.util.Date;
 
 /**
- * 寻访记录导入任务实体（player_pool_record_task）
+ * 寻访记录导入任务实体（ef_player_pool_record_task）
  *
  * <p>沿用终末地一图流原有表结构与表名：token 字段存放前端提交的 hgToken，
  * 调度器每秒取一条未开始的任务执行导入，完成后置 complete_flag。</p>
  *
  * @author UserCenter
  */
-@TableName("player_pool_record_task")
-public class EfPoolRecordTask {
+@TableName("ef_player_pool_record_task")
+public class EfPlayerPoolRecordTask {
 
     /** 任务 ID，主键 */
     @TableId(type = IdType.INPUT)
@@ -29,6 +29,9 @@ public class EfPoolRecordTask {
 
     /** 终末地游戏内角色 UID（完成后写入） */
     private String roleId;
+
+    /** 创建任务的用户中心 UID；旧的不鉴权接口创建的任务为 null */
+    private Long ownerUid;
 
     /** 是否已开始处理 */
     private Boolean startFlag;
@@ -69,6 +72,14 @@ public class EfPoolRecordTask {
 
     public void setRoleId(String roleId) {
         this.roleId = roleId;
+    }
+
+    public Long getOwnerUid() {
+        return ownerUid;
+    }
+
+    public void setOwnerUid(Long ownerUid) {
+        this.ownerUid = ownerUid;
     }
 
     public Boolean getStartFlag() {

@@ -1,17 +1,18 @@
 # 终末地寻访记录 API
 
 > 来源：从 `endfield-yituliu-backend` 迁移至 UserCenterV1。
-> 当前版本**不做用户鉴权**，调用方无需携带登录 token。
+> 匿名接口 `/ef/pool-record/**` 已**全部下线**，下方第 1~3 节仅作历史说明保留。
+> 现行接口统一为 `/user/ef-pool-records/**`，需要登录态，按会话 uid 记录与校验 `ef_account_binding` 中的归属。
 
 ## 基础信息
 
 | 项目 | 说明 |
 |---|---|
 | Base URL | `http://<host>:<port>` |
-| 统一前缀 | `/ef/pool-record` |
+| 统一前缀 | `/user/ef-pool-records` |
 | 返回格式 | `application/json`，统一封装为 `{ code, msg, data }` |
 | 成功标识 | `code = 200` |
-| 鉴权 | 无（`/ef/**` 不在登录拦截器范围内） |
+| 鉴权 | 需要登录态（`/user/**` 在会话拦截器范围内） |
 
 统一响应结构：
 
@@ -32,7 +33,7 @@
 1. 前端提交 `hgToken` 创建任务，立即拿到 `taskId`；
 2. 后台调度器每秒取一条未开始任务执行导入（换取 u8Token → 拉取干员/武器寻访记录 → 落库）；
 3. 前端轮询 `check-task`，返回成功即表示导入完成；
-4. 完成后调用 `character/list` 读取该角色的全部寻访记录。
+4. 完成后调用 `record` 读取该角色的全部寻访记录。
 
 补充规则：
 
@@ -42,7 +43,9 @@
 
 ## 接口列表
 
-### 1. 创建寻访记录导入任务
+> 第 1~3 节为已下线的匿名接口，仅作历史说明；现行接口见第 4~7 节。
+
+### 1. 创建寻访记录导入任务（已下线）
 
 `POST /ef/pool-record/create-task`
 
@@ -76,7 +79,7 @@
 curl -X POST "http://localhost:8080/ef/pool-record/create-task?hgToken=xxx"
 ```
 
-### 2. 查询任务状态
+### 2. 查询任务状态（已下线）
 
 `GET /ef/pool-record/check-task`
 
@@ -120,7 +123,7 @@ curl -X POST "http://localhost:8080/ef/pool-record/create-task?hgToken=xxx"
 curl "http://localhost:8080/ef/pool-record/check-task?taskId=task1234567890123"
 ```
 
-### 3. 读取干员与武器寻访记录
+### 3. 读取干员与武器寻访记录（已下线）
 
 `GET /ef/pool-record/character/list`
 
@@ -236,14 +239,101 @@ curl "http://localhost:8080/ef/pool-record/check-task?taskId=task1234567890123"
 curl "http://localhost:8080/ef/pool-record/character/list?taskId=task1234567890123"
 ```
 
+## 用户侧鉴权接口（`/user/ef-pool-records/**`）
+
+> 以下接口需要登录态（`Authorization: Bearer <会话token>` 或 `UC-Token`），
+> 归属取自会话中的 uid，客户端不能通过请求参数指定。
+
+### 4. 创建导入任务（记录归属）
+
+`POST /user/ef-pool-records/create-task`
+
+与已下线的匿名接口 `POST /ef/pool-record/create-task` 参数、限流规则一致；任务会记录创建者 uid，
+导入完成后服务端把角色档案与「用户-角色」关系写入 `ef_account_binding`，该角色才会出现在「我导入过的账户」列表中。
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| hgToken | string | 是 | 鹰角通行证 token |
+
+**响应 data**：任务 ID（string）。
+
+### 5. 查询任务状态
+
+`GET /user/ef-pool-records/check-task`
+
+仅任务创建者可见；匿名接口下线前遗留的匿名任务（`owner_uid` 为 NULL）一律返回无权限。
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| taskId | string | 是 | 创建任务时返回的任务 ID |
+
+**响应 data**：任务完成时返回角色信息（`uid`、`roleId`、`nickName`）；未完成返回业务错误 `10003 任务尚未完成`。
+
+### 6. 查询我导入过的终末地账户
+
+`GET /user/ef-pool-records/accounts`
+
+**响应 data**：账户数组，按最近导入时间倒序。
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| roleId | string | 终末地游戏内角色 UID，读取寻访记录时回传 |
+| nickName | string | 玩家昵称 |
+| updateTime | string | 最近一次导入时间（ISO-8601） |
+| playerDataImported | boolean | 该角色是否已导入过玩家数据（角色详情），前端可据此提示补传角色详情 |
+
+```json
+{
+  "code": 200,
+  "msg": "操作成功",
+  "data": [
+    {
+      "roleId": "1001234567",
+      "nickName": "管理员",
+      "updateTime": "2026-11-02T10:15:30",
+      "playerDataImported": true
+    }
+  ]
+}
+```
+
+说明：
+
+- 归属与角色档案都取自 `ef_account_binding`（`pool_record_imported = 1`），由鉴权导入任务完成后写入。
+- 匿名接口已下线，不再产生 `owner_uid = 0` 的匿名档案；列表查询显式排除该值作为历史数据兜底。
+
+### 7. 按角色读取我的寻访记录
+
+`GET /user/ef-pool-records/record`
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| roleId | string | 是 | 取自「我导入过的账户」列表 |
+
+**响应 data**：与旧接口 `GET /ef/pool-record/character/list` 相同的 `characterPoolRecord` / `weaponPoolRecord` 两个数组。
+响应 `Cache-Control: private, no-cache`。
+
+**业务错误**
+
+| code | msg | 场景 |
+|---|---|---|
+| 10001 | roleId不能为空 | 未传 roleId |
+| 80008 | 无权限操作 | 当前用户未绑定该角色 |
+
+```bash
+curl "http://localhost:8080/user/ef-pool-records/record?roleId=1001234567" \
+  -H "Authorization: Bearer <会话token>"
+```
+
 ## 数据来源与落库
 
 | 表 | 说明 |
 |---|---|
-| `player_pool_record_task` | 导入任务，保存 hgToken、任务状态与 roleId |
-| `character_pool_record` | 干员寻访记录，`INSERT IGNORE` 去重 |
-| `weapon_pool_record` | 武器寻访记录，`INSERT IGNORE` 去重 |
-| `endministrator_info` | 玩家角色信息（roleId、uid、nickName） |
+| `ef_player_pool_record_task` | 导入任务，保存 hgToken、任务状态、roleId 与创建者 owner_uid |
+| `ef_character_pool_record` | 干员寻访记录，`INSERT IGNORE` 去重 |
+| `ef_weapon_pool_record` | 武器寻访记录，`INSERT IGNORE` 去重 |
+| `endministrator_info` | 一图流旧表，本项目已不再读写；迁移时可不迁移（角色档案改存 `ef_account_binding`） |
+| `ef_account_binding` | 用户与角色绑定及角色档案（hg_uid、nick_name、player_data_imported、pool_record_imported），用户侧接口据此鉴权；所有导入均需登录，导入成功即建立真实归属 |
 
 - 干员数据：`https://ef-webview.hypergryph.com/api/record/char`
 - 武器数据：`https://ef-webview.hypergryph.com/api/record/weapon`

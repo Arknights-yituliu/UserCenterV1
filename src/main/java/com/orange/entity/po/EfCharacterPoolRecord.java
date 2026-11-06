@@ -5,13 +5,13 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
 /**
- * 干员寻访记录实体（character_pool_record）
+ * 干员寻访记录实体（ef_character_pool_record）
  *
  * <p>沿用终末地一图流原有表结构与表名，一行一条寻访记录，按 role_id + seq_id 去重。</p>
  *
  * @author UserCenter
  */
-@TableName("character_pool_record")
+@TableName("ef_character_pool_record")
 public class EfCharacterPoolRecord {
 
     /** 记录 ID，主键 */

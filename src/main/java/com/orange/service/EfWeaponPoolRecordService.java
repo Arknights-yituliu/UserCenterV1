@@ -24,7 +24,7 @@ import java.util.concurrent.ExecutionException;
 /**
  * 武器寻访记录导入服务
  *
- * <p>拉取终末地武器寻访记录接口并分批写入 weapon_pool_record：
+ * <p>拉取终末地武器寻访记录接口并分批写入 ef_weapon_pool_record：
  * 先取最新一页，再按 5 递减补齐数据库缺失的历史记录。</p>
  *
  * @author UserCenter

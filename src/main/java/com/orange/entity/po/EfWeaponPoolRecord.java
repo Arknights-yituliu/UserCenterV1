@@ -5,13 +5,13 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
 /**
- * 武器寻访记录实体（weapon_pool_record）
+ * 武器寻访记录实体（ef_weapon_pool_record）
  *
  * <p>沿用终末地一图流原有表结构与表名，一行一条武器寻访记录。</p>
  *
  * @author UserCenter
  */
-@TableName("weapon_pool_record")
+@TableName("ef_weapon_pool_record")
 public class EfWeaponPoolRecord {
 
     /** 记录 ID，主键 */

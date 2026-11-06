@@ -10,7 +10,7 @@ import org.apache.ibatis.annotations.Select;
 import java.util.List;
 
 /**
- * 武器寻访记录 Mapper（weapon_pool_record）
+ * 武器寻访记录 Mapper（ef_weapon_pool_record）
  *
  * <p>沿用终末地一图流原有表：批量写入使用 INSERT IGNORE，由表上的唯一约束去重。</p>
  *
@@ -25,7 +25,7 @@ public interface EfWeaponPoolRecordMapper extends BaseMapper<EfWeaponPoolRecord>
      * @param items 待插入记录，调用方保证非空且已生成主键
      * @return 实际插入行数
      */
-    @Insert("<script>INSERT IGNORE INTO weapon_pool_record "
+    @Insert("<script>INSERT IGNORE INTO ef_weapon_pool_record "
             + "(id, role_id, pool_id, pool_name, weapon_id, weapon_name, weapon_type, rarity, is_new, "
             + "gacha_ts, seq_id, lang, server_id) VALUES "
             + "<foreach collection='items' item='it' separator=','>"
@@ -40,6 +40,6 @@ public interface EfWeaponPoolRecordMapper extends BaseMapper<EfWeaponPoolRecord>
      * @param roleId 终末地游戏内角色 UID
      * @return 最大 seq_id；无历史记录时返回 null
      */
-    @Select("SELECT MAX(CAST(seq_id AS UNSIGNED)) FROM weapon_pool_record WHERE role_id = #{roleId}")
+    @Select("SELECT MAX(CAST(seq_id AS UNSIGNED)) FROM ef_weapon_pool_record WHERE role_id = #{roleId}")
     Integer getMaxSeqIdNumber(@Param("roleId") String roleId);
 }

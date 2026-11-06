@@ -77,6 +77,15 @@
 | `/user/ef-accounts/player-data` | GET | 是 | 用户会话 | 读取指定角色的玩家数据：`roleId` 必填、`serverId` 可选，须已绑定到当前用户；响应 Cache-Control 为 private, no-cache。 |
 | `/user/ef-accounts/player-data/save` | POST | 是 | 用户会话 | 保存终末地玩家数据：整份 JSON 文本直接落库，已有则覆盖，首次上传同时建立角色绑定。 |
 
+### 终末地寻访记录（`/user/ef-pool-records/**`）
+
+| API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
+|---|---|---|---|---|
+| `/user/ef-pool-records/create-task` | POST | 是 | 用户会话 | 创建寻访记录导入任务并记录归属用户（匿名接口 `/ef/pool-record/create-task` 已下线）。 |
+| `/user/ef-pool-records/check-task` | GET | 是 | 用户会话 | 查询任务状态，仅任务创建者可见。 |
+| `/user/ef-pool-records/accounts` | GET | 是 | 用户会话 | 查询当前用户导入过寻访记录的终末地账户列表，按导入时间倒序。 |
+| `/user/ef-pool-records/record` | GET | 是 | 用户会话 | 按 `roleId` 读取我的干员与武器寻访记录，须已绑定当前用户；响应 Cache-Control 为 private, no-cache。 |
+
 ### 第三方应用授权管理（`/user/oauth/**`）
 
 | API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |

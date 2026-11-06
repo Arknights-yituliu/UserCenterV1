@@ -10,7 +10,7 @@ import org.apache.ibatis.annotations.Select;
 import java.util.List;
 
 /**
- * 干员寻访记录 Mapper（character_pool_record）
+ * 干员寻访记录 Mapper（ef_character_pool_record）
  *
  * <p>沿用终末地一图流原有表：批量写入使用 INSERT IGNORE，由表上的唯一约束去重，
  * 重复记录不报错也不覆盖已有数据。</p>
@@ -26,7 +26,7 @@ public interface EfCharacterPoolRecordMapper extends BaseMapper<EfCharacterPoolR
      * @param items 待插入记录，调用方保证非空且已生成主键
      * @return 实际插入行数
      */
-    @Insert("<script>INSERT IGNORE INTO character_pool_record "
+    @Insert("<script>INSERT IGNORE INTO ef_character_pool_record "
             + "(id, role_id, pool_id, pool_name, char_id, char_name, rarity, is_free, is_new, "
             + "gacha_ts, seq_id, lang, pool_type, server_id) VALUES "
             + "<foreach collection='items' item='it' separator=','>"
@@ -43,7 +43,7 @@ public interface EfCharacterPoolRecordMapper extends BaseMapper<EfCharacterPoolR
      * @param poolType 卡池类型
      * @return 最大 seq_id；该卡池类型无历史记录时返回 null
      */
-    @Select("SELECT MAX(CAST(seq_id AS UNSIGNED)) FROM character_pool_record "
+    @Select("SELECT MAX(CAST(seq_id AS UNSIGNED)) FROM ef_character_pool_record "
             + "WHERE role_id = #{roleId} AND pool_type = #{poolType}")
     Integer getMaxSeqIdNumberByPoolType(@Param("roleId") String roleId, @Param("poolType") String poolType);
 }

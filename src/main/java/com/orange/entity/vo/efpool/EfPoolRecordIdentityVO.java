@@ -1,33 +1,28 @@
-package com.orange.entity.po;
-
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableId;
-import com.baomidou.mybatisplus.annotation.TableName;
+package com.orange.entity.vo.efpool;
 
 /**
- * 终末地玩家角色信息实体（endministrator_info）
+ * 寻访记录导入任务完成后返回的角色身份信息
  *
- * <p>沿用终末地一图流原有表结构与表名，按 role_id 唯一，记录 uid 与昵称。</p>
+ * <p>数据来源已由旧表 endministrator_info 迁移到 ef_account_binding，
+ * 字段名保持不变，避免影响既有调用方。</p>
  *
  * @author UserCenter
  */
-@TableName("endministrator_info")
-public class EfEndministratorInfo {
+public class EfPoolRecordIdentityVO {
 
-    /** 终末地游戏内角色 UID，主键 */
-    @TableId(type = IdType.INPUT)
+    /** 终末地游戏内角色 UID */
     private String roleId;
 
-    /** 鹰角账号 uid */
+    /** 鹰角通行证 UID */
     private String uid;
 
     /** 玩家昵称 */
     private String nickName;
 
-    public EfEndministratorInfo() {
+    public EfPoolRecordIdentityVO() {
     }
 
-    public EfEndministratorInfo(String uid, String roleId, String nickName) {
+    public EfPoolRecordIdentityVO(String uid, String roleId, String nickName) {
         this.uid = uid;
         this.roleId = roleId;
         this.nickName = nickName;

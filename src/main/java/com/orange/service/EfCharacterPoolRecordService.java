@@ -24,7 +24,7 @@ import java.util.concurrent.ExecutionException;
 /**
  * 干员寻访记录导入服务
  *
- * <p>按卡池类型并发拉取终末地寻访记录接口，再分批写入 character_pool_record。
+ * <p>按卡池类型并发拉取终末地寻访记录接口，再分批写入 ef_character_pool_record。
  * 首次请求不传 seq_id 取最新一页，随后按 5 递减补齐全量历史记录。</p>
  *
  * @author UserCenter
