@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.orange.common.exception.BusinessException;
 import com.orange.entity.po.AkAccountBinding;
 import com.orange.entity.po.AkDefaultSource;
+import com.orange.entity.po.AkOperatorState;
 import com.orange.entity.po.AkOperatorStateManualSummary;
 import com.orange.entity.po.AkPlayerInfo;
 import com.orange.entity.vo.akoperator.AkAccountVO;
@@ -169,20 +170,21 @@ class AkAccountServiceImplTest {
     }
 
     @Test
-    void detectsManualOperatorsByAkUidWhenSourceIsAbsent() {
-        OperatorVO item = new OperatorVO();
-        item.setId("char-1");
-        when(manualOperatorService.listManualOperators(UID)).thenReturn(List.of(item));
+    void detectsManualSourceByExistingRecordsEvenWhenAllUnowned() {
+        AkOperatorStateManualSummary summary = new AkOperatorStateManualSummary();
+        summary.setUpdateTime(LocalDateTime.of(2026, 1, 2, 0, 0));
+        when(manualMapper.selectSummaryByUid(UID)).thenReturn(summary);
+        when(manualOperatorService.listManualOperators(UID)).thenReturn(Collections.emptyList());
 
         OperatorListVO result = service().listOperators(UID, String.valueOf(UID), null);
 
-        assertThat(result.getItems()).containsExactly(item);
+        assertThat(result.getItems()).isEmpty();
         verify(bindingMapper, never()).countBinding(anyString(), eq(UID));
     }
 
     @Test
     void fallsBackToAutomaticDataWhenAkUidEqualsUserUidWithoutManualRecords() {
-        when(manualOperatorService.listManualOperators(UID)).thenReturn(Collections.emptyList());
+        when(manualMapper.selectSummaryByUid(UID)).thenReturn(null);
         when(bindingMapper.countBinding(String.valueOf(UID), UID)).thenReturn(1);
         when(operatorMapper.selectByAkUid(String.valueOf(UID))).thenReturn(Collections.emptyList());
 
@@ -190,6 +192,27 @@ class AkAccountServiceImplTest {
 
         assertThat(result.getItems()).isEmpty();
         verify(bindingMapper).countBinding(String.valueOf(UID), UID);
+    }
+
+    @Test
+    void filtersOutUnownedOperatorsFromAutomaticData() {
+        when(bindingMapper.countBinding("ak-1", UID)).thenReturn(1);
+        AkOperatorState owned = new AkOperatorState();
+        owned.setId(1L);
+        owned.setAkUid("ak-1");
+        owned.setOperatorId("char-1");
+        owned.setOwned(1);
+        AkOperatorState unowned = new AkOperatorState();
+        unowned.setId(2L);
+        unowned.setAkUid("ak-1");
+        unowned.setOperatorId("char-2");
+        unowned.setOwned(0);
+        when(operatorMapper.selectByAkUid("ak-1")).thenReturn(List.of(owned, unowned));
+
+        OperatorListVO result = service().listOperators(UID, "ak-1", null);
+
+        assertThat(result.getItems()).hasSize(1);
+        assertThat(result.getItems().get(0).getId()).isEqualTo("char-1");
     }
 
     @Test

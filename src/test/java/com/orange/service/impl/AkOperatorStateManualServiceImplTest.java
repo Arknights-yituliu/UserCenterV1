@@ -54,6 +54,27 @@ class AkOperatorStateManualServiceImplTest {
     }
 
     @Test
+    void filtersOutUnownedOperatorsWhenListing() {
+        AkOperatorStateManual owned = new AkOperatorStateManual();
+        owned.setId(9L);
+        owned.setUid(UID);
+        owned.setOperatorId("char_002_amiya");
+        owned.setOwned(1);
+        AkOperatorStateManual unowned = new AkOperatorStateManual();
+        unowned.setId(10L);
+        unowned.setUid(UID);
+        unowned.setOperatorId("char_003_kalts");
+        unowned.setOwned(0);
+        when(manualMapper.selectByUid(UID)).thenReturn(List.of(owned, unowned));
+
+        List<OperatorVO> result = service().listManualOperators(UID);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getId()).isEqualTo("char_002_amiya");
+        assertThat(result.get(0).getOwned()).isEqualTo(1);
+    }
+
+    @Test
     void normalizesMissingValuesToZeroBeforeSave() {
         when(saveExecutor.save(eq(UID), org.mockito.ArgumentMatchers.anyList()))
                 .thenReturn(new OperatorSaveResultVO(1, 0, 0));

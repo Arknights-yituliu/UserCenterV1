@@ -197,13 +197,16 @@ public class AkAccountServiceImpl implements AkAccountService {
      *
      * <p>归属：手动数据只读当前登录用户本人那一份，因此 {@code source=manual} 时还要求
      * {@code akUid} 等于当前用户中心 UID，避免客户端拿别人的 akUid 取回本人手动数据；
-     * {@code source} 为空时按 akUid 自动识别，手动版无记录再回落到绑定关系鉴权的自动数据。
+     * {@code source} 为空时按 akUid 自动识别，本人不存在手动记录才回落到绑定关系鉴权的自动数据。
      * 未传 {@code akUid} 时按用户设置的默认来源读取，未设置或默认来源失效则取最近变更的条目。</p>
+     *
+     * <p>返回口径：只返回已持有（owned=1）的干员，自动导入与手动版一致；owned=0 的记录
+     * 仍保留在库中，但不出现在读取结果里。</p>
      *
      * @param uid    用户中心 UID
      * @param akUid  数据条目 UID：自动数据为游戏账号 UID，手动数据复用用户中心 UID，可为空
      * @param source 数据来源，可选：manual 手动版，skland 森空岛自动导入，为空时自动识别
-     * @return 对应来源的全部干员数据，无数据时 items 为空数组
+     * @return 对应来源的全部已持有干员数据，无数据时 items 为空数组
      */
     @Override
     public OperatorListVO listOperators(Long uid, String akUid, String source) {
@@ -224,11 +227,12 @@ public class AkAccountServiceImpl implements AkAccountService {
                 throw new BusinessException(ResultCode.PARAM_VALID_ERROR, "source 仅支持 manual 或 skland");
             }
         } else if (manualAkUid.equals(akUid)) {
-            // 未显式指定来源时按 akUid 识别手动条目；手动版无记录则回落到自动数据，
-            // 兼容游戏账号 akUid 恰好与用户中心 UID 撞号的情况
-            List<OperatorVO> manualItems = manualOperatorService.listManualOperators(uid);
-            if (!manualItems.isEmpty()) {
-                return new OperatorListVO(akUid, manualItems);
+            // 未显式指定来源时按 akUid 识别手动条目：只要本人存在手动记录就视为手动来源，
+            // 即使记录全部为 owned=0 也返回空列表，不回落自动数据；不存在手动记录时才回落到
+            // 自动数据，兼容游戏账号 akUid 恰好与用户中心 UID 撞号的情况
+            AkOperatorStateManualSummary manualSummary = manualMapper.selectSummaryByUid(uid);
+            if (manualSummary != null && manualSummary.getUpdateTime() != null) {
+                return new OperatorListVO(akUid, manualOperatorService.listManualOperators(uid));
             }
         }
 
@@ -236,6 +240,9 @@ public class AkAccountServiceImpl implements AkAccountService {
         List<AkOperatorState> rows = operatorMapper.selectByAkUid(akUid);
         List<OperatorVO> items = new ArrayList<>(rows.size());
         for (AkOperatorState row : rows) {
+            if (!Integer.valueOf(1).equals(row.getOwned())) {
+                continue;
+            }
             items.add(toOperatorVO(row));
         }
         return new OperatorListVO(akUid, items);

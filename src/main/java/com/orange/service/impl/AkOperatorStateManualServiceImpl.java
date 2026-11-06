@@ -54,14 +54,20 @@ public class AkOperatorStateManualServiceImpl implements AkOperatorStateManualSe
     /**
      * 读取当前用户的手动修改版干员数据
      *
+     * <p>只返回已持有（owned=1）的干员：owned=0 的记录仍保留在库中用于记录用户标记，
+     * 但不参与读取结果，避免调用方拿到大量未持有条目。</p>
+     *
      * @param uid 用户中心 UID
-     * @return 手动版干员列表，无数据时返回空列表
+     * @return 手动版已持有干员列表，无数据时返回空列表
      */
     @Override
     public List<OperatorVO> listManualOperators(Long uid) {
         List<AkOperatorStateManual> rows = manualMapper.selectByUid(uid);
         List<OperatorVO> items = new ArrayList<>(rows.size());
         for (AkOperatorStateManual row : rows) {
+            if (!Integer.valueOf(1).equals(row.getOwned())) {
+                continue;
+            }
             items.add(toManualOperatorVO(row));
         }
         return items;

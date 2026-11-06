@@ -203,7 +203,7 @@ GET /oauth2/ak-accounts/operators?akUid={akUid}&source={source}
 Authorization: Bearer <access_token>
 ```
 
-需要 `gama-data.read`。全量返回该数据条目的干员数据，星级筛选由调用方完成。数据来源由 `source` 决定：
+需要 `gama-data.read`。返回该数据条目中已持有（`owned=1`）的干员数据，星级筛选由调用方完成。`owned=0` 的记录仍会保存，但不出现在读取结果中。数据来源由 `source` 决定：
 
 - 省略 `akUid`：返回用户设置的默认来源（`defaultFlag=true` 的条目）；未设置或默认来源已失效时取最近变更的条目。此时不能同时传 `source`；
 - 自动导入数据（`source=skland`，或省略 `source` 且未命中手动条目）：`akUid` 必须是当前令牌用户名下的游戏账号；
@@ -253,10 +253,10 @@ HTTP `200`，并携带响应头 `Cache-Control: private, no-cache`：
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `akUid` | string | 游戏账号 UID |
-| `items` | array | 干员记录列表，无数据时为空数组 |
+| `items` | array | 已持有干员记录列表，无数据时为空数组 |
 | `items[].id` | string | 稳定干员编码，业务关联请使用该字段 |
 | `items[].recordId` | integer | 数据库自增行 ID，仅供排查 |
-| `items[].owned` | integer | 是否持有，`1` 是、`0` 否 |
+| `items[].owned` | integer | 是否持有；读取结果只包含已持有干员，恒为 `1` |
 | `items[].rarity` | integer | 干员星级，`0` 表示未提供 |
 | `items[].level` | integer | 干员等级 |
 | `items[].evolvePhase` | integer | 精英化阶段 |
@@ -461,7 +461,7 @@ HTTP `200`：
 
 ## 6. 手动修改版干员数据
 
-手动修改版是用户对自己干员数据的个人副本，**每个用户只有一份**，与具体游戏账号（`akUid`）无关；自动导入的干员数据仍按游戏账号共享，两侧互不影响。两侧字段一致，均包含 `owned`（是否持有）；区别仅在缺省值：自动导入缺省按 `1`，手动版缺省按 `0`。用户身份始终取自 access_token，不能通过请求参数指定。
+手动修改版是用户对自己干员数据的个人副本，**每个用户只有一份**，与具体游戏账号（`akUid`）无关；自动导入的干员数据仍按游戏账号共享，两侧互不影响。两侧字段一致，均包含 `owned`（是否持有）；区别仅在缺省值：自动导入缺省按 `1`，手动版缺省按 `0`。两侧读取时均只返回 `owned=1` 的记录。用户身份始终取自 access_token，不能通过请求参数指定。
 
 读取手动修改版统一使用 [3. 干员数据](#3-干员数据)：传入 `source=manual`，`akUid` 取当前令牌用户的用户中心 UID（即 `GET /oauth2/ak-accounts` 返回的手动条目中的 `akUid`），响应结构为 `data.akUid` + `data.items`。
 
@@ -486,6 +486,7 @@ Authorization: Bearer <access_token>
 
 - 传入的干员 `id` 已存在则按属性（含 `owned`）比较后更新，不存在则新增；**请求中未出现的干员不会被删除**。
 - 同一个请求中的干员 `id` 不能重复，重复返回 `code=10002`。
+- `owned=0` 的干员仍会落库，但读取时不会返回。
 - 保存过程遇到唯一键冲突或死锁时，服务端整事务回滚后重试，最多 2 次；仍失败返回 `code=40004`。
 - 本接口不占用游戏账号的上传限流名额，因此不会返回 `30006`。
 
