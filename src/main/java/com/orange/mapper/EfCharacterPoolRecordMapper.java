@@ -12,8 +12,8 @@ import java.util.List;
 /**
  * 干员寻访记录 Mapper（ef_character_pool_record）
  *
- * <p>沿用终末地一图流原有表：批量写入使用 INSERT IGNORE，由表上的唯一约束去重，
- * 重复记录不报错也不覆盖已有数据。</p>
+ * <p>沿用终末地一图流原有表：批量写入使用 ON DUPLICATE KEY UPDATE，由表上的唯一约束去重，
+ * 冲突行仅在新值非空时覆盖旧值，避免上游字段降级把已有数据刷空。</p>
  *
  * @author UserCenter
  */
@@ -21,20 +21,29 @@ import java.util.List;
 public interface EfCharacterPoolRecordMapper extends BaseMapper<EfCharacterPoolRecord> {
 
     /**
-     * 批量插入干员寻访记录（重复记录由数据库唯一约束自动忽略）
+     * 批量写入干员寻访记录，唯一键冲突时按「只补不毁」更新已有行
      *
-     * @param items 待插入记录，调用方保证非空且已生成主键
-     * @return 实际插入行数
+     * <p>新值为 null 或空串时保留旧值，因此历史遗留的空 char_id 行会被后续导入
+     * 补成 gift_ 伪编码；主键与 role_id、seq_id 等定位字段不参与更新。</p>
+     *
+     * @param items 待写入记录，调用方保证非空且已生成主键
+     * @return 影响行数（新增计 1、更新计 2、无变化计 0）
      */
-    @Insert("<script>INSERT IGNORE INTO ef_character_pool_record "
+    @Insert("<script>INSERT INTO ef_character_pool_record "
             + "(id, role_id, pool_id, pool_name, char_id, char_name, rarity, is_free, is_new, "
             + "gacha_ts, seq_id, lang, pool_type, server_id) VALUES "
             + "<foreach collection='items' item='it' separator=','>"
             + "(#{it.id}, #{it.roleId}, #{it.poolId}, #{it.poolName}, #{it.charId}, #{it.charName}, "
             + "#{it.rarity}, #{it.isFree}, #{it.isNew}, #{it.gachaTs}, #{it.seqId}, #{it.lang}, "
             + "#{it.poolType}, #{it.serverId})"
-            + "</foreach></script>")
-    int batchInsert(@Param("items") List<EfCharacterPoolRecord> items);
+            + "</foreach>"
+            + " ON DUPLICATE KEY UPDATE "
+            + "char_id = IF(VALUES(char_id) IS NULL OR VALUES(char_id) = '', char_id, VALUES(char_id)), "
+            + "char_name = IF(VALUES(char_name) IS NULL OR VALUES(char_name) = '', char_name, VALUES(char_name)), "
+            + "rarity = IFNULL(VALUES(rarity), rarity), "
+            + "gacha_ts = IF(VALUES(gacha_ts) IS NULL OR VALUES(gacha_ts) = '', gacha_ts, VALUES(gacha_ts))"
+            + "</script>")
+    int batchUpsert(@Param("items") List<EfCharacterPoolRecord> items);
 
     /**
      * 查询指定角色、指定卡池类型下已保存记录的最大 seq_id（按数字比较）

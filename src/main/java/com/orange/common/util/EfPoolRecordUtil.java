@@ -1,5 +1,7 @@
 package com.orange.common.util;
 
+import com.orange.entity.dto.efpool.EfCharacterPoolRecordDTO;
+
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -8,11 +10,17 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 终末地寻访记录相关工具类：请求头、seq_id 分页序列与 token 编码
+ * 终末地寻访记录相关工具类：请求头、seq_id 分页序列、token 编码与赠礼记录映射
  *
  * @author UserCenter
  */
 public final class EfPoolRecordUtil {
+
+    /** 赠礼类记录的伪角色编码前缀：真实干员编码均为 chr_ 前缀，不会与角色编码冲突 */
+    public static final String GIFT_CHAR_PREFIX = "gift_";
+
+    /** 赠礼类记录的展示名，按上游 kind 映射 */
+    private static final Map<String, String> GIFT_CHAR_NAMES = Map.of("gift_intel_book", "寻访情报书");
 
     private EfPoolRecordUtil() {
     }
@@ -73,5 +81,67 @@ public final class EfPoolRecordUtil {
             return token;
         }
         return URLEncoder.encode(token, StandardCharsets.UTF_8);
+    }
+
+    /**
+     * 判断单条上游记录是否为不可用数据：既没有角色编码也没有记录类型
+     *
+     * <p>既不是角色记录也不是已知赠礼记录，落库只会产生空值行，调用方应跳过。</p>
+     *
+     * @param dto 单条寻访记录
+     * @return true=脏数据，应跳过
+     */
+    public static boolean isUnusableRecord(EfCharacterPoolRecordDTO dto) {
+        return dto == null || (isBlank(dto.getCharId()) && isBlank(dto.getKind()));
+    }
+
+    /**
+     * 判断单条上游记录是否为赠礼类记录
+     *
+     * <p>上游 list 会混入赠礼记录（如特许寻访满 60 抽赠送寻访情报书，kind=gift_intel_book），
+     * 这类记录只有 kind 没有 charId / charName。</p>
+     *
+     * @param dto 单条寻访记录
+     * @return true=赠礼类记录
+     */
+    public static boolean isGiftRecord(EfCharacterPoolRecordDTO dto) {
+        return dto != null && isBlank(dto.getCharId()) && !isBlank(dto.getKind());
+    }
+
+    /**
+     * 解析落库使用的角色编码：赠礼类记录以 kind 作为伪角色编码
+     *
+     * @param dto 单条寻访记录
+     * @return 角色编码；赠礼记录返回 kind（如 gift_intel_book）
+     */
+    public static String resolveCharId(EfCharacterPoolRecordDTO dto) {
+        return isBlank(dto.getCharId()) ? dto.getKind() : dto.getCharId();
+    }
+
+    /**
+     * 解析落库使用的角色名称：赠礼类记录按 kind 映射为展示名
+     *
+     * @param dto 单条寻访记录
+     * @return 角色名称；赠礼记录返回映射后的展示名，未收录的 kind 原样返回便于排查
+     */
+    public static String resolveCharName(EfCharacterPoolRecordDTO dto) {
+        if (!isBlank(dto.getCharId())) {
+            return dto.getCharName();
+        }
+        String kind = dto.getKind();
+        if (kind == null) {
+            return dto.getCharName();
+        }
+        return GIFT_CHAR_NAMES.getOrDefault(kind, kind);
+    }
+
+    /**
+     * 判断字符串是否为空白
+     *
+     * @param value 待判断字符串
+     * @return true=null 或仅含空白字符
+     */
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 }

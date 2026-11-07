@@ -34,6 +34,13 @@ public class EfCharacterPoolRecordDTO {
     /** 序列 ID */
     private String seqId;
 
+    /**
+     * 记录类型：普通抽卡记录为空，赠礼等非角色记录为 gift_intel_book 等值
+     *
+     * <p>赠礼类记录没有 charId / charName，落库时以 kind 作为伪角色编码。</p>
+     */
+    private String kind;
+
     public String getPoolId() {
         return poolId;
     }
@@ -104,5 +111,13 @@ public class EfCharacterPoolRecordDTO {
 
     public void setSeqId(String seqId) {
         this.seqId = seqId;
+    }
+
+    public String getKind() {
+        return kind;
+    }
+
+    public void setKind(String kind) {
+        this.kind = kind;
     }
 }

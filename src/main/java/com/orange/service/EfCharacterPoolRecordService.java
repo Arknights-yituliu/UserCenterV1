@@ -27,6 +27,10 @@ import java.util.concurrent.ExecutionException;
  * <p>按卡池类型并发拉取终末地寻访记录接口，再分批写入 ef_character_pool_record。
  * 首次请求不传 seq_id 取最新一页，随后按 5 递减补齐全量历史记录。</p>
  *
+ * <p>上游 list 会混入赠礼类记录（特许寻访满 60 抽赠送寻访情报书，kind=gift_intel_book），
+ * 这类记录没有 charId / charName，落库时以 kind 作为 gift_ 前缀的伪角色编码保留，
+ * 既避免产生空值行，也不丢记录条数。</p>
+ *
  * @author UserCenter
  */
 @Service
@@ -95,6 +99,8 @@ public class EfCharacterPoolRecordService {
         String roleId = userInfo.getRoleId();
         String u8Token = userInfo.getU8Token();
         List<EfCharacterPoolRecord> records = new ArrayList<>();
+        int giftCount = 0;
+        int skippedCount = 0;
         LogUtil.info(EfCharacterPoolRecordService.class, "roleId：{} 开始处理干员寻访记录导入任务", roleId);
 
         try {
@@ -102,7 +108,9 @@ public class EfCharacterPoolRecordService {
                     JOINT_POOL_TYPE, STANDARD_POOL_TYPE));
             LambdaQueryWrapper<EfCharacterPoolRecord> beginnerWrapper = new LambdaQueryWrapper<>();
             beginnerWrapper.eq(EfCharacterPoolRecord::getRoleId, roleId)
-                    .eq(EfCharacterPoolRecord::getPoolType, BEGINNER_POOL_TYPE);
+                    .eq(EfCharacterPoolRecord::getPoolType, BEGINNER_POOL_TYPE)
+                    // 只统计真实抽卡行：赠礼类记录以 gift_ 伪编码落库，不应计入 40 抽上限
+                    .notLikeRight(EfCharacterPoolRecord::getCharId, EfPoolRecordUtil.GIFT_CHAR_PREFIX);
             if (characterPoolRecordMapper.selectCount(beginnerWrapper) < BEGINNER_POOL_COMPLETE_COUNT) {
                 poolTypes.add(BEGINNER_POOL_TYPE);
             }
@@ -118,6 +126,14 @@ public class EfCharacterPoolRecordService {
 
                 List<EfCharacterPoolRecordDTO> firstPageList = firstPage.getData().getList();
                 for (EfCharacterPoolRecordDTO dto : firstPageList) {
+                    if (EfPoolRecordUtil.isUnusableRecord(dto)) {
+                        skippedCount++;
+                        logUnusableRecord(roleId, poolType, dto);
+                        continue;
+                    }
+                    if (EfPoolRecordUtil.isGiftRecord(dto)) {
+                        giftCount++;
+                    }
                     records.add(convertToEntity(dto, roleId, poolType));
                 }
 
@@ -137,6 +153,14 @@ public class EfCharacterPoolRecordService {
                         continue;
                     }
                     for (EfCharacterPoolRecordDTO dto : page.getData().getList()) {
+                        if (EfPoolRecordUtil.isUnusableRecord(dto)) {
+                            skippedCount++;
+                            logUnusableRecord(roleId, page.getPoolType(), dto);
+                            continue;
+                        }
+                        if (EfPoolRecordUtil.isGiftRecord(dto)) {
+                            giftCount++;
+                        }
                         records.add(convertToEntity(dto, roleId, page.getPoolType()));
                     }
                 } catch (InterruptedException e) {
@@ -152,8 +176,9 @@ public class EfCharacterPoolRecordService {
         }
 
         batchInsert(records);
-        LogUtil.info(EfCharacterPoolRecordService.class, "roleId：{} 干员寻访记录导入结束，待写入 {} 条，耗时 {} ms",
-                roleId, records.size(), System.currentTimeMillis() - startTime);
+        LogUtil.info(EfCharacterPoolRecordService.class,
+                "roleId：{} 干员寻访记录导入结束，待写入 {} 条（赠礼类 {} 条），跳过脏数据 {} 条，耗时 {} ms",
+                roleId, records.size(), giftCount, skippedCount, System.currentTimeMillis() - startTime);
     }
 
     /**
@@ -169,7 +194,7 @@ public class EfCharacterPoolRecordService {
     }
 
     /**
-     * 分批写入干员寻访记录，重复记录由 INSERT IGNORE 自动忽略
+     * 分批写入干员寻访记录，重复记录由唯一键冲突时「只补不毁」地更新
      *
      * @param records 待写入记录
      */
@@ -177,7 +202,7 @@ public class EfCharacterPoolRecordService {
         if (records.isEmpty()) {
             return;
         }
-        int successCount = 0;
+        int affectedRows = 0;
         for (int from = 0; from < records.size(); from += BATCH_SIZE) {
             int to = Math.min(from + BATCH_SIZE, records.size());
             List<EfCharacterPoolRecord> batch = records.subList(from, to);
@@ -185,14 +210,13 @@ public class EfCharacterPoolRecordService {
                 record.setId(idGenerator.nextId());
             }
             try {
-                characterPoolRecordMapper.batchInsert(batch);
-                successCount += batch.size();
+                affectedRows += characterPoolRecordMapper.batchUpsert(batch);
             } catch (Exception e) {
                 LogUtil.error(EfCharacterPoolRecordService.class,
-                        "干员寻访记录批处理插入失败：" + from + "-" + to, e);
+                        "干员寻访记录批处理写入失败：" + from + "-" + to, e);
             }
         }
-        LogUtil.info(EfCharacterPoolRecordService.class, "干员寻访记录插入完成，提交 {} 条", successCount);
+        LogUtil.info(EfCharacterPoolRecordService.class, "干员寻访记录写入完成，影响 {} 行", affectedRows);
     }
 
     /**
@@ -243,7 +267,23 @@ public class EfCharacterPoolRecordService {
     }
 
     /**
+     * 记录一条脏数据日志：既没有角色编码也没有记录类型，无法落库
+     *
+     * @param roleId   终末地游戏内角色 UID
+     * @param poolType 卡池类型
+     * @param dto      单条记录，可能为 null
+     */
+    private void logUnusableRecord(String roleId, String poolType, EfCharacterPoolRecordDTO dto) {
+        LogUtil.warn(EfCharacterPoolRecordService.class,
+                "roleId：{} 卡池类型 {} seqId：{} 既无角色编码也无记录类型，跳过该条记录",
+                roleId, poolType, dto == null ? null : dto.getSeqId());
+    }
+
+    /**
      * 把单条寻访记录 DTO 转换为数据库实体
+     *
+     * <p>赠礼类记录没有 charId / charName，由 {@link EfPoolRecordUtil} 统一映射为
+     * gift_ 前缀的伪角色编码与展示名，避免落库出现空值行。</p>
      *
      * @param dto      单条记录
      * @param roleId   终末地游戏内角色 UID
@@ -256,8 +296,8 @@ public class EfCharacterPoolRecordService {
                 roleId,
                 dto.getPoolId(),
                 dto.getPoolName(),
-                dto.getCharId(),
-                dto.getCharName(),
+                EfPoolRecordUtil.resolveCharId(dto),
+                EfPoolRecordUtil.resolveCharName(dto),
                 dto.getRarity(),
                 dto.getIsFree(),
                 dto.getIsNew(),
