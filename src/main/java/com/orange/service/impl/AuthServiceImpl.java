@@ -83,9 +83,27 @@ public class AuthServiceImpl implements AuthService {
     @Value("${user-center.login-fail-limit:5}")
     private long loginFailLimit;
 
-    /** 登录锁定时间（秒） */
-    @Value("${user-center.login-lock-seconds:900}")
+    /**
+     * 登录失败计数窗口（秒）：默认 15 分钟。
+     *
+     * <p>与锁定时长解耦：窗口决定「多长时间内的连续失败会被累计」，锁定时长只决定
+     * 「达到阈值后账号停摆多久」。只缩短锁定时长可降低定向锁号 DoS 的影响，
+     * 但不缩短窗口，避免慢速爆破的速率上限被同步放大。</p>
+     */
+    @Value("${user-center.login-fail-window-seconds:900}")
+    private long loginFailWindowSeconds;
+
+    /** 登录锁定时间（秒）：默认 5 分钟 */
+    @Value("${user-center.login-lock-seconds:300}")
     private long loginLockSeconds;
+
+    /** 主站登录 IP 限流：窗口内单 IP 允许的登录尝试次数（防换账号的密码喷洒） */
+    @Value("${user-center.login-rate-limit.ip-limit:20}")
+    private long loginIpLimit = 20;
+
+    /** 主站登录 IP 限流窗口（秒） */
+    @Value("${user-center.login-rate-limit.window-seconds:60}")
+    private long loginIpWindowSeconds = 60;
 
     /** 直连登录发起会话有效期（秒）：默认 5 分钟 */
     @Value("${user-center.oauth.direct-channel-ttl-seconds:300}")
@@ -263,6 +281,10 @@ public class AuthServiceImpl implements AuthService {
      */
     @Override
     public LoginVO login(LoginRequest request, String ip, String ua, String clientId) {
+        // 账号维度的失败计数只能约束「针对同一账号」的爆破，攻击者轮换账号名即可绕过；
+        // 因此先按来源 IP 做一次总请求限流，与直连登录的 ip-request-limit 口径对齐。
+        enforceLoginIpRateLimit(ip);
+
         UserInfo user;
         String loginType;
 
@@ -621,6 +643,27 @@ public class AuthServiceImpl implements AuthService {
     }
 
     /**
+     * 主站登录 IP 限流：窗口内限制单 IP 的登录尝试总数
+     *
+     * <p>账号维度的失败计数只能约束「盯着一个账号试密码」，攻击者轮换账号名即可绕过，
+     * 因此这里在进入凭证校验之前先做 IP 维度计数。窗口与阈值由
+     * {@code login-rate-limit.*} 配置，缺省 20 次/60 秒，与直连登录的
+     * {@code ip-request-limit} 同量级。</p>
+     *
+     * <p>计数对成功与失败一并累加：正常用户的登录频次远低于该阈值，
+     * 而喷洒方无法通过「只成功一次」来规避。</p>
+     *
+     * @param sourceIp 来源 IP
+     */
+    private void enforceLoginIpRateLimit(String sourceIp) {
+        String ip = normalizeRateTarget(sourceIp);
+        if (!RedisRateLimiter.tryAcquire(stringRedisTemplate,
+                RedisKeyUtil.rate("login-ip", ip), loginIpLimit, loginIpWindowSeconds)) {
+            throw new BusinessException(ResultCode.IP_RATE_LIMITED);
+        }
+    }
+
+    /**
      * 注册限流：按来源 IP 与邮箱双维度计数，主站注册与旧系统直连注册共用
      *
      * <p>计数桶按 biz 前缀隔离（register-* 与 direct-register-* 互不影响），
@@ -865,18 +908,21 @@ public class AuthServiceImpl implements AuthService {
     /**
      * 记录一次登录失败并累计，达到阈值后锁定账号
      *
-     * @param email 登录账号（邮箱）
+     * <p>计数窗口取 {@code login-fail-window-seconds}，锁定时长取 {@code login-lock-seconds}，
+     * 两者独立：缩短锁定时间不会放大慢速爆破的尝试速率。</p>
+     *
+     * @param account 登录账号（用户名或邮箱）
      */
-    private void recordLoginFail(String email) {
-        String failKey = RedisKeyUtil.loginFail(email);
+    private void recordLoginFail(String account) {
+        String failKey = RedisKeyUtil.loginFail(account);
         Long count = stringRedisTemplate.opsForValue().increment(failKey);
         if (count != null && count == 1L) {
-            stringRedisTemplate.expire(failKey, loginLockSeconds, TimeUnit.SECONDS);
+            stringRedisTemplate.expire(failKey, loginFailWindowSeconds, TimeUnit.SECONDS);
         }
         if (count != null && count >= loginFailLimit) {
-            // 达到阈值：锁定账号
+            // 达到阈值：锁定账号（锁定时长短于计数窗口，降低定向锁号的影响面）
             stringRedisTemplate.opsForValue().set(
-                    RedisKeyUtil.loginLock(email), "1", loginLockSeconds, TimeUnit.SECONDS);
+                    RedisKeyUtil.loginLock(account), "1", loginLockSeconds, TimeUnit.SECONDS);
             stringRedisTemplate.delete(failKey);
             throw new BusinessException(ResultCode.LOGIN_LOCKED);
         }

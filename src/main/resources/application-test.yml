@@ -51,9 +51,16 @@ user-center:
   code-ttl-seconds: 300
   # 验证码发送限流（秒）：同一邮箱/IP 的最小发送间隔
   code-send-interval-seconds: 60
-  # 登录失败锁定：连续失败次数上限与锁定时间（秒）
+  # 登录失败锁定：连续失败次数上限、计数窗口与锁定时长（秒）
+  # 计数窗口与锁定时长解耦：窗口决定「多久内的连续失败被累计」，锁定时长只决定「达到阈值后账号停摆多久」。
+  # 只缩短锁定时长可降低定向锁号 DoS 的影响，但不缩短窗口，避免慢速爆破的速率上限被同步放大。
   login-fail-limit: 5
-  login-lock-seconds: 900
+  login-fail-window-seconds: 900
+  login-lock-seconds: 300
+  # 登录请求 IP 限流：窗口内单 IP 允许的登录尝试次数（防换账号的密码喷洒）
+  login-rate-limit:
+    ip-limit: 20
+    window-seconds: 60
   # 同邮箱发送最小间隔（秒）：默认 1分钟
   email-send-interval-seconds: 60
   # 注册限流：/auth/register 与 /oauth2/direct-register 共用逻辑，计数桶各自独立
