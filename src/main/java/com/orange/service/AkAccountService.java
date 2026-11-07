@@ -5,6 +5,7 @@ import com.orange.entity.vo.akoperator.AkAccountVO;
 import com.orange.entity.vo.akoperator.ItemListVO;
 import com.orange.entity.vo.akoperator.OperatorListVO;
 import com.orange.entity.vo.akoperator.OperatorSaveResultVO;
+import com.orange.entity.vo.akoperator.SkinListVO;
 
 import java.util.List;
 
@@ -79,11 +80,27 @@ public interface AkAccountService {
     ItemListVO listItems(Long uid, String akUid);
 
     /**
-     * 批量保存某游戏账号的角色信息与干员数据：有则按属性比较后更新，无则新增，未传入的记录不处理
+     * 全量读取游戏账号已拥有皮肤，读取前必须通过绑定关系鉴权
+     *
+     * <p>皮肤只有自动导入侧的全量集合，手动条目没有皮肤数据；该账号从未上报过皮肤时
+     * items 为空数组、updateTime 为 null。返回项只含皮肤编码与获得时间，名称与立绘由调用方
+     * 关联游戏静态数据补全。</p>
+     *
+     * @param uid   用户中心 UID
+     * @param akUid 游戏账号 UID
+     * @return 皮肤全量数据与最近变更时间
+     */
+    SkinListVO listSkins(Long uid, String akUid);
+
+    /**
+     * 批量保存某游戏账号的角色信息、干员数据、物品存量与皮肤数据：有则按属性比较后更新，无则新增，未传入的记录不处理
+     *
+     * <p>皮肤语义与其他数据不同：携带 {@code skins} 时按本次提交全量对齐，未提交的旧皮肤会被删除；
+     * 省略时不改动已有皮肤数据。</p>
      *
      * @param uid     用户中心 UID
-     * @param request 保存参数（角色信息 + 干员数组），目标游戏账号取自 request.playerInfo.akUid
-     * @return 新增/更新/未变更条数统计
+     * @param request 保存参数（角色信息 + 干员数组 + 可选物品数组 + 可选皮肤数组），目标游戏账号取自 request.playerInfo.akUid
+     * @return 新增/更新/未变更条数统计（仅统计干员）
      */
     OperatorSaveResultVO saveOperators(Long uid, OperatorSaveRequest request);
 }

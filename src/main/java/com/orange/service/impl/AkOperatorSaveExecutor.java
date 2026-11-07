@@ -3,11 +3,14 @@ package com.orange.service.impl;
 import com.orange.entity.po.AkItemData;
 import com.orange.entity.po.AkPlayerInfo;
 import com.orange.entity.po.AkOperatorState;
+import com.orange.entity.po.AkSkinState;
 import com.orange.entity.vo.akoperator.OperatorSaveResultVO;
 import com.orange.mapper.AkAccountBindingMapper;
 import com.orange.mapper.AkItemDataMapper;
 import com.orange.mapper.AkPlayerInfoMapper;
+import com.orange.mapper.AkPlayerInfoSnapshotMapper;
 import com.orange.mapper.AkOperatorStateMapper;
+import com.orange.mapper.AkSkinStateMapper;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,7 +27,7 @@ import java.util.Map;
  * 并由调用方在唯一键冲突/死锁时整事务回滚后重试。</p>
  *
  * <p>单个事务内依次完成：核对/创建本人绑定 → 角色信息比对更新或插入 → 干员比对后增量写入 →
- * 物品存量 JSON 整份覆盖写入。</p>
+ * 物品存量 JSON 整份覆盖写入 → 皮肤集合全量对齐 → player/info 文本原样覆盖。</p>
  *
  * @author UserCenter
  */
@@ -41,43 +44,72 @@ public class AkOperatorSaveExecutor {
     private final AkPlayerInfoMapper playerInfoMapper;
     private final AkOperatorStateMapper operatorMapper;
     private final AkItemDataMapper itemMapper;
+    private final AkSkinStateMapper skinMapper;
+    private final AkPlayerInfoSnapshotMapper playerSnapshotMapper;
 
     /**
      * 构造器注入 Mapper
      *
-     * @param bindingMapper    绑定关系 Mapper
-     * @param playerInfoMapper 角色信息 Mapper
-     * @param operatorMapper   干员数据 Mapper
-     * @param itemMapper       物品存量 Mapper
+     * @param bindingMapper        绑定关系 Mapper
+     * @param playerInfoMapper     角色信息 Mapper
+     * @param operatorMapper       干员数据 Mapper
+     * @param itemMapper           物品存量 Mapper
+     * @param skinMapper           皮肤数据 Mapper
+     * @param playerSnapshotMapper player/info 数据镜像 Mapper
      */
     public AkOperatorSaveExecutor(AkAccountBindingMapper bindingMapper,
                                   AkPlayerInfoMapper playerInfoMapper,
                                   AkOperatorStateMapper operatorMapper,
-                                  AkItemDataMapper itemMapper) {
+                                  AkItemDataMapper itemMapper,
+                                  AkSkinStateMapper skinMapper,
+                                  AkPlayerInfoSnapshotMapper playerSnapshotMapper) {
         this.bindingMapper = bindingMapper;
         this.playerInfoMapper = playerInfoMapper;
         this.operatorMapper = operatorMapper;
         this.itemMapper = itemMapper;
+        this.skinMapper = skinMapper;
+        this.playerSnapshotMapper = playerSnapshotMapper;
     }
 
     /**
-     * 在一个写事务内保存绑定关系、角色信息、干员数据与物品存量
+     * 在一个写事务内保存绑定关系、角色信息、干员数据、物品存量、皮肤数据与 player/info 文本
      *
      * @param akUid              游戏账号 UID
      * @param uid                用户中心 UID
      * @param submittedOperators 本次提交的干员记录（已归一化，数值字段非空）
      * @param itemData           本次上报的物品 JSON 文本，null 表示不上报物品
+     * @param submittedSkins     本次提交的皮肤记录（已归一化），null 或空表示不上报皮肤
+     * @param playerData         本次上报的 player/info 文本，null 或空表示不上报，已有镜像保持不变
      * @return 新增/更新/未变更条数统计（仅统计干员）
      */
     @Transactional(rollbackFor = Exception.class)
     public OperatorSaveResultVO save(String akUid,
                                      Long uid,
                                      List<AkOperatorState> submittedOperators,
-                                     String itemData) {
+                                     String itemData,
+                                     List<AkSkinState> submittedSkins,
+                                     String playerData) {
         ensureBinding(akUid, uid);
         savePlayerInfo(akUid);
         saveItems(akUid, itemData);
+        saveSkins(akUid, submittedSkins);
+        savePlayerData(akUid, playerData);
         return saveOperators(akUid, submittedOperators);
+    }
+
+    /**
+     * 原样保存 player/info 文本：不做解析、不做结构校验，整段覆盖该账号已有镜像
+     *
+     * <p>文本为 null 或空串时不发任何 SQL，已有镜像保持不变。</p>
+     *
+     * @param akUid      游戏账号 UID
+     * @param playerData 前端上报的文本原文
+     */
+    private void savePlayerData(String akUid, String playerData) {
+        if (playerData == null || playerData.isEmpty()) {
+            return;
+        }
+        playerSnapshotMapper.upsertPlayerData(akUid, playerData);
     }
 
     /**
@@ -161,6 +193,56 @@ public class AkOperatorSaveExecutor {
             return;
         }
         itemMapper.upsertItemData(akUid, itemData, LocalDateTime.now());
+    }
+
+    /**
+     * 全量对齐皮肤集合：补新增、刷新获得时间变化的行、删除本次未提交的旧行
+     *
+     * <p>皮肤是账号维度的完整集合（森空岛 player/info 一次返回该账号全部已拥有皮肤），
+     * 因此携带 skins 时以本次提交为准做对齐：未提交的旧皮肤会被删除，使数据能自愈。
+     * 省略 skins（null 或空数组）时直接返回，已有皮肤数据保持不变。</p>
+     *
+     * <p>只写真正变化的行：新增行与获得时间变化的行才落库，时间未变的行不产生 UPDATE，
+     * 保证 updated_at 表示「最后一次实际变更」。</p>
+     *
+     * @param akUid     游戏账号 UID
+     * @param submitted 本次提交的皮肤记录（已归一化），null 或空表示不上报皮肤
+     */
+    private void saveSkins(String akUid, List<AkSkinState> submitted) {
+        if (submitted == null || submitted.isEmpty()) {
+            return;
+        }
+        Map<String, AkSkinState> existingMap = new HashMap<>(Math.max(16, submitted.size() * 2));
+        for (AkSkinState row : skinMapper.selectByAkUid(akUid)) {
+            existingMap.put(row.getSkinId(), row);
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        List<AkSkinState> toInsert = new ArrayList<>();
+        List<String> submittedIds = new ArrayList<>(submitted.size());
+
+        for (AkSkinState item : submitted) {
+            submittedIds.add(item.getSkinId());
+            AkSkinState existing = existingMap.get(item.getSkinId());
+            if (existing == null) {
+                item.setUpdatedAt(now);
+                toInsert.add(item);
+                continue;
+            }
+            if (sameValue(existing.getGainTs(), item.getGainTs())) {
+                continue;
+            }
+            item.setId(existing.getId());
+            item.setUpdatedAt(now);
+            skinMapper.updateGainTs(item);
+        }
+
+        for (int from = 0; from < toInsert.size(); from += INSERT_BATCH_SIZE) {
+            int to = Math.min(from + INSERT_BATCH_SIZE, toInsert.size());
+            skinMapper.batchInsert(toInsert.subList(from, to));
+        }
+        // submittedIds 必然非空：本方法已在入口拒绝空集合，避免拼出 NOT IN () 清空全表
+        skinMapper.deleteByAkUidAndNotIn(akUid, submittedIds);
     }
 
     /**

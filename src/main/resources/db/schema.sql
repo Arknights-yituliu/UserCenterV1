@@ -476,3 +476,50 @@ CREATE TABLE `ak_default_source` (
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '用户默认展示的明日方舟数据来源偏好，一行一个用户';
 
+-- -------------------------------------------------------------
+-- 22. 游戏账号已拥有皮肤（一行一个皮肤，按 ak_uid 归属）
+--
+-- 与 ak_operator_state 同粒度：按 ak_uid 共享，多个绑定用户看到同一份数据。
+-- skin_id 含 @ 与 #，且区分大小写，故整表使用 utf8mb4_bin；uk_ak_skin 的前缀即
+-- ak_uid，全量读取与按账号清理都走这条唯一键。
+-- gain_ts 为获得时间（Unix 秒），0 表示时间未知（活动补发或历史数据），不可当 1970 年处理。
+-- updated_at 由服务端在真正发生变化时显式写入，不使用 ON UPDATE：本表按「比对后只写变化行」
+-- 的方式维护，自动刷新会让该列不再表示「最后一次实际变更」。
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `ak_skin_state`;
+CREATE TABLE `ak_skin_state` (
+    `id`         BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `ak_uid`     VARCHAR(32)  NOT NULL COMMENT '游戏账号UID，按此账号归属皮肤数据',
+    `skin_id`    VARCHAR(128) NOT NULL COMMENT '皮肤编码，形如 char_4064_mlynar@epoque#28，区分大小写',
+    `gain_ts`    INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '获得时间Unix秒，0表示未知',
+    `updated_at` DATETIME(3)  NOT NULL COMMENT '该皮肤最后一次实际变更时间，仅真正发生变化时刷新',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_ak_skin` (`ak_uid`, `skin_id`) COMMENT '一个账号下同一皮肤仅一条，全量读取与覆盖写入都走这条键'
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '游戏账号已拥有皮肤，一行一个皮肤，按 ak_uid 归属';
+
+-- -------------------------------------------------------------
+-- 23. 森空岛 player/info 数据镜像（一行一个 ak_uid，只保留最新一份）
+--
+-- 定位是「原样留存」：前端把 player/info 的数据传回来，服务端不做解析、不做结构校验、
+-- 不抽取 data 节点，收到什么文本就存什么，用于后续离线解析、比对与回溯。
+-- 存储关系为「原始数据 → 派生数据」：ak_skin_state、ak_operator_state 等表都可由本表重新解析得到，
+-- 派生逻辑写错或上游加字段时，可直接用本表重跑，不必再向森空岛请求一次。
+-- 与 ak_item_data 同构：一行一账号、文本整段覆盖、时间由数据库默认值维护，故写法保持一致。
+-- 不做内容比对，每次上报直接整段覆盖；update_time 用 ON UPDATE 自动刷新，表示「最后一次覆盖写入」
+-- 而非「内容发生变化」，下游不要拿它判断数据是否真的变了。
+-- 单个账号的数据约 200KB，故用 LONGTEXT，且不对该列建索引、不做前缀索引。
+-- 需要历史版本时另建归档表，不要在本表加版本维度。
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `ak_player_info_snapshot`;
+CREATE TABLE `ak_player_info_snapshot` (
+    `id`          BIGINT      NOT NULL AUTO_INCREMENT COMMENT '数据库自增行ID',
+    `ak_uid`      VARCHAR(32) NOT NULL COMMENT '游戏账号UID，与绑定表及干员表采用相同类型和排序规则',
+    `player_data` LONGTEXT    NOT NULL COMMENT '前端上报的 player/info 文本，原样落库，服务端不解析不校验结构',
+    `create_time` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '首次写入时间',
+    `update_time` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '最近一次覆盖写入时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_player_info_ak_uid` (`ak_uid`) COMMENT '每个游戏账号只保留一份最新镜像'
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '森空岛 player/info 数据镜像，一行一个账号，原样留存前端上报文本';
+

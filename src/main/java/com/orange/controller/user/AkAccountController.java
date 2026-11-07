@@ -9,6 +9,7 @@ import com.orange.entity.vo.akoperator.AkAccountVO;
 import com.orange.entity.vo.akoperator.ItemListVO;
 import com.orange.entity.vo.akoperator.OperatorListVO;
 import com.orange.entity.vo.akoperator.OperatorSaveResultVO;
+import com.orange.entity.vo.akoperator.SkinListVO;
 import com.orange.service.AkAccountService;
 import com.orange.service.AkOperatorStateManualService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -130,6 +131,23 @@ public class AkAccountController {
     @GetMapping("/items")
     public ResponseEntity<Result<ItemListVO>> listItems(@RequestParam("akUid") String akUid) {
         ItemListVO data = akAccountService.listItems(UserContext.requireUid(), akUid);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CACHE_CONTROL, OPERATOR_CACHE_CONTROL)
+                .body(Result.success(data));
+    }
+
+    /**
+     * 全量读取游戏账号已拥有皮肤：返回该账号当前完整的皮肤集合
+     *
+     * <p>只返回皮肤编码与获得时间，名称、画师、系列与立绘由调用方关联游戏静态数据补全。</p>
+     *
+     * @param akUid 游戏账号 UID，必须是当前用户已绑定的账号
+     * @return 皮肤全量数据与最近变更时间，响应仅允许私人缓存
+     */
+    @Operation(summary = "全量读取已拥有皮肤")
+    @GetMapping("/skins")
+    public ResponseEntity<Result<SkinListVO>> listSkins(@RequestParam("akUid") String akUid) {
+        SkinListVO data = akAccountService.listSkins(UserContext.requireUid(), akUid);
         return ResponseEntity.ok()
                 .header(HttpHeaders.CACHE_CONTROL, OPERATOR_CACHE_CONTROL)
                 .body(Result.success(data));

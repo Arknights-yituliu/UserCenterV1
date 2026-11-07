@@ -59,6 +59,9 @@ class AkAccountServiceImplTest {
     private AkOperatorStateManualMapper manualMapper;
 
     @Mock
+    private com.orange.mapper.AkSkinStateMapper skinMapper;
+
+    @Mock
     private AkOperatorStateManualService manualOperatorService;
 
     @Mock
@@ -366,7 +369,7 @@ class AkAccountServiceImplTest {
 
     private AkAccountServiceImpl service() {
         return new AkAccountServiceImpl(bindingMapper, defaultSourceMapper, playerInfoMapper, operatorMapper,
-                itemDataMapper, manualMapper, manualOperatorService, saveExecutor, unbindExecutor,
+                itemDataMapper, skinMapper, manualMapper, manualOperatorService, saveExecutor, unbindExecutor,
                 stringRedisTemplate, new ObjectMapper());
     }
 }

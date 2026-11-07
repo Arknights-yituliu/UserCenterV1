@@ -12,24 +12,29 @@ import com.orange.common.util.SignUtil;
 import com.orange.entity.dto.akoperator.ItemEntryRequest;
 import com.orange.entity.dto.akoperator.OperatorItemRequest;
 import com.orange.entity.dto.akoperator.OperatorSaveRequest;
+import com.orange.entity.dto.akoperator.SkinEntryRequest;
 import com.orange.entity.po.AkAccountBinding;
 import com.orange.entity.po.AkDefaultSource;
 import com.orange.entity.po.AkItemData;
 import com.orange.entity.po.AkPlayerInfo;
 import com.orange.entity.po.AkOperatorState;
 import com.orange.entity.po.AkOperatorStateManualSummary;
+import com.orange.entity.po.AkSkinState;
 import com.orange.entity.vo.akoperator.AkAccountVO;
 import com.orange.entity.vo.akoperator.ItemListVO;
 import com.orange.entity.vo.akoperator.ItemVO;
 import com.orange.entity.vo.akoperator.OperatorListVO;
 import com.orange.entity.vo.akoperator.OperatorSaveResultVO;
 import com.orange.entity.vo.akoperator.OperatorVO;
+import com.orange.entity.vo.akoperator.SkinListVO;
+import com.orange.entity.vo.akoperator.SkinVO;
 import com.orange.mapper.AkAccountBindingMapper;
 import com.orange.mapper.AkDefaultSourceMapper;
 import com.orange.mapper.AkItemDataMapper;
 import com.orange.mapper.AkPlayerInfoMapper;
 import com.orange.mapper.AkOperatorStateManualMapper;
 import com.orange.mapper.AkOperatorStateMapper;
+import com.orange.mapper.AkSkinStateMapper;
 import com.orange.service.AkAccountService;
 import com.orange.service.AkOperatorStateManualService;
 import org.springframework.dao.DuplicateKeyException;
@@ -104,6 +109,7 @@ public class AkAccountServiceImpl implements AkAccountService {
     private final AkPlayerInfoMapper playerInfoMapper;
     private final AkOperatorStateMapper operatorMapper;
     private final AkItemDataMapper itemDataMapper;
+    private final AkSkinStateMapper skinMapper;
     private final AkOperatorStateManualMapper manualMapper;
     private final AkOperatorStateManualService manualOperatorService;
     private final AkOperatorSaveExecutor saveExecutor;
@@ -119,6 +125,7 @@ public class AkAccountServiceImpl implements AkAccountService {
      * @param playerInfoMapper      角色信息 Mapper
      * @param operatorMapper        干员数据 Mapper
      * @param itemDataMapper        物品存量 Mapper，读取整份 JSON 快照
+     * @param skinMapper            皮肤数据 Mapper，读取账号已拥有皮肤
      * @param manualMapper          手动版干员数据 Mapper（仅用于账号列表的汇总时间）
      * @param manualOperatorService 手动版干员数据服务，读取手动条目时复用其字段映射
      * @param saveExecutor          保存写事务执行器（独立 Bean 保证 @Transactional 生效）
@@ -131,6 +138,7 @@ public class AkAccountServiceImpl implements AkAccountService {
                                 AkPlayerInfoMapper playerInfoMapper,
                                 AkOperatorStateMapper operatorMapper,
                                 AkItemDataMapper itemDataMapper,
+                                AkSkinStateMapper skinMapper,
                                 AkOperatorStateManualMapper manualMapper,
                                 AkOperatorStateManualService manualOperatorService,
                                 AkOperatorSaveExecutor saveExecutor,
@@ -142,6 +150,7 @@ public class AkAccountServiceImpl implements AkAccountService {
         this.playerInfoMapper = playerInfoMapper;
         this.operatorMapper = operatorMapper;
         this.itemDataMapper = itemDataMapper;
+        this.skinMapper = skinMapper;
         this.manualMapper = manualMapper;
         this.manualOperatorService = manualOperatorService;
         this.saveExecutor = saveExecutor;
@@ -360,11 +369,39 @@ public class AkAccountServiceImpl implements AkAccountService {
     }
 
     /**
-     * 批量保存某游戏账号的角色信息、干员数据与物品存量
+     * 全量读取游戏账号已拥有皮肤：校验绑定归属后返回该账号完整的皮肤集合
+     *
+     * <p>皮肤只有自动导入侧的全量集合，没有手动来源。返回项只含皮肤编码与获得时间，
+     * 名称、画师、系列与立绘由调用方关联游戏静态数据补全；从未上报过皮肤的账号
+     * 返回空数组与 null 时间。</p>
+     *
+     * @param uid   用户中心 UID
+     * @param akUid 游戏账号 UID
+     * @return 皮肤全量数据与最近变更时间
+     */
+    @Override
+    public SkinListVO listSkins(Long uid, String akUid) {
+        validateAkUid(akUid);
+        requireBinding(akUid, uid);
+        List<AkSkinState> rows = skinMapper.selectByAkUid(akUid);
+        List<SkinVO> items = new ArrayList<>(rows.size());
+        LocalDateTime updateTime = null;
+        for (AkSkinState row : rows) {
+            items.add(new SkinVO(row.getSkinId(), row.getGainTs()));
+            if (row.getUpdatedAt() != null && (updateTime == null || row.getUpdatedAt().isAfter(updateTime))) {
+                updateTime = row.getUpdatedAt();
+            }
+        }
+        return new SkinListVO(akUid, items, updateTime);
+    }
+
+    /**
+     * 批量保存某游戏账号的角色信息、干员数据、物品存量与皮肤数据
      *
      * @param uid     用户中心 UID
-     * @param request 保存参数（角色信息 + 干员数组 + 可选物品数组），目标游戏账号取自 request.playerInfo.akUid
-     * @return 新增/更新/未变更条数统计，三项之和等于传入干员记录数
+     * @param request 保存参数（角色信息 + 干员数组 + 可选物品数组 + 可选皮肤数组 + 可选 player/info 文本），
+     *                目标游戏账号取自 request.playerInfo.akUid
+     * @return 新增/更新/未变更条数统计（仅统计干员），三项之和等于传入干员记录数
      */
     @Override
     public OperatorSaveResultVO saveOperators(Long uid, OperatorSaveRequest request) {
@@ -373,11 +410,13 @@ public class AkAccountServiceImpl implements AkAccountService {
         // 先归一化（缺省/null/空字符串补 0）再校验重复 ID，保证比较语义与落库值一致
         List<AkOperatorState> operators = normalizeOperators(akUid, request.getOperators());
         String itemData = serializeItems(request.getItems());
+        List<AkSkinState> skins = normalizeSkins(akUid, request.getSkins());
+        String playerData = request.getPlayerData();
 
         // 参数校验通过后占用该 ak_uid 的限流名额；首次上传不做凭据校验，绑定关系由写事务建立
         acquireSaveQuota(akUid);
 
-        return saveWithRetry(akUid, uid, operators, itemData);
+        return saveWithRetry(akUid, uid, operators, itemData, skins, playerData);
     }
 
     /**
@@ -385,19 +424,23 @@ public class AkAccountServiceImpl implements AkAccountService {
      *
      * <p>限流名额只在首次执行前占用一次，内部重试不重复占用。</p>
      *
-     * @param akUid     游戏账号 UID
-     * @param uid       用户中心 UID
-     * @param operators 本次提交的干员记录（已归一化）
-     * @param itemData  本次上报的物品 JSON 文本，null 表示不上报物品
+     * @param akUid      游戏账号 UID
+     * @param uid        用户中心 UID
+     * @param operators  本次提交的干员记录（已归一化）
+     * @param itemData   本次上报的物品 JSON 文本，null 表示不上报物品
+     * @param skins      本次上报的皮肤记录（已归一化），null 表示不上报皮肤
+     * @param playerData 本次上报的 player/info 文本，null 表示不上报
      * @return 新增/更新/未变更条数统计
      */
     private OperatorSaveResultVO saveWithRetry(String akUid,
                                                Long uid,
                                                List<AkOperatorState> operators,
-                                               String itemData) {
+                                               String itemData,
+                                               List<AkSkinState> skins,
+                                               String playerData) {
         for (int attempt = 0; ; attempt++) {
             try {
-                return saveExecutor.save(akUid, uid, operators, itemData);
+                return saveExecutor.save(akUid, uid, operators, itemData, skins, playerData);
             } catch (DuplicateKeyException | PessimisticLockingFailureException e) {
                 if (attempt >= SAVE_MAX_RETRY) {
                     LogUtil.warn(AkAccountServiceImpl.class, "干员数据保存冲突重试耗尽, akUidHash={}, attempts={}",
@@ -464,6 +507,45 @@ public class AkAccountServiceImpl implements AkAccountService {
             result.add(toStateRecord(akUid, item));
         }
         return result;
+    }
+
+    /**
+     * 归一化皮肤数组：拒绝同一请求中重复的皮肤编码，获得时间缺省补 0（时间未知）
+     *
+     * <p>空数组与缺省等价，都表示本次不上报皮肤，已存数据保持不变。</p>
+     *
+     * @param akUid 游戏账号 UID
+     * @param skins 客户端提交的皮肤数组，可为空表示本次不上报皮肤
+     * @return 可直接落库的皮肤记录列表，未上报时返回 null
+     */
+    private List<AkSkinState> normalizeSkins(String akUid, List<SkinEntryRequest> skins) {
+        if (skins == null || skins.isEmpty()) {
+            return null;
+        }
+        Set<String> seenIds = new HashSet<>(Math.max(16, skins.size() * 2));
+        List<AkSkinState> result = new ArrayList<>(skins.size());
+        for (SkinEntryRequest item : skins) {
+            if (!seenIds.add(item.getSkinId())) {
+                throw new BusinessException(ResultCode.PARAM_VALID_ERROR, "同一请求中皮肤ID重复：" + item.getSkinId());
+            }
+            result.add(toSkinRecord(akUid, item));
+        }
+        return result;
+    }
+
+    /**
+     * 将单条皮肤请求转换为落库实体，获得时间 null 归一化为 0（时间未知）
+     *
+     * @param akUid 游戏账号 UID
+     * @param item  客户端提交的皮肤记录
+     * @return 皮肤落库实体（id 与 updatedAt 由服务端维护）
+     */
+    private AkSkinState toSkinRecord(String akUid, SkinEntryRequest item) {
+        AkSkinState record = new AkSkinState();
+        record.setAkUid(akUid);
+        record.setSkinId(item.getSkinId());
+        record.setGainTs(zeroIfNull(item.getGainTs()));
+        return record;
     }
 
     /**
