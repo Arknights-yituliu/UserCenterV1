@@ -20,7 +20,6 @@ import com.orange.entity.vo.efpool.EfPoolRecordVO;
 import com.orange.mapper.EfAccountBindingMapper;
 import com.orange.mapper.EfPoolRecordTaskMapper;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -308,13 +307,13 @@ public class EfPoolRecordTaskService {
     }
 
     /**
-     * 每分钟把创建时间在「当前时间-24 小时」到「当前时间-15 分钟」之间的任务 token 覆盖为占位值，
+     * 把创建时间在「当前时间-24 小时」到「当前时间-15 分钟」之间的任务 token 覆盖为占位值，
      * 避免 hgToken 长期留存导致数据泄露
      *
      * <p>限定时间区间只扫描最近 24 小时内的任务，避免全表更新带来的性能开销；
-     * 已被覆盖的记录不会重复写入。</p>
+     * 已被覆盖的记录不会重复写入。触发节奏由
+     * {@link com.orange.service.scheduler.EfPoolRecordTaskScheduler} 控制（每分钟一次）。</p>
      */
-    @Scheduled(cron = "0 * * * * ?")
     public void maskExpiredToken() {
         long now = System.currentTimeMillis();
         Date endTime = new Date(now - TOKEN_MASK_WINDOW_MS);
@@ -330,11 +329,11 @@ public class EfPoolRecordTaskService {
     }
 
     /**
-     * 每秒取一条最早创建且未开始的任务执行导入
+     * 取一条最早创建且未开始的任务执行导入
      *
-     * <p>超过有效窗口仍未开始的任务直接标记为已开始、不再执行，避免堆积旧任务。</p>
+     * <p>超过有效窗口仍未开始的任务直接标记为已开始、不再执行，避免堆积旧任务。
+     * 触发节奏由 {@link com.orange.service.scheduler.EfPoolRecordTaskScheduler} 控制（每秒一次）。</p>
      */
-    @Scheduled(cron = "* * * * * ?")
     public void loadingPoolRecord() {
         EfPlayerPoolRecordTask task = null;
         try {

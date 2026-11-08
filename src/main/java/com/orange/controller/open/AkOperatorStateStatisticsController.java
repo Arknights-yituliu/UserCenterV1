@@ -17,8 +17,8 @@ import java.util.List;
  *
  * <p>只读结果表 ak_operator_state_statistics，不触发全表扫描，接口耗时与源表数据量无关。</p>
  *
- * <p>统计结果由 {@link com.orange.service.AkOperatorStateStatisticsScheduler} 定时异步刷新，
- * 固定 30 分钟一轮，本接口不提供手动触发入口：跑一轮统计要扫描约 4000 万行，属离线跑批，
+ * <p>统计结果由 {@link com.orange.service.scheduler.AkOperatorStateStatisticsScheduler} 定时异步刷新，
+ * 每小时 05 分一轮，本接口不提供手动触发入口：跑一轮统计要扫描约 4000 万行，属离线跑批，
  * 因此触发即返回、统计在后台线程执行，同一时刻只允许一轮，已在执行时本次触发被忽略，
  * 避免反复触发把数据库压满。</p>
  *

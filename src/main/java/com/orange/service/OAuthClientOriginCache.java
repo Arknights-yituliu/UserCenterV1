@@ -5,7 +5,6 @@ import com.orange.event.OAuthClientOriginChangedEvent;
 import com.orange.mapper.OAuthClientOriginMapper;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
@@ -68,19 +67,20 @@ public class OAuthClientOriginCache {
         refreshSafely("应用启动");
     }
 
-    /** 定时对账，覆盖管理员直接审批以及多实例事件遗漏的情况。 */
-    @Scheduled(fixedDelayString = "${user-center.oauth.origin-cache-refresh-ms:60000}")
-    public void scheduledRefresh() {
-        refreshSafely("定时任务");
-    }
-
     /** Origin 写事务提交后立即刷新本节点缓存。 */
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onOriginChanged(OAuthClientOriginChangedEvent ignored) {
         refreshSafely("数据变更");
     }
 
-    private void refreshSafely(String trigger) {
+    /**
+     * 刷新缓存并吞掉异常，失败时保留上一份快照
+     *
+     * <p>启动加载、事务事件与定时对账都走这里，保证三条触发路径的容错行为一致。</p>
+     *
+     * @param trigger 触发来源，仅用于日志定位
+     */
+    public void refreshSafely(String trigger) {
         try {
             refresh();
         } catch (RuntimeException e) {
