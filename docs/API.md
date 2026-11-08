@@ -19,8 +19,9 @@
 | `/auth/reset-password` | POST | 否 | - | 通过邮箱验证码重设密码，无需登录，成功后踢出该账号全部会话。 |
 | `/open/oauth/scopes` | GET | 否 | - | 公开查询系统全部可选 OAuth 权限（code+中文描述），不含元范围 all，无用户数据。 |
 | `/open/schedule/{id}` | GET | 否 | - | 按排班表 ID 公开查询完整排班表内容，无需登录，供外部只读访问。 |
-| `/open/ak-operator-statistics/result` | GET | 否 | - | 公开查询干员养成数据统计结果，读取离线跑批结果表（30 分钟刷新一轮），不触发全表扫描。 |
+| `/open/ak-operator-statistics/result` | GET | 否 | - | 公开查询干员养成数据统计结果，读取离线跑批结果表（每小时 05 分刷新一轮），不触发全表扫描。 |
 | `/open/ak-operator-statistics/v2/result` | GET | 否 | - | 干员统计结果 V2：内容与 V1 一致，模组分布字段改用 `equipA`/`equipX`/`equipY`/`equipD`/`equipB`，与源表列名对齐。 |
+| `/open/ak-skin-statistics/result` | GET | 否 | - | 公开查询皮肤持有统计结果，一行一个皮肤（拥有账号数、参与统计账号总数），读取离线跑批结果表（每小时 10 分刷新一轮），不触发全表扫描。 |
 
 ## 二、用户会话鉴权接口（`Authorization: Bearer {token}` 或 `UC-Token`）
 
