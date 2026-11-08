@@ -1,0 +1,264 @@
+-- =============================================================
+-- 模块一：用户服务（账号、日志、邮件、配置、排班、OAuth）
+--
+-- 依赖：先执行 schema.sql 完成建库与排序规则对齐。
+-- 本文件可独立重跑：所有建表均为 DROP TABLE IF EXISTS + CREATE。
+-- 排序规则：业务表统一 utf8mb4_general_ci；需要精确比较的哈希摘要列
+-- （content_hash、token_hash、family_id）列级显式 utf8mb4_bin。
+-- =============================================================
+
+USE `user_center`;
+
+-- -------------------------------------------------------------
+-- 1. 全局用户主表
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `user_info`;
+CREATE TABLE `user_info` (
+    `uid`             BIGINT       NOT NULL COMMENT '对外业务编号（雪花ID，全局唯一，主键）',
+    `email`           VARCHAR(128) DEFAULT NULL COMMENT '邮箱（登录账号）',
+    `user_name`       VARCHAR(64)  DEFAULT NULL COMMENT '用户名（登录账号，兼容旧系统迁移用户）',
+    `password`        VARCHAR(128) DEFAULT NULL COMMENT '密码（BCrypt 哈希）',
+    `avatar`          VARCHAR(512) DEFAULT NULL COMMENT '头像地址',
+    `nickname`        VARCHAR(64)  DEFAULT NULL COMMENT '全局默认昵称',
+    `status`          INT          NOT NULL DEFAULT 1 COMMENT '状态：1=正常 <0=封禁',
+    `ip`              VARCHAR(64)  DEFAULT NULL COMMENT '注册 IP',
+    `register_time`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '注册时间',
+    `last_login_time` DATETIME     DEFAULT NULL COMMENT '最后登录时间',
+    PRIMARY KEY (`uid`),
+    UNIQUE KEY `uk_email` (`email`),
+    UNIQUE KEY `uk_user_name` (`user_name`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '全局用户主表';
+
+-- -------------------------------------------------------------
+-- 2. 登录日志表
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `login_log`;
+CREATE TABLE `login_log` (
+    `id`         BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `uid`        BIGINT       DEFAULT NULL COMMENT '用户 uid（失败时可能为空）',
+    `client_id`  VARCHAR(64)  DEFAULT NULL COMMENT '来源客户端 id（对应 oauth_client.client_id）',
+    `login_type` VARCHAR(32)  NOT NULL COMMENT '登录方式：password/email_code/wechat/qq',
+    `ip`         VARCHAR(64)  DEFAULT NULL COMMENT '登录 IP',
+    `user_agent` VARCHAR(512) DEFAULT NULL COMMENT 'UA',
+    `status`     TINYINT      NOT NULL COMMENT '结果：1=成功 0=失败',
+    `login_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '登录时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_uid` (`uid`),
+    KEY `idx_login_time` (`login_time`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '登录日志表';
+
+-- -------------------------------------------------------------
+-- 3. 操作审计日志表
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `audit_log`;
+CREATE TABLE `audit_log` (
+    `id`            BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `operator_type` VARCHAR(16)  NOT NULL COMMENT '操作者类型：admin/user',
+    `operator_id`   BIGINT       DEFAULT NULL COMMENT '操作者 id',
+    `action`        VARCHAR(64)  NOT NULL COMMENT '操作动作',
+    `target`        VARCHAR(255) DEFAULT NULL COMMENT '操作对象描述',
+    `detail`        JSON         DEFAULT NULL COMMENT '操作详情（JSON）',
+    `create_time`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '操作时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_operator` (`operator_type`, `operator_id`),
+    KEY `idx_create_time` (`create_time`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '操作审计日志表';
+
+-- -------------------------------------------------------------
+-- 4. SMTP 邮件渠道配置表（多渠道降级发送，配置存数据库可动态调整）
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `smtp_config`;
+CREATE TABLE `smtp_config` (
+    `id`               BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `account_key`      VARCHAR(64)  NOT NULL COMMENT '渠道标识，如 mail-163-1 / mail-163-2',
+    `host`             VARCHAR(128) NOT NULL COMMENT 'SMTP 服务器地址',
+    `port`             INT          NOT NULL COMMENT 'SMTP 端口',
+    `username`         VARCHAR(128) NOT NULL COMMENT '登录账号（发件人邮箱）',
+    `password`         VARCHAR(256) NOT NULL COMMENT 'SMTP 授权码',
+    `protocol`         VARCHAR(16)  NOT NULL DEFAULT 'smtp' COMMENT '协议，默认 smtp',
+    `default_encoding` VARCHAR(16)  NOT NULL DEFAULT 'UTF-8' COMMENT '默认编码',
+    `ssl_enable`       TINYINT      NOT NULL DEFAULT 1 COMMENT '是否启用 SSL：1=启用 0=关闭',
+    `enabled`          TINYINT      NOT NULL DEFAULT 1 COMMENT '是否启用该渠道：1=启用 0=停用',
+    `create_time`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_account_key` (`account_key`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = 'SMTP 邮件渠道配置表';
+
+-- -------------------------------------------------------------
+-- 5. 用户配置表
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `user_config`;
+CREATE TABLE `user_config` (
+    `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `uid`         BIGINT       NOT NULL COMMENT '用户 uid',
+    `client_id`   VARCHAR(64)  NOT NULL COMMENT '客户端标识（对应 oauth_client.client_id）',
+    `category`    VARCHAR(32)  NOT NULL COMMENT '配置分类',
+    `version`     VARCHAR(32)  NOT NULL COMMENT '配置版本（同用户+客户端+分类下区分不同配置）',
+    `name`        VARCHAR(32)  NOT NULL COMMENT '配置名称（同版本下的命名快照）',
+    `source`      VARCHAR(32)  DEFAULT NULL COMMENT '来源：web/mini_app 等',
+    `note`        VARCHAR(32)  DEFAULT NULL COMMENT '备注',
+    `config`      LONGTEXT     NOT NULL COMMENT '配置内容（JSON 字符串）',
+    `content_hash` CHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL COMMENT 'config 内容 SHA-256',
+    `config_bytes` BIGINT UNSIGNED NOT NULL COMMENT 'config 的 UTF-8 字节数',
+    `create_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_user_config_identity` (`uid`, `client_id`, `category`, `version`, `name`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '用户配置表';
+
+-- -------------------------------------------------------------
+-- 6. 用户配置容量配额表
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `user_config_quota`;
+CREATE TABLE `user_config_quota` (
+    `uid`         BIGINT          NOT NULL COMMENT '用户 uid',
+    `used_bytes`  BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '已使用配置字节数',
+    `limit_bytes` BIGINT UNSIGNED NOT NULL DEFAULT 512000 COMMENT '当前配置总配额，默认 500KB',
+    `create_time` DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time` DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`uid`),
+    CONSTRAINT `chk_user_config_quota_used` CHECK (`used_bytes` <= `limit_bytes`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '用户配置容量配额';
+
+-- -------------------------------------------------------------
+-- 7. 用户排班表
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `user_schedule`;
+CREATE TABLE `user_schedule` (
+    `id`          BIGINT   NOT NULL COMMENT '排班表 ID（自制雪花 ID）',
+    `uid`         BIGINT   NOT NULL COMMENT '所属用户 uid',
+    `schedule`    LONGTEXT NOT NULL COMMENT '排班表内容（JSON 字符串）',
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_user_schedule_uid_update_time` (`uid`, `update_time`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '用户排班表，每个用户最多 5 条由业务层控制';
+
+-- -------------------------------------------------------------
+-- 8. OAuth2 客户端注册表（第三方 Web 网站接入登记）
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `oauth_client`;
+CREATE TABLE `oauth_client` (
+    `id`                VARCHAR(128) NOT NULL COMMENT '客户端ID（client_id）',
+    `client_secret`     VARCHAR(256) DEFAULT NULL COMMENT '客户端密钥（BCrypt 哈希，公共客户端为空）',
+    `client_name`       VARCHAR(128) NOT NULL COMMENT '客户端名称（第三方网站名）',
+    `auth_methods`      VARCHAR(256) NOT NULL COMMENT '认证方式：none/client_secret_post',
+    `grant_types`       VARCHAR(256) NOT NULL COMMENT '授权类型：authorization_code,refresh_token',
+    `redirect_uris`     VARCHAR(2048) NOT NULL COMMENT '回调地址白名单（逗号分隔，精确匹配）',
+    `scopes`            VARCHAR(256) NOT NULL COMMENT '可授权范围（逗号分隔）：user.read',
+    `require_pkce`      TINYINT      NOT NULL DEFAULT 1 COMMENT '是否强制 PKCE：1=强制 0=不强制',
+    `require_auth_consent` TINYINT    NOT NULL DEFAULT 1 COMMENT '授权时是否展示确认页（自研实现暂未启用确认页）',
+    `access_token_ttl`  BIGINT       DEFAULT NULL COMMENT 'access_token 有效期（秒），NULL 用全局默认',
+    `refresh_token_ttl` BIGINT       DEFAULT NULL COMMENT 'refresh_token 有效期（秒）',
+    `owner_enabled`     TINYINT      NOT NULL DEFAULT 1 COMMENT '所有者是否启用：1=启用 0=停用',
+    `admin_approved`    TINYINT      NOT NULL DEFAULT 0 COMMENT '管理员是否审批通过：1=通过 0=待审批或封禁',
+    `direct_auth_enabled` TINYINT    NOT NULL DEFAULT 0 COMMENT '是否允许直连认证（登录和注册）：1=允许 0=禁止',
+    `rotate_refresh_token` TINYINT   NOT NULL DEFAULT 0 COMMENT '是否开启 refresh_token 轮转：1=开启 0=关闭（固定凭证）',
+    `owner_uid`         BIGINT       DEFAULT NULL COMMENT '所有者用户 uid（开发者账号，NULL=平台托管）',
+    `create_time`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_owner_enabled` (`owner_enabled`),
+    KEY `idx_owner_uid` (`owner_uid`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = 'OAuth2 客户端注册表';
+
+-- -------------------------------------------------------------
+-- 9. OAuth2 客户端 CORS Origin 表（独立审核和动态缓存）
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `oauth_client_origin`;
+CREATE TABLE `oauth_client_origin` (
+    `client_id`       VARCHAR(128) NOT NULL COMMENT 'OAuth客户端ID，一个客户端当前登记一个Origin',
+    `client_name`     VARCHAR(128) NOT NULL COMMENT '客户端名称（冗余保存，供管理员审核展示）',
+    `origin`          VARCHAR(255) NOT NULL COMMENT '规范化Origin（scheme、host和可选非默认端口）',
+    `enabled`         TINYINT      NOT NULL DEFAULT 1 COMMENT '所有者是否启用：1=启用 0=停用',
+    `admin_approved`  TINYINT      NOT NULL DEFAULT 0 COMMENT '管理员是否审批通过：1=通过 0=待审批或拒绝',
+    `create_time`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`client_id`),
+    KEY `idx_cors_status` (`enabled`, `admin_approved`, `origin`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = 'OAuth2客户端CORS Origin白名单';
+
+-- -------------------------------------------------------------
+-- 10. OAuth refresh_token 授权台账表
+--
+-- 令牌本身仍是 Redis 中的热数据（含 TTL 自动过期与 Lua 原子校验），
+-- 本表只作为“我的授权”查询与审计的持久化投影，允许最终一致：
+-- 每次签发 refresh_token 插入一行，吊销时置 revoked=1，
+-- 过期状态在查询时按 expire_time 过滤，不依赖定时任务。
+-- 开启轮转的客户端，一次授权派生的全部令牌共享同一 family_id：
+-- 轮转只更新本行的 token_hash，重放判定后按 family_id 整族置吊销。
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `oauth_grant`;
+CREATE TABLE `oauth_grant` (
+    `id`          BIGINT          NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `uid`         BIGINT          NOT NULL COMMENT '授权用户 uid',
+    `client_id`   VARCHAR(128)    NOT NULL COMMENT '被授权的 OAuth 客户端 ID',
+    `scope`       VARCHAR(256)    NOT NULL COMMENT '授权范围（逗号分隔）',
+    `token_hash`  CHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL COMMENT 'refresh_token 的 SHA-256（不落明文）',
+    `family_id`   CHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL COMMENT '令牌家族标识（64 位 hex，未开启轮转的历史记录为 NULL）',
+    `issue_time`  DATETIME        NOT NULL COMMENT '授权（签发）时间',
+    `expire_time` DATETIME        NOT NULL COMMENT '过期时间',
+    `revoked`     TINYINT         NOT NULL DEFAULT 0 COMMENT '是否已吊销：1=已吊销 0=有效',
+    `create_time` DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间',
+    `update_time` DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '记录更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_oauth_grant_token_hash` (`token_hash`),
+    KEY `idx_oauth_grant_uid` (`uid`, `revoked`, `expire_time`),
+    KEY `idx_oauth_grant_family` (`family_id`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = 'OAuth refresh_token 授权台账';
+
+-- -------------------------------------------------------------
+-- 11. 用户自定义 OAuth 授权范围表
+--
+-- 与 oauth_grant（每次签发的令牌台账，一行一次授权）不同，本表是
+-- 「用户维度 × 客户端」的唯一偏好：用户主动挑选愿意授予该应用的权限集合。
+-- 签发令牌时若存在本记录，取「本次申请范围 ∩ 本表范围」作为最终授权范围，
+-- 从而让用户在确认页的裁剪/追加在下次登录时自动延续。
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `oauth_user_scope`;
+CREATE TABLE `oauth_user_scope` (
+    `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `uid`         BIGINT       NOT NULL COMMENT '用户 uid',
+    `client_id`   VARCHAR(128) NOT NULL COMMENT 'OAuth 客户端 ID',
+    `scopes`      VARCHAR(256) NOT NULL COMMENT '用户自定义授予该客户端的范围（英文逗号分隔，不可为空）',
+    `create_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_uid_client` (`uid`, `client_id`) COMMENT '同一用户对同一应用只保留一条自定义范围'
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '用户自定义OAuth授权范围，一行一个用户与应用组合';
+
+-- -------------------------------------------------------------
+-- 12. 用户自定义有效期的 access_token 签发记录表
+--
+-- 与 oauth_grant（refresh_token 台账，只存摘要）不同，本表记录
+-- POST /user/oauth/custom-tokens 或 POST /oauth2/token/from-refresh 现场签发的短时 access_token，供用户在
+-- 「我的自定义令牌」页面查看；按需求 token 明文保存，便于用户复制复用。
+-- 过期状态在查询时按 expire_time 计算，不依赖定时任务。
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `oauth_custom_token`;
+CREATE TABLE `oauth_custom_token` (
+    `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `uid`         BIGINT       NOT NULL COMMENT '签发用户 uid',
+    `client_id`   VARCHAR(128) NOT NULL COMMENT '目标 OAuth 客户端 ID',
+    `name`        VARCHAR(50)  NOT NULL COMMENT '用户为本次签发起的名称',
+    `token`       VARCHAR(128) NOT NULL COMMENT 'access_token 明文',
+    `scope`       VARCHAR(256) NOT NULL COMMENT '本次令牌携带的权限范围（英文逗号分隔）',
+    `expires_in`  BIGINT       NOT NULL COMMENT '签发时指定的有效期（秒）',
+    `expire_time` DATETIME     NOT NULL COMMENT '到期时间',
+    `create_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_oauth_custom_token_uid` (`uid`, `create_time`) COMMENT '按用户查询其签发的自定义令牌并按签发时间倒序'
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '用户自定义有效期的access_token签发记录';
