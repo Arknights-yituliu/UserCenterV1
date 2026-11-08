@@ -34,6 +34,21 @@ public interface AkSkinStateMapper extends BaseMapper<AkSkinState> {
     List<AkSkinState> selectByAkUid(@Param("akUid") String akUid);
 
     /**
+     * 按主键键集分页读取皮肤记录，供离线统计任务全表扫描
+     *
+     * <p>用 {@code id > lastId} 而不是 OFFSET：深分页时 OFFSET 需要先扫过并丢弃前 N 行，
+     * 而键集分页每批都从主键索引的定位点直接开始。只取统计需要的三列，{@code gain_ts}
+     * 与 {@code updated_at} 不参与统计，不读进结果集。</p>
+     *
+     * @param lastId 上一批最后一行的主键，首批传 0
+     * @param limit  本批最大行数
+     * @return 按主键升序排列的皮肤记录，无更多数据时返回空列表
+     */
+    @Select("SELECT id, ak_uid, skin_id FROM ak_skin_state WHERE id > #{lastId} "
+            + "ORDER BY id LIMIT #{limit}")
+    List<AkSkinState> selectStatisticsBatch(@Param("lastId") long lastId, @Param("limit") int limit);
+
+    /**
      * 批量插入皮肤记录（调用方按每批约 100 行切片）
      *
      * @param items 待插入记录，调用方保证非空
