@@ -6,6 +6,7 @@
 > - **OAuth access_token**：OAuth 授权签发的访问令牌，请求头携带 `Authorization: Bearer {access_token}`（或 `UC-Token`），由 `OAuthAuthInterceptor` 校验，部分接口额外要求 scope 或直连认证开关。
 > - **协议级认证**：OAuth 协议端点自带认证（client_id + client_secret、授权码、refresh_token、PKCE、一次性票据等），在服务层校验，不走拦截器。
 > - **签名认证**：Ed25519 验签 + 时间窗 + nonce 防重放（仅内部迁移端点）。
+> - **访问密钥**：请求参数 `key` 携带明文密钥，服务端只保存其 SHA-256 摘要并做常量时间比对，与后台控制台的校验方式一致；缺失或不匹配返回 `80008 无权限操作`。
 
 ## 一、公开接口（无需鉴权）
 
@@ -21,7 +22,7 @@
 | `/open/schedule/{id}` | GET | 否 | - | 按排班表 ID 公开查询完整排班表内容，无需登录，供外部只读访问。 |
 | `/open/ak-operator-statistics/result` | GET | 否 | - | 公开查询干员养成数据统计结果，读取离线跑批结果表（每小时 05 分刷新一轮），不触发全表扫描。 |
 | `/open/ak-operator-statistics/v2/result` | GET | 否 | - | 干员统计结果 V2：内容与 V1 一致，模组分布字段改用 `equipA`/`equipX`/`equipY`/`equipD`/`equipB`，与源表列名对齐。 |
-| `/open/ak-skin-statistics/result` | GET | 否 | - | 公开查询皮肤持有统计结果，一行一个皮肤（拥有账号数、参与统计账号总数），读取离线跑批结果表（每小时 10 分刷新一轮），不触发全表扫描。 |
+| `/open/ak-skin-statistics/result` | GET | 是 | 访问密钥（`key` 参数） | 查询皮肤持有统计结果，一行一个皮肤（拥有账号数、参与统计账号总数），读取离线跑批结果表（每小时 10 分刷新一轮），不触发全表扫描。需携带 `?key=明文密钥`，与后台控制台共用同一把密钥。 |
 
 ## 二、用户会话鉴权接口（`Authorization: Bearer {token}` 或 `UC-Token`）
 
