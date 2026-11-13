@@ -2,6 +2,7 @@ package com.orange.service.impl;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.orange.common.config.OAuthProperties;
 import com.orange.common.enums.OAuthClientAuthMethod;
 import com.orange.common.enums.OAuthGrantType;
 import com.orange.common.enums.OAuthScope;
@@ -20,7 +21,6 @@ import com.orange.event.OAuthClientReviewNotificationEvent;
 import com.orange.mapper.OAuthClientMapper;
 import com.orange.mapper.OAuthClientOriginMapper;
 import com.orange.service.OAuthClientAdminService;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.Cursor;
 import org.springframework.data.redis.core.ScanOptions;
@@ -68,9 +68,7 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
     private final SecureRandom secureRandom = new SecureRandom();
 
-    /** 单个开发者账号可注册的客户端数量上限 */
-    @Value("${user-center.oauth.max-clients-per-owner:10}")
-    private int maxClientsPerOwner;
+    private final OAuthProperties oauthProperties;
 
     /**
      * 构造器注入依赖
@@ -80,17 +78,19 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
      * @param stringRedisTemplate  Redis 客户端（级联清理令牌）
      * @param objectMapper         JSON 序列化器（解析令牌记录）
      * @param eventPublisher       Spring 事务事件发布器
+     * @param oauthProperties      OAuth 授权服务器参数
      */
     public OAuthClientAdminServiceImpl(OAuthClientMapper oauthClientMapper,
                                        OAuthClientOriginMapper oauthClientOriginMapper,
                                        StringRedisTemplate stringRedisTemplate,
                                        ObjectMapper objectMapper,
-                                       ApplicationEventPublisher eventPublisher) {
+                                       ApplicationEventPublisher eventPublisher, OAuthProperties oauthProperties) {
         this.oauthClientMapper = oauthClientMapper;
         this.oauthClientOriginMapper = oauthClientOriginMapper;
         this.stringRedisTemplate = stringRedisTemplate;
         this.objectMapper = objectMapper;
         this.eventPublisher = eventPublisher;
+        this.oauthProperties = oauthProperties;
     }
 
     /**
@@ -106,10 +106,10 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public OAuthClientCredentialVO register(Long uid, OAuthClientRegisterRequest request) {
-        // 1. 数量上限校验：单账号最多 maxClientsPerOwner 个客户端
+        // 1. 数量上限校验：单账号可注册的客户端数量由 OAuthProperties 管理
         Long count = oauthClientMapper.selectCount(
                 Wrappers.<OAuthClient>lambdaQuery().eq(OAuthClient::getOwnerUid, uid));
-        if (count >= maxClientsPerOwner) {
+        if (count >= oauthProperties.getMaxClientsPerOwner()) {
             throw new BusinessException(ResultCode.OAUTH_CLIENT_LIMIT);
         }
         // 2. 在任何凭证生成和入库前完成归一化。这里集中处理必填项、白名单和跨字段规则，

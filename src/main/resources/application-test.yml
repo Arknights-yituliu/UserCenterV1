@@ -53,75 +53,28 @@ oauth:
   consent-page-url: http://localhost:5000/oauth2/consent
 
 # ============ 业务自定义配置 ============
-user-center:
-  # 会话有效期（秒）：默认 90 天
-  session-ttl-seconds: 7776000
-  # 验证码有效期（秒）：默认 5 分钟
-  code-ttl-seconds: 300
-  # 验证码发送限流（秒）：同一邮箱/IP 的最小发送间隔
-  code-send-interval-seconds: 60
-  # 登录失败锁定：连续失败次数上限、计数窗口与锁定时长（秒）
-  # 计数窗口与锁定时长解耦：窗口决定「多久内的连续失败被累计」，锁定时长只决定「达到阈值后账号停摆多久」。
-  # 只缩短锁定时长可降低定向锁号 DoS 的影响，但不缩短窗口，避免慢速爆破的速率上限被同步放大。
-  login-fail-limit: 5
-  login-fail-window-seconds: 900
-  login-lock-seconds: 300
-  # 登录请求 IP 限流：窗口内单 IP 允许的登录尝试次数（防换账号的密码喷洒）
-  login-rate-limit:
-    ip-limit: 20
-    window-seconds: 60
-  # 同邮箱发送最小间隔（秒）：默认 1分钟
-  email-send-interval-seconds: 60
-  # 注册限流：/auth/register 与 /oauth2/direct-register 共用逻辑，计数桶各自独立
-  register-rate-limit:
-    # 单 IP / 单邮箱注册上限，以及统计窗口（秒）
-    ip-limit: 10
-    email-limit: 3
-    window-seconds: 3600
-  # OAuth2 限流、缓存与迁移配置
-  oauth:
-    # 直连登录 / 注册限流（固定窗口）与登录失败渐进锁定
-    direct-rate-limit:
-      session:
-        # 单 IP / 单 client+IP 发起会话上限，以及统计窗口（秒）
-        ip-limit: 60
-        client-ip-limit: 20
-        window-seconds: 60
-      login:
-        # 单 IP 提交登录上限，以及统计窗口（秒）
-        ip-request-limit: 30
-        ip-request-window-seconds: 60
-        # 同一 IP 或账号失败次数的统计窗口（秒）
-        failure-window-seconds: 900
-        # 失败次数达到阈值后，按级别锁定（秒）
-        first-lock-threshold: 5
-        first-lock-seconds: 60
-        second-lock-threshold: 10
-        second-lock-seconds: 300
-        third-lock-threshold: 15
-        third-lock-seconds: 900
-    # oauth_client_origin 审批白名单的本地缓存刷新周期（毫秒）
-    origin-cache-refresh-ms: 60000
-    # 单个开发者账号可注册的 OAuth 客户端数量上限（默认 10）
-    max-clients-per-owner: 5
-    # ===== 迁移兑换端点（POST /oauth2/internal/migrate-token）=====
-    # 该端点跨公网可达，认证层（Ed25519 验签）是唯一屏障，其余为加固项
-    migrate:
-      # 总开关：默认关闭，上线时显式打开，存量迁移结束后立即关闭
-      enabled: false
-      # 强制 HTTPS：非 HTTPS 直接拒绝；仅本地联调可临时置 false
-      require-https: true
-      # 认证方式：本期固定 ed25519
-      auth-mode: ed25519
-      # 允许的时间偏移（秒）：公网暴露下取小值，同时决定 nonce 的 TTL（该值 ×2）
-      clock-skew-seconds: 120
-      # 限流：应用层按 IP / uid / client 三个维度（网关层另有按 IP 限流）
-      per-ip-per-minute: 600
-      per-uid-per-minute: 5
-      per-client-per-minute: 3000
-      # kid → Ed25519 公钥（Base64 的 X.509 SubjectPublicKeyInfo）映射，格式：k1=base64,k2=base64
-      # UC 侧只存公钥，从环境变量注入，绝不写进仓库；轮换期可同时配置新旧多把公钥
-      verify-keys: ""
+# 会话、验证码、登录锁定和主站限流在 UserAccentProperties 中维护
+# 直连登录、注册和渐进锁定在 OAuthDirectProperties 中维护
+# OAuth2 有效期、缓存刷新周期及客户端数量上限在 OAuthProperties 中维护
+
+# ===== 迁移兑换端点（POST /oauth2/internal/migrate-token）=====
+# 该端点跨公网可达，认证层（Ed25519 验签）是唯一屏障，其余为加固项
+migrate:
+  # 总开关：默认关闭，上线时显式打开，存量迁移结束后立即关闭
+  enabled: false
+  # 强制 HTTPS：非 HTTPS 直接拒绝；仅本地联调可临时置 false
+  require-https: true
+  # 认证方式：本期固定 ed25519
+  auth-mode: ed25519
+  # 允许的时间偏移（秒）：公网暴露下取小值，同时决定 nonce 的 TTL（该值 ×2）
+  clock-skew-seconds: 120
+  # 限流：应用层按 IP / uid / client 三个维度（网关层另有按 IP 限流）
+  per-ip-per-minute: 600
+  per-uid-per-minute: 5
+  per-client-per-minute: 3000
+  # kid → Ed25519 公钥（Base64 的 X.509 SubjectPublicKeyInfo）映射，格式：k1=base64,k2=base64
+  # UC 侧只存公钥，从环境变量注入，绝不写进仓库；轮换期可同时配置新旧多把公钥
+  verify-keys: ""
 
 springdoc:
   api-docs:

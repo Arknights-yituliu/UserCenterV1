@@ -68,33 +68,33 @@ public class OAuthMigrateServiceImpl implements OAuthMigrateService {
     private final ObjectMapper objectMapper;
 
     /** 总开关：默认关闭，上线时显式打开，迁移结束后立即关闭 */
-    @Value("${user-center.oauth.migrate.enabled:false}")
+    @Value("${migrate.enabled:false}")
     private boolean enabled;
 
     /** 是否强制 HTTPS：非 HTTPS 直接拒绝，仅本地联调可临时关闭 */
-    @Value("${user-center.oauth.migrate.require-https:true}")
+    @Value("${migrate.require-https:true}")
     private boolean requireHttps;
 
     /** 认证方式：本期固定 ed25519 */
-    @Value("${user-center.oauth.migrate.auth-mode:ed25519}")
+    @Value("${migrate.auth-mode:ed25519}")
     private String authMode;
 
     /** 允许的请求时间偏移（秒），同时决定 nonce 的 TTL（该值 ×2） */
-    @Value("${user-center.oauth.migrate.clock-skew-seconds:120}")
+    @Value("${migrate.clock-skew-seconds:120}")
     private long clockSkewSeconds;
 
     /** 应用层限流：单 IP / 单 uid / 单 client 每分钟上限 */
-    @Value("${user-center.oauth.migrate.per-ip-per-minute:600}")
+    @Value("${migrate.per-ip-per-minute:600}")
     private long perIpPerMinute;
 
-    @Value("${user-center.oauth.migrate.per-uid-per-minute:5}")
+    @Value("${migrate.per-uid-per-minute:5}")
     private long perUidPerMinute;
 
-    @Value("${user-center.oauth.migrate.per-client-per-minute:3000}")
+    @Value("${migrate.per-client-per-minute:3000}")
     private long perClientPerMinute;
 
     /** kid → Ed25519 公钥（Base64 的 X.509 SubjectPublicKeyInfo）映射，格式：k1=base64,k2=base64 */
-    @Value("${user-center.oauth.migrate.verify-keys:}")
+    @Value("${migrate.verify-keys:}")
     private String verifyKeys;
 
     /** 解析后的 kid → 公钥映射缓存（配置在运行期不变，首次使用时解析） */

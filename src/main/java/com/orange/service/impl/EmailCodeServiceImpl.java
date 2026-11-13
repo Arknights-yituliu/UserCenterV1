@@ -1,6 +1,7 @@
 package com.orange.service.impl;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.orange.common.config.UserAccentProperties;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.util.RedisKeyUtil;
@@ -37,17 +38,7 @@ public class EmailCodeServiceImpl implements EmailCodeService {
     private final MailService mailService;
     private final UserInfoMapper userMapper;
 
-    /** 验证码有效期（秒） */
-    @Value("${user-center.code-ttl-seconds:300}")
-    private long codeTtlSeconds;
-
-    /** 同 IP 发送最小间隔（秒） */
-    @Value("${user-center.code-send-interval-seconds:60}")
-    private long ipIntervalSeconds;
-
-    /** 同邮箱发送最小间隔（秒）：默认 5 分钟 */
-    @Value("${user-center.email-send-interval-seconds:300}")
-    private long emailIntervalSeconds;
+    private final UserAccentProperties userAccentProperties;
 
     /** 注册验证码邮件模板 ID（腾讯云 SES） */
     @Value("${tencent.email.register-template-id:57132}")
@@ -67,19 +58,21 @@ public class EmailCodeServiceImpl implements EmailCodeService {
      * @param stringRedisTemplate Redis 客户端
      * @param mailService         邮件服务
      * @param userMapper          用户 Mapper（注册用途发信前查邮箱占用）
+     * @param userAccentProperties 用户认证与验证码策略
      */
     public EmailCodeServiceImpl(StringRedisTemplate stringRedisTemplate, MailService mailService,
-                                UserInfoMapper userMapper) {
+                                UserInfoMapper userMapper, UserAccentProperties userAccentProperties) {
         this.stringRedisTemplate = stringRedisTemplate;
         this.mailService = mailService;
         this.userMapper = userMapper;
+        this.userAccentProperties = userAccentProperties;
     }
 
     /**
      * 发送邮箱验证码（带发送限流）
      *
      * <p>register 用途在通过 IP 限流后、消耗邮箱限流额度前先查邮箱占用，
-     * 已注册则抛 EMAIL_ALREADY_EXISTS：既不发信，也不会把该邮箱锁进 5 分钟发送间隔，
+     * 已注册则抛 EMAIL_ALREADY_EXISTS：既不发信，也不会消耗该邮箱的发送额度，
      * 用户可立即改用其他邮箱或转去登录。</p>
      *
      * @param email 目标邮箱
@@ -88,6 +81,9 @@ public class EmailCodeServiceImpl implements EmailCodeService {
      */
     @Override
     public void sendCode(String email, String usage, String ip) {
+        long ipIntervalSeconds = userAccentProperties.getCodeSendIntervalSeconds();
+        long emailIntervalSeconds = userAccentProperties.getEmailSendIntervalSeconds();
+        long codeTtlSeconds = userAccentProperties.getCodeTtlSeconds();
         // 同 IP 限流：间隔内只能发送一次
         if (!RedisRateLimiter.tryAcquire(stringRedisTemplate,
                 RedisKeyUtil.rate("send-code", ip), 1, ipIntervalSeconds)) {

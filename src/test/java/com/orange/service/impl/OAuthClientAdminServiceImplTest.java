@@ -1,6 +1,7 @@
 package com.orange.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.orange.common.config.OAuthProperties;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.entity.dto.oauthclient.OAuthClientRegisterRequest;
@@ -23,7 +24,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -66,9 +66,29 @@ class OAuthClientAdminServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new OAuthClientAdminServiceImpl(oauthClientMapper, oauthClientOriginMapper,
-                redisTemplate, new ObjectMapper(), eventPublisher);
-        ReflectionTestUtils.setField(service, "maxClientsPerOwner", 10);
+                redisTemplate, new ObjectMapper(), eventPublisher, new OAuthProperties("", "", ""));
         lenient().when(oauthClientMapper.selectCount(any())).thenReturn(0L);
+    }
+
+    @Test
+    void fifthExistingClientPreventsFurtherRegistration() {
+        when(oauthClientMapper.selectCount(any())).thenReturn(5L);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.register(7L, validRequest()));
+
+        assertEquals(ResultCode.OAUTH_CLIENT_LIMIT.getCode(), exception.getCode());
+        verify(oauthClientMapper, never()).insert(any());
+    }
+
+    @Test
+    void fourthExistingClientAllowsRegistration() {
+        when(oauthClientMapper.selectCount(any())).thenReturn(4L);
+
+        OAuthClientCredentialVO credential = service.register(7L, validRequest());
+
+        assertNotNull(credential.getClientId());
+        verify(oauthClientMapper).insert(any(OAuthClient.class));
     }
 
     @Test

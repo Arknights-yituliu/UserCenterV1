@@ -5,11 +5,11 @@ import org.springframework.stereotype.Component;
 
 /**
  * OAuth2 授权服务器参数。
- * 邮箱和页面地址读取顶层 oauth 配置，有效期参数直接在此类维护。
+ * 邮箱和页面地址读取顶层 oauth 配置，有效期、缓存刷新周期及客户端配额直接在此类维护。
  *
  * @author UserCenter
  */
-@Component
+@Component("oauthProperties")
 public class OAuthProperties {
 
     /** OAuth 客户端注册或更新后的管理员通知邮箱；留空则不发送。 */
@@ -41,6 +41,12 @@ public class OAuthProperties {
 
     /** 授权确认单有效期（秒）：5 分钟。 */
     private final long consentTtlSeconds = 300L;
+
+    /** OAuth 客户端已审批 Origin 白名单的本地缓存刷新周期（毫秒）：60 秒。 */
+    private final long originCacheRefreshMs = 60000L;
+
+    /** 单个开发者账号可注册的 OAuth 客户端数量上限。 */
+    private final int maxClientsPerOwner = 5;
 
     public OAuthProperties(
             @Value("${oauth.admin-email:}") String adminEmail,
@@ -85,5 +91,13 @@ public class OAuthProperties {
 
     public long getConsentTtlSeconds() {
         return consentTtlSeconds;
+    }
+
+    public long getOriginCacheRefreshMs() {
+        return originCacheRefreshMs;
+    }
+
+    public int getMaxClientsPerOwner() {
+        return maxClientsPerOwner;
     }
 }

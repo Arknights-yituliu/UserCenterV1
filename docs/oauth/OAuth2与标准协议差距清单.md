@@ -98,12 +98,12 @@
   配套防护：`ts` 时间窗（默认 ±120s）+ `nonce` 一次性占用（`SET NX EX`，TTL 为时间窗的 2 倍）+ `kid` 公钥标识以支持轮换。**不采用共享密钥（HMAC）**：跨公网场景下任一侧泄漏即可伪造请求、冒充任意用户。
 - **公网可达这一事实**：BackEndV3 与 UC 分属两台服务器，无法只走内网，该路径**跨公网可达**；UC 亦未对该路径注册任何拦截器（`interceptor/WebConfig.java` 仅覆盖 `/user/**`、`/auth/logout`、`/oauth2/userinfo` 等），认证完全由端点自带。
 - **加固要求**（网络层是加固、不是屏障；**认证层是唯一准入屏障**）：
-  1. 认证层：Ed25519 验签必须始终开启，公钥经 `user-center.oauth.migrate.verify-keys` 按 `kid` 配置，支持轮换；
+  1. 认证层：Ed25519 验签必须始终开启，公钥经 `migrate.verify-keys` 按 `kid` 配置，支持轮换；
   2. 传输层：强制 HTTPS（含反代终止 TLS 时按 `X-Forwarded-Proto` 判定）；
   3. 来源层：`ip-allowlist` 仅放行 BackEndV3 固定出网 IP；
   4. 限流层：网关按 IP + 应用层按 `uid`/`client_id` 三维限流；
   5. 准入层：复用客户端直连开关（`direct_auth_enabled`）作为客户端准入，且**必须校验用户存在且未被封禁**，否则该端点会沦为绕过封禁的后门；
-  6. 开关：`user-center.oauth.migrate.enabled` 默认关闭，且**开关校验先于认证校验**，迁移结束后立即关闭；
+  6. 开关：`migrate.enabled` 默认关闭，且**开关校验先于认证校验**，迁移结束后立即关闭；
   7. 审计：只记录 `client_id`/`uid`/`origin`/旧 token 摘要/请求 IP/`kid`/结果，私钥、签名原文、令牌明文一律不入日志与审计。
 
 ## 4. 已确认的合规/加分项（避免改造时误伤）

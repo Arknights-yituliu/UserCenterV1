@@ -3,6 +3,8 @@ package com.orange.service.impl;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.orange.common.config.OAuthDirectProperties;
+import com.orange.common.config.UserAccentProperties;
 import com.orange.common.enums.OAuthClientAuthMethod;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
@@ -34,7 +36,6 @@ import com.orange.service.OAuthTokenService;
 import com.orange.service.RevokeService;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -75,101 +76,9 @@ public class AuthServiceImpl implements AuthService {
     private final PasswordEncoder passwordEncoder;
     private final Validator validator;
 
-    /** 会话有效期（秒）：默认 180 天 */
-    @Value("${user-center.session-ttl-seconds:15552000}")
-    private long sessionTtlSeconds;
+    private final UserAccentProperties userAccentProperties;
 
-    /** 登录失败次数上限 */
-    @Value("${user-center.login-fail-limit:5}")
-    private long loginFailLimit;
-
-    /**
-     * 登录失败计数窗口（秒）：默认 15 分钟。
-     *
-     * <p>与锁定时长解耦：窗口决定「多长时间内的连续失败会被累计」，锁定时长只决定
-     * 「达到阈值后账号停摆多久」。只缩短锁定时长可降低定向锁号 DoS 的影响，
-     * 但不缩短窗口，避免慢速爆破的速率上限被同步放大。</p>
-     */
-    @Value("${user-center.login-fail-window-seconds:900}")
-    private long loginFailWindowSeconds;
-
-    /** 登录锁定时间（秒）：默认 5 分钟 */
-    @Value("${user-center.login-lock-seconds:300}")
-    private long loginLockSeconds;
-
-    /** 主站登录 IP 限流：窗口内单 IP 允许的登录尝试次数（防换账号的密码喷洒） */
-    @Value("${user-center.login-rate-limit.ip-limit:20}")
-    private long loginIpLimit = 20;
-
-    /** 主站登录 IP 限流窗口（秒） */
-    @Value("${user-center.login-rate-limit.window-seconds:60}")
-    private long loginIpWindowSeconds = 60;
-
-    /** 直连登录发起会话有效期（秒）：默认 5 分钟 */
-    @Value("${user-center.oauth.direct-channel-ttl-seconds:300}")
-    private long directChannelTtlSeconds;
-
-    /** 直连登录一次性票据有效期（秒）：默认 60 秒 */
-    @Value("${user-center.oauth.direct-ticket-ttl-seconds:60}")
-    private long directTicketTtlSeconds;
-
-    /** 直连登录发起会话限流配置。 */
-    @Value("${user-center.oauth.direct-rate-limit.session.ip-limit:60}")
-    private long directSessionIpLimit = 60;
-
-    @Value("${user-center.oauth.direct-rate-limit.session.client-ip-limit:20}")
-    private long directSessionClientIpLimit = 20;
-
-    @Value("${user-center.oauth.direct-rate-limit.session.window-seconds:60}")
-    private long directSessionWindowSeconds = 60;
-
-    /** 直连登录提交凭证限流与失败锁定配置。 */
-    @Value("${user-center.oauth.direct-rate-limit.login.ip-request-limit:30}")
-    private long directLoginIpRequestLimit = 30;
-
-    @Value("${user-center.oauth.direct-rate-limit.login.ip-request-window-seconds:60}")
-    private long directLoginIpRequestWindowSeconds = 60;
-
-    @Value("${user-center.oauth.direct-rate-limit.login.failure-window-seconds:900}")
-    private long directLoginFailureWindowSeconds = 900;
-
-    @Value("${user-center.oauth.direct-rate-limit.login.first-lock-threshold:5}")
-    private long directLoginFirstLockThreshold = 5;
-
-    @Value("${user-center.oauth.direct-rate-limit.login.first-lock-seconds:60}")
-    private long directLoginFirstLockSeconds = 60;
-
-    @Value("${user-center.oauth.direct-rate-limit.login.second-lock-threshold:10}")
-    private long directLoginSecondLockThreshold = 10;
-
-    @Value("${user-center.oauth.direct-rate-limit.login.second-lock-seconds:300}")
-    private long directLoginSecondLockSeconds = 300;
-
-    @Value("${user-center.oauth.direct-rate-limit.login.third-lock-threshold:15}")
-    private long directLoginThirdLockThreshold = 15;
-
-    @Value("${user-center.oauth.direct-rate-limit.login.third-lock-seconds:900}")
-    private long directLoginThirdLockSeconds = 900;
-
-    /** 直连注册限流配置。 */
-    @Value("${user-center.oauth.direct-rate-limit.register.ip-limit:10}")
-    private long directRegisterIpLimit = 10;
-
-    @Value("${user-center.oauth.direct-rate-limit.register.email-limit:3}")
-    private long directRegisterEmailLimit = 3;
-
-    @Value("${user-center.oauth.direct-rate-limit.register.window-seconds:3600}")
-    private long directRegisterWindowSeconds = 3600;
-
-    /** 主站注册限流配置：与直连注册同量级，避免 /auth/register 被用于批量探测邮箱是否已注册。 */
-    @Value("${user-center.register-rate-limit.ip-limit:10}")
-    private long registerIpLimit = 10;
-
-    @Value("${user-center.register-rate-limit.email-limit:3}")
-    private long registerEmailLimit = 3;
-
-    @Value("${user-center.register-rate-limit.window-seconds:3600}")
-    private long registerWindowSeconds = 3600;
+    private final OAuthDirectProperties oauthDirectProperties;
 
     /**
      * 构造器注入依赖
@@ -183,12 +92,15 @@ public class AuthServiceImpl implements AuthService {
      * @param stringRedisTemplate Redis 客户端
      * @param objectMapper        JSON 序列化器
      * @param validator           Bean Validation 校验器（直连注册散参手动校验）
+     * @param userAccentProperties 用户认证与验证码策略
+     * @param oauthDirectProperties 直连登录与注册策略
      */
     public AuthServiceImpl(UserInfoMapper userMapper, LoginLogMapper loginLogMapper, OAuthClientMapper oauthClientMapper,
                            EmailCodeService emailCodeService, RevokeService revokeService,
                            OAuthTokenService oauthTokenService,
                            StringRedisTemplate stringRedisTemplate, ObjectMapper objectMapper,
-                           Validator validator) {
+                           Validator validator, UserAccentProperties userAccentProperties,
+                           OAuthDirectProperties oauthDirectProperties) {
         this.userMapper = userMapper;
         this.loginLogMapper = loginLogMapper;
         this.oauthClientMapper = oauthClientMapper;
@@ -199,6 +111,8 @@ public class AuthServiceImpl implements AuthService {
         this.objectMapper = objectMapper;
         this.passwordEncoder = new BCryptPasswordEncoder();
         this.validator = validator;
+        this.userAccentProperties = userAccentProperties;
+        this.oauthDirectProperties = oauthDirectProperties;
     }
 
     /**
@@ -217,7 +131,8 @@ public class AuthServiceImpl implements AuthService {
     public LoginVO register(RegisterRequest request, String ip, String clientId) {
         // 先按来源 IP 和邮箱限流，防止无凭证批量探测邮箱/用户名占用
         enforceRegisterRateLimit("register", ip, request.getEmail(),
-                registerIpLimit, registerEmailLimit, registerWindowSeconds);
+                userAccentProperties.getRegisterIpLimit(), userAccentProperties.getRegisterEmailLimit(),
+                userAccentProperties.getRegisterWindowSeconds());
         // 校验 + 创建用户（含邮箱验证码校验、唯一性校验、密码加密）
         UserInfo user = createRegisteredUser(request, ip);
         return buildLoginVO(user, createSession(user.getUid(), clientId));
@@ -466,10 +381,10 @@ public class AuthServiceImpl implements AuthService {
         String channel = OAuthUtil.generateToken();
         Map<String, Object> record = new HashMap<>();
         record.put("clientId", clientId);
-        writeJson(RedisKeyUtil.directChannel(channel), record, directChannelTtlSeconds);
+        writeJson(RedisKeyUtil.directChannel(channel), record, oauthDirectProperties.getChannelTtlSeconds());
         DirectLoginSessionVO vo = new DirectLoginSessionVO();
         vo.setChannel(channel);
-        vo.setExpiresIn(directChannelTtlSeconds);
+        vo.setExpiresIn(oauthDirectProperties.getChannelTtlSeconds());
         LogUtil.debug(AuthServiceImpl.class, "[Auth] 直连登录发起会话: clientId={}", clientId);
         return vo;
     }
@@ -535,7 +450,8 @@ public class AuthServiceImpl implements AuthService {
     public DirectLoginTicketVO directRegister(String channel, RegisterRequest request, String ip) {
         // 1. 先按来源 IP 和邮箱限流，验证码发送频控由 EmailCodeService 统一执行。
         enforceRegisterRateLimit("direct-register", ip, request.getEmail(),
-                directRegisterIpLimit, directRegisterEmailLimit, directRegisterWindowSeconds);
+                oauthDirectProperties.getRegisterIpLimit(), oauthDirectProperties.getRegisterEmailLimit(),
+                oauthDirectProperties.getRegisterWindowSeconds());
         // 2. 校验发起会话凭证有效，并重新检查客户端状态和直连权限。
         String clientId = readDirectChannel(channel);
         OAuthClient client = requireEnabledOAuthClient(clientId);
@@ -590,10 +506,10 @@ public class AuthServiceImpl implements AuthService {
     private void enforceDirectSessionRateLimit(String clientId, String sourceIp) {
         String ip = normalizeRateTarget(sourceIp);
         if (!RedisRateLimiter.tryAcquire(stringRedisTemplate, RedisKeyUtil.rate("direct-session-ip", ip),
-                directSessionIpLimit, directSessionWindowSeconds)
+                oauthDirectProperties.getSessionIpLimit(), oauthDirectProperties.getSessionWindowSeconds())
                 || !RedisRateLimiter.tryAcquire(stringRedisTemplate,
                 RedisKeyUtil.rate("direct-session-client-ip", clientId + ":" + ip),
-                directSessionClientIpLimit, directSessionWindowSeconds)) {
+                oauthDirectProperties.getSessionClientIpLimit(), oauthDirectProperties.getSessionWindowSeconds())) {
             throw new BusinessException(ResultCode.IP_RATE_LIMITED);
         }
     }
@@ -602,7 +518,7 @@ public class AuthServiceImpl implements AuthService {
         String ip = normalizeRateTarget(sourceIp);
         if (Boolean.TRUE.equals(stringRedisTemplate.hasKey(RedisKeyUtil.rate("direct-login-ip-lock", ip)))
                 || !RedisRateLimiter.tryAcquire(stringRedisTemplate, RedisKeyUtil.rate("direct-login-ip", ip),
-                directLoginIpRequestLimit, directLoginIpRequestWindowSeconds)) {
+                oauthDirectProperties.getLoginIpRequestLimit(), oauthDirectProperties.getLoginIpRequestWindowSeconds())) {
             throw new BusinessException(ResultCode.IP_RATE_LIMITED);
         }
         if (!account.isEmpty() && Boolean.TRUE.equals(stringRedisTemplate.hasKey(
@@ -623,12 +539,12 @@ public class AuthServiceImpl implements AuthService {
         String failureKey = RedisKeyUtil.rate(failureBiz, target);
         Long count = stringRedisTemplate.opsForValue().increment(failureKey);
         if (count != null && count == 1L) {
-            stringRedisTemplate.expire(failureKey, directLoginFailureWindowSeconds, TimeUnit.SECONDS);
+            stringRedisTemplate.expire(failureKey, oauthDirectProperties.getLoginFailureWindowSeconds(), TimeUnit.SECONDS);
         }
         long lockSeconds = count == null ? 0
-                : count >= directLoginThirdLockThreshold ? directLoginThirdLockSeconds
-                : count >= directLoginSecondLockThreshold ? directLoginSecondLockSeconds
-                : count >= directLoginFirstLockThreshold ? directLoginFirstLockSeconds : 0;
+                : count >= oauthDirectProperties.getLoginThirdLockThreshold() ? oauthDirectProperties.getLoginThirdLockSeconds()
+                : count >= oauthDirectProperties.getLoginSecondLockThreshold() ? oauthDirectProperties.getLoginSecondLockSeconds()
+                : count >= oauthDirectProperties.getLoginFirstLockThreshold() ? oauthDirectProperties.getLoginFirstLockSeconds() : 0;
         if (lockSeconds > 0) {
             stringRedisTemplate.opsForValue().set(RedisKeyUtil.rate(lockBiz, target), "1", lockSeconds,
                     TimeUnit.SECONDS);
@@ -647,7 +563,7 @@ public class AuthServiceImpl implements AuthService {
      *
      * <p>账号维度的失败计数只能约束「盯着一个账号试密码」，攻击者轮换账号名即可绕过，
      * 因此这里在进入凭证校验之前先做 IP 维度计数。窗口与阈值由
-     * {@code login-rate-limit.*} 配置，缺省 20 次/60 秒，与直连登录的
+     * {@link UserAccentProperties} 管理，默认 20 次/60 秒，与直连登录的
      * {@code ip-request-limit} 同量级。</p>
      *
      * <p>计数对成功与失败一并累加：正常用户的登录频次远低于该阈值，
@@ -658,7 +574,8 @@ public class AuthServiceImpl implements AuthService {
     private void enforceLoginIpRateLimit(String sourceIp) {
         String ip = normalizeRateTarget(sourceIp);
         if (!RedisRateLimiter.tryAcquire(stringRedisTemplate,
-                RedisKeyUtil.rate("login-ip", ip), loginIpLimit, loginIpWindowSeconds)) {
+                RedisKeyUtil.rate("login-ip", ip), userAccentProperties.getLoginIpLimit(),
+                userAccentProperties.getLoginIpWindowSeconds())) {
             throw new BusinessException(ResultCode.IP_RATE_LIMITED);
         }
     }
@@ -706,10 +623,10 @@ public class AuthServiceImpl implements AuthService {
         Map<String, Object> record = new HashMap<>();
         record.put("clientId", clientId);
         record.put("uid", uid);
-        writeJson(RedisKeyUtil.directTicket(ticket), record, directTicketTtlSeconds);
+        writeJson(RedisKeyUtil.directTicket(ticket), record, oauthDirectProperties.getTicketTtlSeconds());
         DirectLoginTicketVO vo = new DirectLoginTicketVO();
         vo.setTicket(ticket);
-        vo.setExpiresIn(directTicketTtlSeconds);
+        vo.setExpiresIn(oauthDirectProperties.getTicketTtlSeconds());
         return vo;
     }
 
@@ -738,7 +655,7 @@ public class AuthServiceImpl implements AuthService {
         }
         // 2. 一次性占用标记：只有第一个请求能拿到 true，重放直接拒绝
         Boolean first = stringRedisTemplate.opsForValue().setIfAbsent(
-                RedisKeyUtil.directUsed(ticket), "1", directTicketTtlSeconds, TimeUnit.SECONDS);
+                RedisKeyUtil.directUsed(ticket), "1", oauthDirectProperties.getTicketTtlSeconds(), TimeUnit.SECONDS);
         if (!Boolean.TRUE.equals(first)) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "登录票据已使用");
         }
@@ -826,7 +743,7 @@ public class AuthServiceImpl implements AuthService {
             stringRedisTemplate.opsForValue().set(
                     RedisKeyUtil.token(token),
                     objectMapper.writeValueAsString(session),
-                    sessionTtlSeconds, TimeUnit.SECONDS);
+                    userAccentProperties.getSessionTtlSeconds(), TimeUnit.SECONDS);
             stringRedisTemplate.opsForSet().add(RedisKeyUtil.uidSession(uid), token);
         } catch (JsonProcessingException e) {
             throw new BusinessException(ResultCode.SYSTEM_ERROR, "会话创建失败");
@@ -908,7 +825,7 @@ public class AuthServiceImpl implements AuthService {
     /**
      * 记录一次登录失败并累计，达到阈值后锁定账号
      *
-     * <p>计数窗口取 {@code login-fail-window-seconds}，锁定时长取 {@code login-lock-seconds}，
+     * <p>计数窗口与锁定时长由 {@link UserAccentProperties} 管理，
      * 两者独立：缩短锁定时间不会放大慢速爆破的尝试速率。</p>
      *
      * @param account 登录账号（用户名或邮箱）
@@ -917,12 +834,12 @@ public class AuthServiceImpl implements AuthService {
         String failKey = RedisKeyUtil.loginFail(account);
         Long count = stringRedisTemplate.opsForValue().increment(failKey);
         if (count != null && count == 1L) {
-            stringRedisTemplate.expire(failKey, loginFailWindowSeconds, TimeUnit.SECONDS);
+            stringRedisTemplate.expire(failKey, userAccentProperties.getLoginFailWindowSeconds(), TimeUnit.SECONDS);
         }
-        if (count != null && count >= loginFailLimit) {
+        if (count != null && count >= userAccentProperties.getLoginFailLimit()) {
             // 达到阈值：锁定账号（锁定时长短于计数窗口，降低定向锁号的影响面）
             stringRedisTemplate.opsForValue().set(
-                    RedisKeyUtil.loginLock(account), "1", loginLockSeconds, TimeUnit.SECONDS);
+                    RedisKeyUtil.loginLock(account), "1", userAccentProperties.getLoginLockSeconds(), TimeUnit.SECONDS);
             stringRedisTemplate.delete(failKey);
             throw new BusinessException(ResultCode.LOGIN_LOCKED);
         }
