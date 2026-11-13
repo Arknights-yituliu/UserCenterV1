@@ -1,9 +1,9 @@
 package com.orange.service.impl;
 
+import com.orange.common.config.OAuthProperties;
 import com.orange.common.util.LogUtil;
 import com.orange.event.OAuthClientReviewNotificationEvent;
 import com.orange.service.MailService;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
@@ -21,13 +21,13 @@ import org.springframework.util.StringUtils;
 public class OAuthClientAdminNotificationListener {
 
     private final MailService mailService;
-    private final String adminEmail;
+    private final OAuthProperties oauthProperties;
 
     public OAuthClientAdminNotificationListener(
             MailService mailService,
-            @Value("${user-center.oauth.admin-email:}") String adminEmail) {
+            OAuthProperties oauthProperties) {
         this.mailService = mailService;
-        this.adminEmail = adminEmail;
+        this.oauthProperties = oauthProperties;
     }
 
     /**
@@ -38,8 +38,9 @@ public class OAuthClientAdminNotificationListener {
     @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void sendReviewNotification(OAuthClientReviewNotificationEvent event) {
+        String adminEmail = oauthProperties.getAdminEmail();
         if (!StringUtils.hasText(adminEmail)) {
-            LogUtil.warn(OAuthClientAdminNotificationListener.class, "[OAuthClient] 未配置 user-center.oauth.admin-email，跳过管理员审核邮件");
+            LogUtil.warn(OAuthClientAdminNotificationListener.class, "[OAuthClient] OAuthProperties 未配置管理员邮箱，跳过管理员审核邮件");
             return;
         }
 

@@ -1,5 +1,6 @@
 package com.orange.service.impl;
 
+import com.orange.common.config.OAuthProperties;
 import com.orange.event.OAuthClientReviewNotificationEvent;
 import com.orange.service.MailService;
 import org.junit.jupiter.api.Test;
@@ -16,15 +17,16 @@ class OAuthClientAdminNotificationListenerTest {
     @Test
     void sendsClientDetailsToConfiguredAdmin() {
         MailService mailService = mock(MailService.class);
+        OAuthProperties oauthProperties = new OAuthProperties("admin@example.com", "", "");
         OAuthClientAdminNotificationListener listener =
-                new OAuthClientAdminNotificationListener(mailService, "admin@example.com");
+                new OAuthClientAdminNotificationListener(mailService, oauthProperties);
 
         listener.sendReviewNotification(new OAuthClientReviewNotificationEvent(
                 "注册", "client-1", "Example SPA", 7L, "https://spa.example.com"));
 
         ArgumentCaptor<String> subject = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> content = ArgumentCaptor.forClass(String.class);
-        verify(mailService).sendText(org.mockito.ArgumentMatchers.eq("admin@example.com"),
+        verify(mailService).sendText(org.mockito.ArgumentMatchers.eq(oauthProperties.getAdminEmail()),
                 subject.capture(), content.capture());
         assertTrue(subject.getValue().contains("注册"));
         assertTrue(content.getValue().contains("client-1"));
@@ -34,8 +36,9 @@ class OAuthClientAdminNotificationListenerTest {
     @Test
     void skipsNotificationWhenAdminEmailIsBlank() {
         MailService mailService = mock(MailService.class);
+        OAuthProperties oauthProperties = new OAuthProperties(" ", "", "");
         OAuthClientAdminNotificationListener listener =
-                new OAuthClientAdminNotificationListener(mailService, " ");
+                new OAuthClientAdminNotificationListener(mailService, oauthProperties);
 
         listener.sendReviewNotification(new OAuthClientReviewNotificationEvent(
                 "更新", "client-1", "Example SPA", 7L, null));

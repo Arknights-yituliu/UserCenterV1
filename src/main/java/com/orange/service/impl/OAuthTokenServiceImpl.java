@@ -2,6 +2,7 @@ package com.orange.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.orange.common.config.OAuthProperties;
 import com.orange.common.context.UserContext;
 import com.orange.common.enums.OAuthClientAuthMethod;
 import com.orange.common.enums.OAuthGrantType;
@@ -36,7 +37,6 @@ import com.orange.mapper.UserInfoMapper;
 import com.orange.service.OAuthTokenStore;
 import com.orange.service.OAuthTokenService;
 import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -112,37 +112,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     private final OAuthTokenStore oauthTokenStore;
     private final PasswordEncoder passwordEncoder;
 
-    /** access_token 默认有效期（秒） */
-    @Value("${user-center.oauth.access-token-ttl-seconds:7200}")
-    private long accessTokenTtlSeconds;
-
-    /** refresh_token 默认有效期（秒） */
-    @Value("${user-center.oauth.refresh-token-ttl-seconds:7776000}")
-    private long refreshTokenTtlSeconds;
-
-    /** 授权码默认有效期（秒） */
-    @Value("${user-center.oauth.authorization-code-ttl-seconds:300}")
-    private long authorizationCodeTtlSeconds;
-
-    /** refresh_token 轮转宽限期（秒）：宽限期内旧凭证重试返回同一份新凭证而不判定为泄露 */
-    @Value("${user-center.oauth.refresh-rotation-grace-seconds:60}")
-    private long refreshRotationGraceSeconds;
-
-    /** 登录页地址：未登录时 302 跳转（纯前端接入场景，为空则保持抛 80001） */
-    @Value("${user-center.oauth.login-page-url:}")
-    private String loginPageUrl;
-
-    /** 跨站登录票据有效期（秒）：默认 5 分钟，一次性使用 */
-    @Value("${user-center.oauth.login-ticket-ttl-seconds:300}")
-    private long loginTicketTtlSeconds;
-
-    /** 授权确认页地址：requireAuthConsent=1 的客户端授权时 302 跳转（纯前端页面接入） */
-    @Value("${user-center.oauth.consent-page-url:}")
-    private String consentPageUrl;
-
-    /** 授权确认单有效期（秒）：默认 5 分钟 */
-    @Value("${user-center.oauth.consent-ttl-seconds:300}")
-    private long consentTtlSeconds;
+    private final OAuthProperties oauthProperties;
 
     /**
      * 构造器注入依赖
@@ -155,13 +125,14 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      * @param stringRedisTemplate  Redis 客户端
      * @param objectMapper         JSON 序列化器
      * @param oauthTokenStore      OAuth 一次性凭证原子存储
+     * @param oauthProperties      OAuth 授权服务器参数
      */
     public OAuthTokenServiceImpl(OAuthClientMapper oauthClientMapper, OAuthGrantMapper oauthGrantMapper,
                                  OAuthUserScopeMapper oauthUserScopeMapper,
                                  OAuthCustomTokenMapper oauthCustomTokenMapper,
                                  UserInfoMapper userInfoMapper,
                                  StringRedisTemplate stringRedisTemplate, ObjectMapper objectMapper,
-                                 OAuthTokenStore oauthTokenStore) {
+                                 OAuthTokenStore oauthTokenStore, OAuthProperties oauthProperties) {
         this.oauthClientMapper = oauthClientMapper;
         this.oauthGrantMapper = oauthGrantMapper;
         this.oauthUserScopeMapper = oauthUserScopeMapper;
@@ -170,6 +141,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         this.stringRedisTemplate = stringRedisTemplate;
         this.objectMapper = objectMapper;
         this.oauthTokenStore = oauthTokenStore;
+        this.oauthProperties = oauthProperties;
         this.passwordEncoder = new BCryptPasswordEncoder();
     }
 
@@ -222,7 +194,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         }
         // 一次性占用标记：只有第一个请求能拿到 true，后续重放直接拒绝
         Boolean first = stringRedisTemplate.opsForValue().setIfAbsent(
-                RedisKeyUtil.oauthTicketUsed(ticket), "1", loginTicketTtlSeconds, TimeUnit.SECONDS);
+                RedisKeyUtil.oauthTicketUsed(ticket), "1", oauthProperties.getLoginTicketTtlSeconds(), TimeUnit.SECONDS);
         if (!Boolean.TRUE.equals(first)) {
             return null;
         }
@@ -251,10 +223,10 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         String ticket = OAuthUtil.generateToken();
         Map<String, Object> record = new HashMap<>();
         record.put("uid", uid);
-        writeJson(RedisKeyUtil.oauthTicket(ticket), record, loginTicketTtlSeconds);
+        writeJson(RedisKeyUtil.oauthTicket(ticket), record, oauthProperties.getLoginTicketTtlSeconds());
         LoginTicketVO vo = new LoginTicketVO();
         vo.setTicket(ticket);
-        vo.setExpiresIn(loginTicketTtlSeconds);
+        vo.setExpiresIn(oauthProperties.getLoginTicketTtlSeconds());
         return vo;
     }
 
@@ -293,6 +265,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         // 3. 解析当前登录用户（复用本系统会话 token，未登录走登录页）
         Long uid = resolveLoginUid(request);
         if (uid == null) {
+            String loginPageUrl = oauthProperties.getLoginPageUrl();
             if (!StringUtils.hasText(loginPageUrl)) {
                 throw new BusinessException(ResultCode.NOT_LOGIN, "请在授权前先登录用户中心");
             }
@@ -316,7 +289,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         }
         // 4. requireAuthConsent=1 的客户端：先生成一次性确认单，由确认页同意后再签发授权码
         if (isConsentRequired(client)) {
-            if (!StringUtils.hasText(consentPageUrl)) {
+            if (!StringUtils.hasText(oauthProperties.getConsentPageUrl())) {
                 throw new BusinessException(ResultCode.SYSTEM_ERROR, "客户端要求授权确认但未配置确认页地址 consent-page-url");
             }
             return buildConsentRedirectUrl(clientId, redirectUri, scope, state,
@@ -371,7 +344,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         record.put("scope", finalScope);
         record.put("redirectUri", redirectUri);
         record.put("codeChallenge", codeChallenge);
-        writeJson(RedisKeyUtil.oauthCode(code), record, authorizationCodeTtlSeconds);
+        writeJson(RedisKeyUtil.oauthCode(code), record, oauthProperties.getAuthorizationCodeTtlSeconds());
         return code;
     }
 
@@ -417,8 +390,9 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         record.put("state", state == null ? "" : state);
         record.put("codeChallenge", codeChallenge == null ? "" : codeChallenge);
         record.put("codeChallengeMethod", codeChallengeMethod == null ? "" : codeChallengeMethod);
-        writeJson(RedisKeyUtil.oauthConsent(pendingId), record, consentTtlSeconds);
+        writeJson(RedisKeyUtil.oauthConsent(pendingId), record, oauthProperties.getConsentTtlSeconds());
         // 5. 跳转确认页并携带确认单 ID
+        String consentPageUrl = oauthProperties.getConsentPageUrl();
         return consentPageUrl + (consentPageUrl.contains("?") ? "&" : "?") + "pending_id=" + pendingId;
     }
 
@@ -482,7 +456,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     public String confirmAuthorization(String pendingId, boolean approve, List<String> scopes, HttpServletRequest request) {
         // 1. 一次性占用确认单：并发/重复提交只有第一次能进入
         Boolean first = stringRedisTemplate.opsForValue().setIfAbsent(
-                RedisKeyUtil.oauthConsentUsed(pendingId), "1", consentTtlSeconds, TimeUnit.SECONDS);
+                RedisKeyUtil.oauthConsentUsed(pendingId), "1", oauthProperties.getConsentTtlSeconds(), TimeUnit.SECONDS);
         if (!Boolean.TRUE.equals(first)) {
             throw new BusinessException(ResultCode.OAUTH_CONSENT_INVALID);
         }
@@ -619,7 +593,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         // 5. compare-and-delete 由 Lua 原子完成。并发请求可能同时完成上述只读校验，
         // 但最终只有一个请求能删除匹配记录并写入 used 标记。
         // 传入 rawRecord 是为了让脚本比较“业务层校验过的正是即将删除的记录”，避免中间被替换。
-        if (!oauthTokenStore.consumeAuthorizationCode(code, rawRecord, authorizationCodeTtlSeconds)) {
+        if (!oauthTokenStore.consumeAuthorizationCode(code, rawRecord, oauthProperties.getAuthorizationCodeTtlSeconds())) {
             throw new BusinessException(ResultCode.OAUTH_CODE_REUSED);
         }
 
@@ -737,7 +711,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
                     oldRefreshToken, snapshot,
                     newAccessToken, accessJson, accessTtl,
                     newRefreshToken, refreshJson, refreshTtl,
-                    uid, familyId, tombstoneJson, refreshRotationGraceSeconds));
+                    uid, familyId, tombstoneJson, oauthProperties.getRefreshRotationGraceSeconds()));
             if (result != OAuthTokenStore.ROTATE_STALE) {
                 break;
             }
@@ -792,7 +766,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         long elapsedSeconds = System.currentTimeMillis() / 1000 - rotatedAt;
         String nextRefreshToken = stringRedisTemplate.opsForValue()
                 .get(RedisKeyUtil.oauthRefreshNext(oldRefreshToken));
-        if (nextRefreshToken != null && elapsedSeconds >= 0 && elapsedSeconds <= refreshRotationGraceSeconds) {
+        if (nextRefreshToken != null && elapsedSeconds >= 0 && elapsedSeconds <= oauthProperties.getRefreshRotationGraceSeconds()) {
             LogUtil.info(OAuthTokenServiceImpl.class,
                     "[OAuth] 宽限期内重放旧刷新令牌，返回同一份新凭证: clientId={}, elapsedSeconds={}",
                     client.getId(), elapsedSeconds);
@@ -2116,7 +2090,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      * @return 有效期（秒）：客户端未单独配置时回退全局默认值
      */
     private long resolveAccessTokenTtl(OAuthClient client) {
-        return client.getAccessTokenTtl() != null ? client.getAccessTokenTtl() : accessTokenTtlSeconds;
+        return client.getAccessTokenTtl() != null ? client.getAccessTokenTtl() : oauthProperties.getAccessTokenTtlSeconds();
     }
 
     /**
@@ -2126,7 +2100,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      * @return 有效期（秒）：客户端未单独配置时回退全局默认值
      */
     private long resolveRefreshTokenTtl(OAuthClient client) {
-        return client.getRefreshTokenTtl() != null ? client.getRefreshTokenTtl() : refreshTokenTtlSeconds;
+        return client.getRefreshTokenTtl() != null ? client.getRefreshTokenTtl() : oauthProperties.getRefreshTokenTtlSeconds();
     }
 
     /**

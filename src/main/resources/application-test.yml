@@ -43,6 +43,15 @@ tencent:
     register-template-id: 57132
     login-template-id: 57133
 
+# OAuth2 通知与页面地址；令牌等有效期在 OAuthProperties 中维护
+oauth:
+  # OAuth 客户端注册或更新后的管理员通知邮箱；留空则不发送
+  admin-email: xxx@example.com
+  # authorize 未登录时跳转的登录页地址；留空则返回未登录错误
+  login-page-url: http://localhost:8080/login.html
+  # requireAuthConsent=1 的客户端授权时跳转的确认页地址
+  consent-page-url: http://localhost:5000/oauth2/consent
+
 # ============ 业务自定义配置 ============
 user-center:
   # 会话有效期（秒）：默认 90 天
@@ -69,27 +78,8 @@ user-center:
     ip-limit: 10
     email-limit: 3
     window-seconds: 3600
-  # ===== OAuth2 授权服务器配置（第三方 Web 网站接入） =====
+  # OAuth2 限流、缓存与迁移配置
   oauth:
-    # OAuth 客户端注册或更新后的管理员通知邮箱；留空则不发送
-    admin-email: xxx@example.com
-    # access_token 有效期（秒）：默认 2 小时
-    access-token-ttl-seconds: 7200
-    # refresh_token 有效期（秒）：默认 90 天
-    refresh-token-ttl-seconds: 7776000
-    # refresh_token 轮转宽限期（秒）：开启轮转的客户端在宽限期内重放旧凭证返回同一份新凭证，
-    # 超出则判定为凭证泄露并作废整条令牌家族。建议不小于客户端网络重试窗口
-    refresh-rotation-grace-seconds: 60
-    # 授权码有效期（秒）：默认 5 分钟
-    authorization-code-ttl-seconds: 300
-    # 登录页地址：authorize 未登录时 302 跳转（纯前端接入；为空则保持抛 80001）
-    login-page-url: http://localhost:8080/login.html
-    # 跨站登录票据有效期（秒）：默认 5 分钟，一次性使用（登录页换取后随 authorize 携带）
-    login-ticket-ttl-seconds: 300
-    # 授权确认页地址：requireAuthConsent=1 的客户端授权时 302 跳转（纯前端页面接入）
-    consent-page-url: http://localhost:5000/oauth2/consent
-    # 授权确认单有效期（秒）：默认 5 分钟
-    consent-ttl-seconds: 300
     # 直连登录 / 注册限流（固定窗口）与登录失败渐进锁定
     direct-rate-limit:
       session:

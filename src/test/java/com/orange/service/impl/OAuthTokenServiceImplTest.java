@@ -2,6 +2,7 @@ package com.orange.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.orange.common.config.OAuthProperties;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.util.OAuthUtil;
@@ -10,6 +11,7 @@ import com.orange.entity.po.OAuthClient;
 import com.orange.entity.po.OAuthGrant;
 import com.orange.entity.vo.oauth.OAuthClientGrantGroupVO;
 import com.orange.entity.vo.oauth.OAuthGrantItemVO;
+import com.orange.entity.vo.oauth.LoginTicketVO;
 import com.orange.entity.vo.oauth.OAuthTokenVO;
 import com.orange.entity.vo.oauth.RefreshGrantVO;
 import com.orange.mapper.OAuthClientMapper;
@@ -28,7 +30,7 @@ import org.springframework.data.redis.core.SetOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.mock.web.MockHttpServletRequest;
 
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
@@ -41,6 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -99,11 +102,49 @@ class OAuthTokenServiceImplTest {
         lenient().when(redisTemplate.opsForSet()).thenReturn(setOperations);
         service = new OAuthTokenServiceImpl(
                 oauthClientMapper, oauthGrantMapper, oauthUserScopeMapper, oauthCustomTokenMapper,
-                userInfoMapper, redisTemplate, objectMapper, oauthTokenStore);
-        ReflectionTestUtils.setField(service, "accessTokenTtlSeconds", 7200L);
-        ReflectionTestUtils.setField(service, "refreshTokenTtlSeconds", 86400L);
-        ReflectionTestUtils.setField(service, "authorizationCodeTtlSeconds", 300L);
-        ReflectionTestUtils.setField(service, "refreshRotationGraceSeconds", 60L);
+                userInfoMapper, redisTemplate, objectMapper, oauthTokenStore,
+                new OAuthProperties("admin@example.com", "https://auth.example.com/login",
+                        "https://auth.example.com/consent"));
+    }
+
+    @Test
+    void unauthenticatedAuthorizationUsesLoginPageFromProperties() {
+        OAuthClient client = client("none", "authorization_code", null, 1);
+        when(oauthClientMapper.selectById("client-1")).thenReturn(client);
+
+        String redirect = service.buildAuthorizeRedirectUrl(
+                "code", "client-1", REDIRECT_URI, "user.read", "state-1",
+                OAuthUtil.pkceS256(VERIFIER), "S256", new MockHttpServletRequest());
+
+        assertTrue(redirect.startsWith("https://auth.example.com/login?redirect="));
+    }
+
+    @Test
+    void consentUsesPageAndExpiryFromProperties() {
+        OAuthClient client = client("none", "authorization_code", null, 1);
+        when(oauthClientMapper.selectById("client-1")).thenReturn(client);
+
+        String redirect = service.buildConsentRedirectUrl(
+                "client-1", REDIRECT_URI, "user.read", "state-1",
+                OAuthUtil.pkceS256(VERIFIER), "S256", 9L);
+
+        String prefix = "https://auth.example.com/consent?pending_id=";
+        assertTrue(redirect.startsWith(prefix));
+        verify(valueOperations).set(eq(RedisKeyUtil.oauthConsent(redirect.substring(prefix.length()))),
+                anyString(), eq(300L), eq(java.util.concurrent.TimeUnit.SECONDS));
+    }
+
+    @Test
+    void loginTicketUsesExpiryFromProperties() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("Authorization", "Bearer session-1");
+        when(valueOperations.get(RedisKeyUtil.token("session-1"))).thenReturn("{\"uid\":9}");
+
+        LoginTicketVO ticket = service.createLoginTicket(request);
+
+        assertEquals(300L, ticket.getExpiresIn());
+        verify(valueOperations).set(eq(RedisKeyUtil.oauthTicket(ticket.getTicket())),
+                anyString(), eq(300L), eq(java.util.concurrent.TimeUnit.SECONDS));
     }
 
     @Test
@@ -270,6 +311,7 @@ class OAuthTokenServiceImplTest {
         assertEquals("family-1", request.familyId());
         assertEquals(9L, request.uid());
         assertEquals(60L, request.graceTtlSeconds());
+        assertEquals(7776000L, request.refreshTtlSeconds());
         // 台账沿用同一条记录：只把摘要替换为新值并补写家族标识
         verify(oauthGrantMapper).rotateTokenHash(anyString(), anyString(), eq("family-1"));
     }
