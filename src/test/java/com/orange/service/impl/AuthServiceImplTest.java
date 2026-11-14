@@ -83,14 +83,25 @@ class AuthServiceImplTest {
     }
 
     @Test
-    void twentyFirstLoginAttemptIsRejectedBeforeCheckingCredentials() {
-        when(valueOperations.increment(RedisKeyUtil.rate("login-ip", IP))).thenReturn(21L);
+    void oneHundredTwentyFirstLoginAttemptIsRejectedBeforeCheckingCredentials() {
+        when(valueOperations.increment(RedisKeyUtil.rate("login-ip", IP))).thenReturn(121L);
 
         BusinessException exception = assertThrows(BusinessException.class,
                 () -> service.login(passwordRequest(), IP, "test", "client-1"));
 
         assertEquals(ResultCode.IP_RATE_LIMITED.getCode(), exception.getCode());
         verifyNoInteractions(userInfoMapper, emailCodeService);
+    }
+
+    @Test
+    void oneHundredTwentiethLoginAttemptStillChecksCredentials() {
+        when(valueOperations.increment(RedisKeyUtil.rate("login-ip", IP))).thenReturn(120L);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.login(passwordRequest(), IP, "test", "client-1"));
+
+        assertEquals(ResultCode.USER_NOT_FOUND.getCode(), exception.getCode());
+        verify(userInfoMapper).selectOne(any());
     }
 
     @Test
@@ -107,7 +118,7 @@ class AuthServiceImplTest {
     }
 
     @Test
-    void fifthLoginFailureLocksAccountForThirtyMinutes() {
+    void fifthLoginFailureLocksAccountForThreeMinutes() {
         when(valueOperations.increment(RedisKeyUtil.rate("login-ip", IP))).thenReturn(2L);
         when(valueOperations.increment(RedisKeyUtil.loginFail(ACCOUNT))).thenReturn(5L);
 
@@ -115,12 +126,12 @@ class AuthServiceImplTest {
                 () -> service.login(passwordRequest(), IP, "test", "client-1"));
 
         assertEquals(ResultCode.LOGIN_LOCKED.getCode(), exception.getCode());
-        verify(valueOperations).set(RedisKeyUtil.loginLock(ACCOUNT), "1", 1800L, TimeUnit.SECONDS);
+        verify(valueOperations).set(RedisKeyUtil.loginLock(ACCOUNT), "1", 180L, TimeUnit.SECONDS);
         verify(redisTemplate).delete(RedisKeyUtil.loginFail(ACCOUNT));
     }
 
     @Test
-    void fifthEmailCodeFailureUsesTheSameThirtyMinuteAccountLock() {
+    void fifthEmailCodeFailureUsesTheSameThreeMinuteAccountLock() {
         when(valueOperations.increment(RedisKeyUtil.rate("login-ip", IP))).thenReturn(1L);
         when(valueOperations.increment(RedisKeyUtil.loginFail(ACCOUNT))).thenReturn(5L);
         doThrow(new BusinessException(ResultCode.CODE_ERROR)).when(emailCodeService).verifyCode(ACCOUNT, "wrong");
@@ -133,7 +144,7 @@ class AuthServiceImplTest {
                 () -> service.login(request, IP, "test", "client-1"));
 
         assertEquals(ResultCode.LOGIN_LOCKED.getCode(), exception.getCode());
-        verify(valueOperations).set(RedisKeyUtil.loginLock(ACCOUNT), "1", 1800L, TimeUnit.SECONDS);
+        verify(valueOperations).set(RedisKeyUtil.loginLock(ACCOUNT), "1", 180L, TimeUnit.SECONDS);
         verifyNoInteractions(userInfoMapper);
     }
 
@@ -150,7 +161,7 @@ class AuthServiceImplTest {
         assertEquals("登录失败次数过多，账号已临时锁定", response.getMsg());
         verifyNoInteractions(userInfoMapper, emailCodeService);
         verify(valueOperations, never()).increment(RedisKeyUtil.loginFail(ACCOUNT));
-        verify(valueOperations, never()).set(RedisKeyUtil.loginLock(ACCOUNT), "1", 1800L, TimeUnit.SECONDS);
+        verify(valueOperations, never()).set(RedisKeyUtil.loginLock(ACCOUNT), "1", 180L, TimeUnit.SECONDS);
     }
 
     @Test
@@ -173,8 +184,8 @@ class AuthServiceImplTest {
     }
 
     @Test
-    void sixteenthRegistrationAttemptFromIpIsRejected() {
-        when(valueOperations.increment(RedisKeyUtil.rate("register-ip", IP))).thenReturn(16L);
+    void thirtyFirstRegistrationAttemptFromIpIsRejected() {
+        when(valueOperations.increment(RedisKeyUtil.rate("register-ip", IP))).thenReturn(31L);
         RegisterRequest request = new RegisterRequest();
         request.setEmail(ACCOUNT);
 
@@ -196,8 +207,24 @@ class AuthServiceImplTest {
                 () -> service.register(request, IP, "client-1"));
 
         assertEquals(ResultCode.IP_RATE_LIMITED.getCode(), exception.getCode());
-        verify(redisTemplate).expire(RedisKeyUtil.rate("register-ip", IP), 3600L, TimeUnit.SECONDS);
+        verify(redisTemplate).expire(RedisKeyUtil.rate("register-ip", IP), 600L, TimeUnit.SECONDS);
         verifyNoInteractions(userInfoMapper, emailCodeService);
+    }
+
+    @Test
+    void thirtiethRegistrationAttemptStillChecksEmailCode() {
+        when(valueOperations.increment(RedisKeyUtil.rate("register-ip", IP))).thenReturn(30L);
+        when(valueOperations.increment(RedisKeyUtil.rate("register-email", ACCOUNT))).thenReturn(1L);
+        doThrow(new BusinessException(ResultCode.CODE_ERROR)).when(emailCodeService).verifyCode(ACCOUNT, "wrong");
+        RegisterRequest request = new RegisterRequest();
+        request.setEmail(ACCOUNT);
+        request.setVerificationCode("wrong");
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.register(request, IP, "client-1"));
+
+        assertEquals(ResultCode.CODE_ERROR.getCode(), exception.getCode());
+        verify(redisTemplate).expire(RedisKeyUtil.rate("register-email", ACCOUNT), 3600L, TimeUnit.SECONDS);
     }
 
     private LoginRequest passwordRequest() {

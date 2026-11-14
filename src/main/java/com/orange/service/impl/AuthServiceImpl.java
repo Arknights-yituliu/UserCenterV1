@@ -414,14 +414,9 @@ public class AuthServiceImpl implements AuthService {
         String clientId = readDirectChannel(channel);
         OAuthClient client = requireEnabledOAuthClient(clientId);
         requireDirectAuthEnabled(client);
-        // 3. 复用主站的凭证校验与账号失败锁定，直连仅额外记录 IP 失败次数。
-        try {
-            user = authenticateLogin(type, account, password, code);
-            checkUserStatus(user);
-        } catch (BusinessException e) {
-            recordDirectLoginIpFailure(sourceIp);
-            throw e;
-        }
+        // 3. 复用主站的凭证校验与账号失败锁定，IP 仅做短窗口请求限流。
+        user = authenticateLogin(type, account, password, code);
+        checkUserStatus(user);
         // 4. 消费发起会话（一次性，防止重复使用）
         stringRedisTemplate.delete(RedisKeyUtil.directChannel(channel));
         // 5. 签发一次性登录票据（绑定 clientId + uid，短时有效）
@@ -507,10 +502,6 @@ public class AuthServiceImpl implements AuthService {
 
     private void enforceDirectLoginRateLimit(String sourceIp, String account) {
         String ip = normalizeRateTarget(sourceIp);
-        if (Boolean.TRUE.equals(stringRedisTemplate.hasKey(RedisKeyUtil.rate("direct-login-ip-lock", ip)))) {
-            throw new BusinessException(ResultCode.IP_RATE_LIMITED,
-                    "登录失败次数过多，当前 IP 已临时锁定，请稍后再试");
-        }
         if (!RedisRateLimiter.tryAcquire(stringRedisTemplate, RedisKeyUtil.rate("direct-login-ip", ip),
                 oauthDirectProperties.getLoginIpRequestLimit(), oauthDirectProperties.getLoginIpRequestWindowSeconds())) {
             throw new BusinessException(ResultCode.IP_RATE_LIMITED);
@@ -518,19 +509,12 @@ public class AuthServiceImpl implements AuthService {
         checkLoginLock(account);
     }
 
-    private void recordDirectLoginIpFailure(String sourceIp) {
-        String ip = normalizeRateTarget(sourceIp);
-        applyLoginFailureLock(RedisKeyUtil.rate("direct-login-ip-fail", ip),
-                RedisKeyUtil.rate("direct-login-ip-lock", ip));
-    }
-
     /**
      * 主站登录 IP 限流：窗口内限制单 IP 的登录尝试总数
      *
      * <p>账号维度的失败计数只能约束「盯着一个账号试密码」，攻击者轮换账号名即可绕过，
      * 因此这里在进入凭证校验之前先做 IP 维度计数。窗口与阈值由
-     * {@link UserAccentProperties} 管理，默认 20 次/60 秒，与直连登录的
-     * {@code ip-request-limit} 同量级。</p>
+     * {@link UserAccentProperties} 管理，默认 120 次/60 秒，主站与直连分别计数。</p>
      *
      * <p>计数对成功与失败一并累加：正常用户的登录频次远低于该阈值，
      * 而喷洒方无法通过「只成功一次」来规避。</p>
@@ -560,7 +544,7 @@ public class AuthServiceImpl implements AuthService {
         long windowSeconds = userAccentProperties.getRegisterWindowSeconds();
         String ip = normalizeRateTarget(sourceIp);
         if (!RedisRateLimiter.tryAcquire(stringRedisTemplate, RedisKeyUtil.rate(biz + "-ip", ip),
-                userAccentProperties.getRegisterIpLimit(), windowSeconds)) {
+                userAccentProperties.getRegisterIpLimit(), userAccentProperties.getRegisterIpWindowSeconds())) {
             throw new BusinessException(ResultCode.IP_RATE_LIMITED);
         }
         String normalizedEmail = normalizeRateTarget(email);
@@ -816,7 +800,7 @@ public class AuthServiceImpl implements AuthService {
         }
     }
 
-    /** 账号与直连 IP 共用一级锁定：窗口内失败 5 次锁定 30 分钟，锁定后清空失败计数。 */
+    /** 账号一级锁定：窗口内失败 5 次锁定 3 分钟，锁定后清空失败计数。 */
     private boolean applyLoginFailureLock(String failKey, String lockKey) {
         Long count = stringRedisTemplate.opsForValue().increment(failKey);
         if (count != null && count == 1L) {

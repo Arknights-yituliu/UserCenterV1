@@ -27,7 +27,7 @@ public class OAuthDirectProperties {
     private final long sessionWindowSeconds = 60L;
 
     /** 提交登录：窗口内单 IP 请求次数上限。 */
-    private final long loginIpRequestLimit = 30L;
+    private final long loginIpRequestLimit = 120L;
 
     /** 提交登录 IP 限流窗口（秒）。 */
     private final long loginIpRequestWindowSeconds = 60L;

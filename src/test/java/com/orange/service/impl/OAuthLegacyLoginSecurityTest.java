@@ -5,8 +5,6 @@ import com.orange.common.config.OAuthDirectProperties;
 import com.orange.common.config.UserAccentProperties;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
-import com.orange.common.exception.GlobalExceptionHandler;
-import com.orange.common.util.Result;
 import com.orange.common.util.RedisKeyUtil;
 import com.orange.entity.dto.auth.LoginRequest;
 import com.orange.entity.dto.auth.RegisterRequest;
@@ -34,6 +32,8 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -116,8 +116,8 @@ class OAuthLegacyLoginSecurityTest {
     }
 
     @Test
-    void thirtyFirstDirectLoginRequestIsRejectedBeforeReadingChannel() {
-        when(valueOperations.increment(RedisKeyUtil.rate("direct-login-ip", "127.0.0.1"))).thenReturn(31L);
+    void oneHundredTwentyFirstDirectLoginRequestIsRejectedBeforeReadingChannel() {
+        when(valueOperations.increment(RedisKeyUtil.rate("direct-login-ip", "127.0.0.1"))).thenReturn(121L);
 
         BusinessException exception = assertThrows(BusinessException.class,
                 () -> service.directLogin("channel", "password", "user", "password", null, "127.0.0.1"));
@@ -127,9 +127,20 @@ class OAuthLegacyLoginSecurityTest {
         verify(valueOperations, never()).get(RedisKeyUtil.directChannel("channel"));
     }
 
+    @Test
+    void oneHundredTwentiethDirectLoginRequestStillReadsChannel() {
+        when(valueOperations.increment(RedisKeyUtil.rate("direct-login-ip", "127.0.0.1"))).thenReturn(120L);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.directLogin("channel", "password", "user", "password", null, "127.0.0.1"));
+
+        assertEquals(ResultCode.PARAM_ERROR.getCode(), exception.getCode());
+        verify(valueOperations).get(RedisKeyUtil.directChannel("channel"));
+    }
+
     @ParameterizedTest
-    @CsvSource({"1, 0", "4, 0", "5, 1800", "9, 1800", "10, 1800", "14, 1800", "15, 1800"})
-    void directLoginFailureAppliesSingleLevelLocksToIpAndAccount(long failureCount, long lockSeconds) {
+    @CsvSource({"1, 0", "4, 0", "5, 180", "9, 180", "10, 180", "14, 180", "15, 180"})
+    void directLoginFailureLocksOnlyAccount(long failureCount, long lockSeconds) {
         String ip = "127.0.0.1";
         String account = "user@example.com";
         when(valueOperations.increment(RedisKeyUtil.rate("direct-login-ip", ip))).thenReturn(1L);
@@ -137,7 +148,6 @@ class OAuthLegacyLoginSecurityTest {
                 .thenReturn("{\"clientId\":\"client-1\"}");
         when(oauthClientMapper.selectById("client-1")).thenReturn(encryptedClient(true));
         when(valueOperations.increment(RedisKeyUtil.loginFail(account))).thenReturn(failureCount);
-        when(valueOperations.increment(RedisKeyUtil.rate("direct-login-ip-fail", ip))).thenReturn(failureCount);
 
         BusinessException exception = assertThrows(BusinessException.class,
                 () -> service.directLogin("channel", "password", account, "password", null, ip));
@@ -146,16 +156,15 @@ class OAuthLegacyLoginSecurityTest {
                 exception.getCode());
         verify(valueOperations).increment(RedisKeyUtil.loginFail(account));
         verify(valueOperations, never()).increment(RedisKeyUtil.rate("direct-login-account-fail", account));
+        verify(valueOperations, never()).increment(RedisKeyUtil.rate("direct-login-ip-fail", ip));
+        verify(valueOperations, never()).set(RedisKeyUtil.rate("direct-login-ip-lock", ip), "1", 180L, TimeUnit.SECONDS);
         verify(redisTemplate).expire(RedisKeyUtil.rate("direct-login-ip", ip), 60L, TimeUnit.SECONDS);
         if (failureCount == 1) {
-            verify(redisTemplate).expire(RedisKeyUtil.rate("direct-login-ip-fail", ip), 900L, TimeUnit.SECONDS);
             verify(redisTemplate).expire(RedisKeyUtil.loginFail(account), 900L, TimeUnit.SECONDS);
         }
         if (lockSeconds > 0) {
-            verify(valueOperations).set(RedisKeyUtil.rate("direct-login-ip-lock", ip), "1", lockSeconds, TimeUnit.SECONDS);
             verify(valueOperations).set(RedisKeyUtil.loginLock(account), "1", lockSeconds, TimeUnit.SECONDS);
             verify(redisTemplate).delete(RedisKeyUtil.loginFail(account));
-            verify(redisTemplate).delete(RedisKeyUtil.rate("direct-login-ip-fail", ip));
         } else {
             verify(valueOperations, never()).set(anyString(), anyString(), anyLong(), any(TimeUnit.class));
         }
@@ -189,13 +198,12 @@ class OAuthLegacyLoginSecurityTest {
 
         assertEquals(ResultCode.LOGIN_LOCKED.getCode(), fifth.getCode());
         verify(valueOperations, times(5)).increment(RedisKeyUtil.loginFail(account));
-        verify(valueOperations).set(RedisKeyUtil.loginLock(account), "1", 1800L, TimeUnit.SECONDS);
+        verify(valueOperations).set(RedisKeyUtil.loginLock(account), "1", 180L, TimeUnit.SECONDS);
     }
 
     @Test
     void sharedAccountLockRejectsDirectLoginBeforeReadingChannel() {
         String account = "user@example.com";
-        when(redisTemplate.hasKey(RedisKeyUtil.rate("direct-login-ip-lock", "127.0.0.1"))).thenReturn(false);
         when(redisTemplate.hasKey(RedisKeyUtil.loginLock(account))).thenReturn(true);
 
         BusinessException exception = assertThrows(BusinessException.class,
@@ -210,7 +218,7 @@ class OAuthLegacyLoginSecurityTest {
     }
 
     @Test
-    void fifthEmailCodeFailureLocksDirectLoginAccountAndIpForThirtyMinutes() {
+    void fifthEmailCodeFailureLocksOnlyDirectLoginAccountForThreeMinutes() {
         String account = "user@example.com";
         String ip = "127.0.0.1";
         when(valueOperations.increment(RedisKeyUtil.rate("direct-login-ip", ip))).thenReturn(1L);
@@ -218,32 +226,67 @@ class OAuthLegacyLoginSecurityTest {
                 .thenReturn("{\"clientId\":\"client-1\"}");
         when(oauthClientMapper.selectById("client-1")).thenReturn(encryptedClient(true));
         when(valueOperations.increment(RedisKeyUtil.loginFail(account))).thenReturn(5L);
-        when(valueOperations.increment(RedisKeyUtil.rate("direct-login-ip-fail", ip))).thenReturn(5L);
         doThrow(new BusinessException(ResultCode.CODE_ERROR)).when(emailCodeService).verifyCode(account, "wrong");
 
         BusinessException exception = assertThrows(BusinessException.class,
                 () -> service.directLogin("channel", "email", account, null, "wrong", ip));
 
         assertEquals(ResultCode.LOGIN_LOCKED.getCode(), exception.getCode());
-        verify(valueOperations).set(RedisKeyUtil.loginLock(account), "1", 1800L, TimeUnit.SECONDS);
-        verify(valueOperations).set(RedisKeyUtil.rate("direct-login-ip-lock", ip), "1", 1800L, TimeUnit.SECONDS);
+        verify(valueOperations).set(RedisKeyUtil.loginLock(account), "1", 180L, TimeUnit.SECONDS);
+        verify(valueOperations, never()).set(RedisKeyUtil.rate("direct-login-ip-lock", ip), "1", 180L, TimeUnit.SECONDS);
         verify(redisTemplate, never()).delete(RedisKeyUtil.directChannel("channel"));
     }
 
     @Test
-    void lockedIpRejectsDirectLoginWithoutExtendingLock() {
+    void failuresForFiveAccountsDoNotBlockAnotherUserOnSharedIp() {
         String ip = "127.0.0.1";
-        when(redisTemplate.hasKey(RedisKeyUtil.rate("direct-login-ip-lock", ip))).thenReturn(true);
+        Map<String, Long> counters = new HashMap<>();
+        when(valueOperations.increment(anyString())).thenAnswer(invocation ->
+                counters.merge(invocation.getArgument(0), 1L, Long::sum));
+        when(valueOperations.get(RedisKeyUtil.directChannel("channel")))
+                .thenReturn("{\"clientId\":\"client-1\"}");
+        when(oauthClientMapper.selectById("client-1")).thenReturn(encryptedClient(true));
+        // 升级前遗留的 IP 锁也不再参与登录判断。
+        lenient().when(redisTemplate.hasKey(RedisKeyUtil.rate("direct-login-ip-lock", ip))).thenReturn(true);
+
+        for (int index = 0; index < 5; index++) {
+            String account = "missing-user-" + index;
+            BusinessException exception = assertThrows(BusinessException.class,
+                    () -> service.directLogin("channel", "password", account, "wrong", null, ip));
+            assertEquals(ResultCode.USER_NOT_FOUND.getCode(), exception.getCode());
+        }
+        UserInfo user = new UserInfo();
+        user.setUid(9L);
+        user.setStatus(1);
+        when(userInfoMapper.selectOne(any())).thenReturn(user);
+
+        DirectLoginTicketVO ticket = service.directLogin("channel", "email", "normal@example.com", null, "123456", ip);
+
+        assertEquals(60L, ticket.getExpiresIn());
+        verify(redisTemplate, never()).hasKey(RedisKeyUtil.rate("direct-login-ip-lock", ip));
+        verify(valueOperations, never()).increment(RedisKeyUtil.rate("direct-login-ip-fail", ip));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"31, 0", "1, 6"})
+    void directRegistrationEnforcesIpAndEmailLimitsBeforeReadingChannel(long ipCount, long emailCount) {
+        String ip = "127.0.0.1";
+        String email = "user@example.com";
+        when(valueOperations.increment(RedisKeyUtil.rate("direct-register-ip", ip))).thenReturn(ipCount);
+        if (ipCount <= 30) {
+            when(valueOperations.increment(RedisKeyUtil.rate("direct-register-email", email))).thenReturn(emailCount);
+        }
+        RegisterRequest request = new RegisterRequest();
+        request.setEmail(email);
 
         BusinessException exception = assertThrows(BusinessException.class,
-                () -> service.directLogin("channel", "password", "user", "wrong", null, ip));
+                () -> service.directRegister("channel", request, ip));
 
         assertEquals(ResultCode.IP_RATE_LIMITED.getCode(), exception.getCode());
-        Result<Void> response = new GlobalExceptionHandler().handleBusinessException(exception);
-        assertEquals(30005, response.getCode());
-        assertEquals("登录失败次数过多，当前 IP 已临时锁定，请稍后再试", response.getMsg());
-        verify(valueOperations, never()).increment(RedisKeyUtil.rate("direct-login-ip-fail", ip));
-        verify(valueOperations, never()).set(anyString(), anyString(), anyLong(), any(TimeUnit.class));
+        verify(valueOperations, never()).get(RedisKeyUtil.directChannel("channel"));
+        if (ipCount == 1) {
+            verify(redisTemplate).expire(RedisKeyUtil.rate("direct-register-ip", ip), 600L, TimeUnit.SECONDS);
+        }
         verifyNoInteractions(userInfoMapper, emailCodeService);
     }
 

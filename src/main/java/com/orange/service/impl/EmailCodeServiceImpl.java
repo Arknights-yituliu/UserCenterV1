@@ -81,14 +81,20 @@ public class EmailCodeServiceImpl implements EmailCodeService {
      */
     @Override
     public void sendCode(String email, String usage, String ip) {
-        long ipIntervalSeconds = userAccentProperties.getCodeSendIntervalSeconds();
         long emailIntervalSeconds = userAccentProperties.getEmailSendIntervalSeconds();
         long codeTtlSeconds = userAccentProperties.getCodeTtlSeconds();
-        // 同 IP 限流：间隔内只能发送一次
+        // IP 采用分钟与小时两个窗口，兼顾共享出口用户和发送总量。
         if (!RedisRateLimiter.tryAcquire(stringRedisTemplate,
-                RedisKeyUtil.rate("send-code", ip), 1, ipIntervalSeconds)) {
+                RedisKeyUtil.rate("send-code", ip), userAccentProperties.getCodeSendIpLimit(),
+                userAccentProperties.getCodeSendIpWindowSeconds())) {
             throw new BusinessException(ResultCode.CODE_SEND_TOO_FREQUENT,
-                    "同 IP 发送过于频繁，请 " + ipIntervalSeconds + " 秒后再试");
+                    "同 IP 验证码请求过于频繁，请稍后再试");
+        }
+        if (!RedisRateLimiter.tryAcquire(stringRedisTemplate,
+                RedisKeyUtil.rate("send-code-hour", ip), userAccentProperties.getCodeSendIpHourlyLimit(),
+                userAccentProperties.getCodeSendIpHourlyWindowSeconds())) {
+            throw new BusinessException(ResultCode.CODE_SEND_TOO_FREQUENT,
+                    "同 IP 验证码请求已达到小时上限，请稍后再试");
         }
         // 注册用途前置查重：邮箱已注册则快速失败，无需等到提交注册才报错
         if (USAGE_REGISTER.equals(usage) && isEmailRegistered(email)) {
