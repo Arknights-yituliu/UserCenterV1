@@ -3,7 +3,8 @@ package com.orange.common.config;
 import org.springframework.stereotype.Component;
 
 /**
- * OAuth 旧系统直连登录、注册策略，直接在此类维护，不从外部配置绑定。
+ * OAuth 旧系统直连认证策略，直接在此类维护，不从外部配置绑定。
+ * 登录失败锁定与注册限流策略统一由 {@link UserAccentProperties} 维护。
  *
  * @author UserCenter
  */
@@ -31,36 +32,6 @@ public class OAuthDirectProperties {
     /** 提交登录 IP 限流窗口（秒）。 */
     private final long loginIpRequestWindowSeconds = 60L;
 
-    /** 同一 IP 或账号的登录失败统计窗口（秒）：15 分钟。 */
-    private final long loginFailureWindowSeconds = 900L;
-
-    /** 一级锁定的失败次数阈值。 */
-    private final long loginFirstLockThreshold = 5L;
-
-    /** 一级锁定时长（秒）。 */
-    private final long loginFirstLockSeconds = 60L;
-
-    /** 二级锁定的失败次数阈值。 */
-    private final long loginSecondLockThreshold = 10L;
-
-    /** 二级锁定时长（秒）。 */
-    private final long loginSecondLockSeconds = 300L;
-
-    /** 三级锁定的失败次数阈值。 */
-    private final long loginThirdLockThreshold = 15L;
-
-    /** 三级锁定时长（秒）。 */
-    private final long loginThirdLockSeconds = 900L;
-
-    /** 直连注册：窗口内单 IP 注册次数上限，与主站注册的计数桶独立。 */
-    private final long registerIpLimit = 10L;
-
-    /** 直连注册：窗口内同邮箱注册次数上限。 */
-    private final long registerEmailLimit = 3L;
-
-    /** 直连注册限流窗口（秒）：1 小时。 */
-    private final long registerWindowSeconds = 3600L;
-
     public long getChannelTtlSeconds() {
         return channelTtlSeconds;
     }
@@ -87,45 +58,5 @@ public class OAuthDirectProperties {
 
     public long getLoginIpRequestWindowSeconds() {
         return loginIpRequestWindowSeconds;
-    }
-
-    public long getLoginFailureWindowSeconds() {
-        return loginFailureWindowSeconds;
-    }
-
-    public long getLoginFirstLockThreshold() {
-        return loginFirstLockThreshold;
-    }
-
-    public long getLoginFirstLockSeconds() {
-        return loginFirstLockSeconds;
-    }
-
-    public long getLoginSecondLockThreshold() {
-        return loginSecondLockThreshold;
-    }
-
-    public long getLoginSecondLockSeconds() {
-        return loginSecondLockSeconds;
-    }
-
-    public long getLoginThirdLockThreshold() {
-        return loginThirdLockThreshold;
-    }
-
-    public long getLoginThirdLockSeconds() {
-        return loginThirdLockSeconds;
-    }
-
-    public long getRegisterIpLimit() {
-        return registerIpLimit;
-    }
-
-    public long getRegisterEmailLimit() {
-        return registerEmailLimit;
-    }
-
-    public long getRegisterWindowSeconds() {
-        return registerWindowSeconds;
     }
 }

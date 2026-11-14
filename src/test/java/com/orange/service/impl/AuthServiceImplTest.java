@@ -5,9 +5,12 @@ import com.orange.common.config.OAuthDirectProperties;
 import com.orange.common.config.UserAccentProperties;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
+import com.orange.common.exception.GlobalExceptionHandler;
+import com.orange.common.util.Result;
 import com.orange.common.util.RedisKeyUtil;
 import com.orange.entity.dto.auth.LoginRequest;
 import com.orange.entity.dto.auth.RegisterRequest;
+import com.orange.entity.po.UserInfo;
 import com.orange.mapper.LoginLogMapper;
 import com.orange.mapper.OAuthClientMapper;
 import com.orange.mapper.UserInfoMapper;
@@ -29,9 +32,12 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -101,7 +107,7 @@ class AuthServiceImplTest {
     }
 
     @Test
-    void fifthLoginFailureLocksAccountForFiveMinutes() {
+    void fifthLoginFailureLocksAccountForThirtyMinutes() {
         when(valueOperations.increment(RedisKeyUtil.rate("login-ip", IP))).thenReturn(2L);
         when(valueOperations.increment(RedisKeyUtil.loginFail(ACCOUNT))).thenReturn(5L);
 
@@ -109,13 +115,66 @@ class AuthServiceImplTest {
                 () -> service.login(passwordRequest(), IP, "test", "client-1"));
 
         assertEquals(ResultCode.LOGIN_LOCKED.getCode(), exception.getCode());
-        verify(valueOperations).set(RedisKeyUtil.loginLock(ACCOUNT), "1", 300L, TimeUnit.SECONDS);
+        verify(valueOperations).set(RedisKeyUtil.loginLock(ACCOUNT), "1", 1800L, TimeUnit.SECONDS);
         verify(redisTemplate).delete(RedisKeyUtil.loginFail(ACCOUNT));
     }
 
     @Test
-    void eleventhRegistrationAttemptFromIpIsRejected() {
-        when(valueOperations.increment(RedisKeyUtil.rate("register-ip", IP))).thenReturn(11L);
+    void fifthEmailCodeFailureUsesTheSameThirtyMinuteAccountLock() {
+        when(valueOperations.increment(RedisKeyUtil.rate("login-ip", IP))).thenReturn(1L);
+        when(valueOperations.increment(RedisKeyUtil.loginFail(ACCOUNT))).thenReturn(5L);
+        doThrow(new BusinessException(ResultCode.CODE_ERROR)).when(emailCodeService).verifyCode(ACCOUNT, "wrong");
+        LoginRequest request = new LoginRequest();
+        request.setAccountType("email");
+        request.setEmail(ACCOUNT);
+        request.setVerificationCode("wrong");
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.login(request, IP, "test", "client-1"));
+
+        assertEquals(ResultCode.LOGIN_LOCKED.getCode(), exception.getCode());
+        verify(valueOperations).set(RedisKeyUtil.loginLock(ACCOUNT), "1", 1800L, TimeUnit.SECONDS);
+        verifyNoInteractions(userInfoMapper);
+    }
+
+    @Test
+    void lockedAccountIsRejectedWithoutCheckingCredentialsOrExtendingLock() {
+        when(redisTemplate.hasKey(RedisKeyUtil.loginLock(ACCOUNT))).thenReturn(true);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.login(passwordRequest(), IP, "test", "client-1"));
+
+        assertEquals(ResultCode.LOGIN_LOCKED.getCode(), exception.getCode());
+        Result<Void> response = new GlobalExceptionHandler().handleBusinessException(exception);
+        assertEquals(30004, response.getCode());
+        assertEquals("登录失败次数过多，账号已临时锁定", response.getMsg());
+        verifyNoInteractions(userInfoMapper, emailCodeService);
+        verify(valueOperations, never()).increment(RedisKeyUtil.loginFail(ACCOUNT));
+        verify(valueOperations, never()).set(RedisKeyUtil.loginLock(ACCOUNT), "1", 1800L, TimeUnit.SECONDS);
+    }
+
+    @Test
+    void successfulEmailCodeLoginClearsSharedAccountFailures() {
+        when(redisTemplate.opsForSet()).thenReturn(setOperations);
+        UserInfo user = new UserInfo();
+        user.setUid(9L);
+        user.setStatus(1);
+        when(userInfoMapper.selectOne(any())).thenReturn(user);
+        LoginRequest request = new LoginRequest();
+        request.setAccountType("email");
+        request.setEmail(ACCOUNT);
+        request.setVerificationCode("123456");
+
+        service.login(request, IP, "test", "client-1");
+
+        verify(redisTemplate).delete(RedisKeyUtil.loginFail(ACCOUNT));
+        verify(redisTemplate).delete(RedisKeyUtil.loginLock(ACCOUNT));
+        verify(valueOperations, never()).increment(RedisKeyUtil.loginFail(ACCOUNT));
+    }
+
+    @Test
+    void sixteenthRegistrationAttemptFromIpIsRejected() {
+        when(valueOperations.increment(RedisKeyUtil.rate("register-ip", IP))).thenReturn(16L);
         RegisterRequest request = new RegisterRequest();
         request.setEmail(ACCOUNT);
 
@@ -127,9 +186,9 @@ class AuthServiceImplTest {
     }
 
     @Test
-    void fourthRegistrationAttemptForEmailIsRejectedWithinHourlyWindow() {
+    void sixthRegistrationAttemptForEmailIsRejectedWithinHourlyWindow() {
         when(valueOperations.increment(RedisKeyUtil.rate("register-ip", IP))).thenReturn(1L);
-        when(valueOperations.increment(RedisKeyUtil.rate("register-email", ACCOUNT))).thenReturn(4L);
+        when(valueOperations.increment(RedisKeyUtil.rate("register-email", ACCOUNT))).thenReturn(6L);
         RegisterRequest request = new RegisterRequest();
         request.setEmail(ACCOUNT);
 

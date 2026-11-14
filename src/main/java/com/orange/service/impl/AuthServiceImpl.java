@@ -93,7 +93,7 @@ public class AuthServiceImpl implements AuthService {
      * @param objectMapper        JSON 序列化器
      * @param validator           Bean Validation 校验器（直连注册散参手动校验）
      * @param userAccentProperties 用户认证与验证码策略
-     * @param oauthDirectProperties 直连登录与注册策略
+     * @param oauthDirectProperties 直连认证策略
      */
     public AuthServiceImpl(UserInfoMapper userMapper, LoginLogMapper loginLogMapper, OAuthClientMapper oauthClientMapper,
                            EmailCodeService emailCodeService, RevokeService revokeService,
@@ -130,9 +130,7 @@ public class AuthServiceImpl implements AuthService {
     @Transactional(rollbackFor = Exception.class)
     public LoginVO register(RegisterRequest request, String ip, String clientId) {
         // 先按来源 IP 和邮箱限流，防止无凭证批量探测邮箱/用户名占用
-        enforceRegisterRateLimit("register", ip, request.getEmail(),
-                userAccentProperties.getRegisterIpLimit(), userAccentProperties.getRegisterEmailLimit(),
-                userAccentProperties.getRegisterWindowSeconds());
+        enforceRegisterRateLimit("register", ip, request.getEmail());
         // 校验 + 创建用户（含邮箱验证码校验、唯一性校验、密码加密）
         UserInfo user = createRegisteredUser(request, ip);
         return buildLoginVO(user, createSession(user.getUid(), clientId));
@@ -207,10 +205,10 @@ public class AuthServiceImpl implements AuthService {
             // 账号优先取用户名（兼容旧系统迁移用户），未传时回退邮箱（历史前端只传 email）
             String userName = request.getUserName();
             String account = (userName != null && !userName.isBlank()) ? userName : request.getEmail();
-            user = passwordLogin(account, request.getPassword());
+            user = authenticateLogin(TYPE_PASSWORD, account, request.getPassword(), null);
             loginType = TYPE_PASSWORD;
         } else if (TYPE_EMAIL_CODE.equals(request.getAccountType())) {
-            user = emailCodeLogin(request.getEmail(), request.getVerificationCode());
+            user = authenticateLogin(TYPE_EMAIL_CODE, request.getEmail(), null, request.getVerificationCode());
             loginType = TYPE_EMAIL_CODE;
         } else {
             throw new BusinessException(ResultCode.PARAM_ERROR, "不支持的登录方式");
@@ -416,19 +414,14 @@ public class AuthServiceImpl implements AuthService {
         String clientId = readDirectChannel(channel);
         OAuthClient client = requireEnabledOAuthClient(clientId);
         requireDirectAuthEnabled(client);
-        // 3. 按登录方式校验凭证（密码/邮箱验证码，复用主登录逻辑：含失败锁定与失败计数）
+        // 3. 复用主站的凭证校验与账号失败锁定，直连仅额外记录 IP 失败次数。
         try {
-            if (TYPE_PASSWORD.equals(type)) {
-                user = passwordLogin(account, password);
-            } else {
-                user = emailCodeLogin(account, code);
-            }
+            user = authenticateLogin(type, account, password, code);
             checkUserStatus(user);
         } catch (BusinessException e) {
-            recordDirectLoginFailure(sourceIp, normalizedAccount);
+            recordDirectLoginIpFailure(sourceIp);
             throw e;
         }
-        clearDirectLoginAccountFailure(normalizedAccount);
         // 4. 消费发起会话（一次性，防止重复使用）
         stringRedisTemplate.delete(RedisKeyUtil.directChannel(channel));
         // 5. 签发一次性登录票据（绑定 clientId + uid，短时有效）
@@ -449,9 +442,7 @@ public class AuthServiceImpl implements AuthService {
     @Transactional(rollbackFor = Exception.class)
     public DirectLoginTicketVO directRegister(String channel, RegisterRequest request, String ip) {
         // 1. 先按来源 IP 和邮箱限流，验证码发送频控由 EmailCodeService 统一执行。
-        enforceRegisterRateLimit("direct-register", ip, request.getEmail(),
-                oauthDirectProperties.getRegisterIpLimit(), oauthDirectProperties.getRegisterEmailLimit(),
-                oauthDirectProperties.getRegisterWindowSeconds());
+        enforceRegisterRateLimit("direct-register", ip, request.getEmail());
         // 2. 校验发起会话凭证有效，并重新检查客户端状态和直连权限。
         String clientId = readDirectChannel(channel);
         OAuthClient client = requireEnabledOAuthClient(clientId);
@@ -516,46 +507,21 @@ public class AuthServiceImpl implements AuthService {
 
     private void enforceDirectLoginRateLimit(String sourceIp, String account) {
         String ip = normalizeRateTarget(sourceIp);
-        if (Boolean.TRUE.equals(stringRedisTemplate.hasKey(RedisKeyUtil.rate("direct-login-ip-lock", ip)))
-                || !RedisRateLimiter.tryAcquire(stringRedisTemplate, RedisKeyUtil.rate("direct-login-ip", ip),
+        if (Boolean.TRUE.equals(stringRedisTemplate.hasKey(RedisKeyUtil.rate("direct-login-ip-lock", ip)))) {
+            throw new BusinessException(ResultCode.IP_RATE_LIMITED,
+                    "登录失败次数过多，当前 IP 已临时锁定，请稍后再试");
+        }
+        if (!RedisRateLimiter.tryAcquire(stringRedisTemplate, RedisKeyUtil.rate("direct-login-ip", ip),
                 oauthDirectProperties.getLoginIpRequestLimit(), oauthDirectProperties.getLoginIpRequestWindowSeconds())) {
             throw new BusinessException(ResultCode.IP_RATE_LIMITED);
         }
-        if (!account.isEmpty() && Boolean.TRUE.equals(stringRedisTemplate.hasKey(
-                RedisKeyUtil.rate("direct-login-account-lock", account)))) {
-            throw new BusinessException(ResultCode.LOGIN_LOCKED);
-        }
+        checkLoginLock(account);
     }
 
-    private void recordDirectLoginFailure(String sourceIp, String account) {
-        applyProgressiveDirectLoginLock("direct-login-ip-fail", "direct-login-ip-lock",
-                normalizeRateTarget(sourceIp));
-        if (!account.isEmpty()) {
-            applyProgressiveDirectLoginLock("direct-login-account-fail", "direct-login-account-lock", account);
-        }
-    }
-
-    private void applyProgressiveDirectLoginLock(String failureBiz, String lockBiz, String target) {
-        String failureKey = RedisKeyUtil.rate(failureBiz, target);
-        Long count = stringRedisTemplate.opsForValue().increment(failureKey);
-        if (count != null && count == 1L) {
-            stringRedisTemplate.expire(failureKey, oauthDirectProperties.getLoginFailureWindowSeconds(), TimeUnit.SECONDS);
-        }
-        long lockSeconds = count == null ? 0
-                : count >= oauthDirectProperties.getLoginThirdLockThreshold() ? oauthDirectProperties.getLoginThirdLockSeconds()
-                : count >= oauthDirectProperties.getLoginSecondLockThreshold() ? oauthDirectProperties.getLoginSecondLockSeconds()
-                : count >= oauthDirectProperties.getLoginFirstLockThreshold() ? oauthDirectProperties.getLoginFirstLockSeconds() : 0;
-        if (lockSeconds > 0) {
-            stringRedisTemplate.opsForValue().set(RedisKeyUtil.rate(lockBiz, target), "1", lockSeconds,
-                    TimeUnit.SECONDS);
-        }
-    }
-
-    private void clearDirectLoginAccountFailure(String account) {
-        if (!account.isEmpty()) {
-            stringRedisTemplate.delete(RedisKeyUtil.rate("direct-login-account-fail", account));
-            stringRedisTemplate.delete(RedisKeyUtil.rate("direct-login-account-lock", account));
-        }
+    private void recordDirectLoginIpFailure(String sourceIp) {
+        String ip = normalizeRateTarget(sourceIp);
+        applyLoginFailureLock(RedisKeyUtil.rate("direct-login-ip-fail", ip),
+                RedisKeyUtil.rate("direct-login-ip-lock", ip));
     }
 
     /**
@@ -584,25 +550,23 @@ public class AuthServiceImpl implements AuthService {
      * 注册限流：按来源 IP 与邮箱双维度计数，主站注册与旧系统直连注册共用
      *
      * <p>计数桶按 biz 前缀隔离（register-* 与 direct-register-* 互不影响），
-     * 阈值与窗口由各自调用方传入。</p>
+     * 阈值与窗口统一读取 {@link UserAccentProperties} 中的注册限流配置。</p>
      *
      * @param biz           计数桶业务前缀
      * @param sourceIp      来源 IP
      * @param email         注册邮箱（为空则跳过邮箱维度计数）
-     * @param ipLimit       窗口内同 IP 最大注册尝试次数
-     * @param emailLimit    窗口内同邮箱最大注册尝试次数
-     * @param windowSeconds 计数窗口（秒）
      */
-    private void enforceRegisterRateLimit(String biz, String sourceIp, String email,
-                                          long ipLimit, long emailLimit, long windowSeconds) {
+    private void enforceRegisterRateLimit(String biz, String sourceIp, String email) {
+        long windowSeconds = userAccentProperties.getRegisterWindowSeconds();
         String ip = normalizeRateTarget(sourceIp);
         if (!RedisRateLimiter.tryAcquire(stringRedisTemplate, RedisKeyUtil.rate(biz + "-ip", ip),
-                ipLimit, windowSeconds)) {
+                userAccentProperties.getRegisterIpLimit(), windowSeconds)) {
             throw new BusinessException(ResultCode.IP_RATE_LIMITED);
         }
         String normalizedEmail = normalizeRateTarget(email);
         if (!normalizedEmail.isEmpty() && !RedisRateLimiter.tryAcquire(stringRedisTemplate,
-                RedisKeyUtil.rate(biz + "-email", normalizedEmail), emailLimit, windowSeconds)) {
+                RedisKeyUtil.rate(biz + "-email", normalizedEmail),
+                userAccentProperties.getRegisterEmailLimit(), windowSeconds)) {
             throw new BusinessException(ResultCode.IP_RATE_LIMITED);
         }
     }
@@ -752,7 +716,32 @@ public class AuthServiceImpl implements AuthService {
     }
 
     /**
-     * 密码登录：校验登录锁定、BCrypt 密码、失败计数
+     * 主站与直连登录共用账号失败计数与一级锁定，密码和邮箱验证码均受约束。
+     */
+    private UserInfo authenticateLogin(String type, String account, String password, String code) {
+        String normalizedAccount = normalizeRateTarget(account);
+        checkLoginLock(normalizedAccount);
+        UserInfo user;
+        try {
+            user = TYPE_PASSWORD.equals(type) ? passwordLogin(account, password) : emailCodeLogin(account, code);
+        } catch (BusinessException e) {
+            if (e.getCode() != ResultCode.PARAM_ERROR.getCode()) {
+                recordLoginFail(normalizedAccount);
+            }
+            throw e;
+        }
+        clearLoginFail(normalizedAccount);
+        return user;
+    }
+
+    private void checkLoginLock(String account) {
+        if (!account.isEmpty() && Boolean.TRUE.equals(stringRedisTemplate.hasKey(RedisKeyUtil.loginLock(account)))) {
+            throw new BusinessException(ResultCode.LOGIN_LOCKED);
+        }
+    }
+
+    /**
+     * 密码登录：匹配账号并校验 BCrypt 密码
      *
      * @param account  登录账号（邮箱或用户名）
      * @param password 明文密码
@@ -766,21 +755,12 @@ public class AuthServiceImpl implements AuthService {
         UserInfo user = userMapper.selectOne(Wrappers.<UserInfo>lambdaQuery()
                 .and(w -> w.eq(UserInfo::getEmail, account).or().eq(UserInfo::getUserName, account)));
         if (user == null) {
-            // 用户不存在也累计失败次数，防止撞库探测
-            recordLoginFail(account);
             throw new BusinessException(ResultCode.USER_NOT_FOUND);
         }
 
-        // 登录锁定校验
-        if (Boolean.TRUE.equals(stringRedisTemplate.hasKey(RedisKeyUtil.loginLock(account)))) {
-            throw new BusinessException(ResultCode.LOGIN_LOCKED);
-        }
-
         if (!passwordEncoder.matches(password, user.getPassword())) {
-            recordLoginFail(account);
             throw new BusinessException(ResultCode.PASSWORD_ERROR);
         }
-        clearLoginFail(account);
         return user;
     }
 
@@ -825,34 +805,40 @@ public class AuthServiceImpl implements AuthService {
     /**
      * 记录一次登录失败并累计，达到阈值后锁定账号
      *
-     * <p>计数窗口与锁定时长由 {@link UserAccentProperties} 管理，
-     * 两者独立：缩短锁定时间不会放大慢速爆破的尝试速率。</p>
+     * <p>主站与直连登录共用账号计数；计数窗口、阈值与锁定时长由
+     * {@link UserAccentProperties} 统一管理。</p>
      *
      * @param account 登录账号（用户名或邮箱）
      */
     private void recordLoginFail(String account) {
-        String failKey = RedisKeyUtil.loginFail(account);
+        if (applyLoginFailureLock(RedisKeyUtil.loginFail(account), RedisKeyUtil.loginLock(account))) {
+            throw new BusinessException(ResultCode.LOGIN_LOCKED);
+        }
+    }
+
+    /** 账号与直连 IP 共用一级锁定：窗口内失败 5 次锁定 30 分钟，锁定后清空失败计数。 */
+    private boolean applyLoginFailureLock(String failKey, String lockKey) {
         Long count = stringRedisTemplate.opsForValue().increment(failKey);
         if (count != null && count == 1L) {
             stringRedisTemplate.expire(failKey, userAccentProperties.getLoginFailWindowSeconds(), TimeUnit.SECONDS);
         }
         if (count != null && count >= userAccentProperties.getLoginFailLimit()) {
-            // 达到阈值：锁定账号（锁定时长短于计数窗口，降低定向锁号的影响面）
             stringRedisTemplate.opsForValue().set(
-                    RedisKeyUtil.loginLock(account), "1", userAccentProperties.getLoginLockSeconds(), TimeUnit.SECONDS);
+                    lockKey, "1", userAccentProperties.getLoginLockSeconds(), TimeUnit.SECONDS);
             stringRedisTemplate.delete(failKey);
-            throw new BusinessException(ResultCode.LOGIN_LOCKED);
+            return true;
         }
+        return false;
     }
 
     /**
      * 登录成功后清除失败计数与锁定标记
      *
-     * @param email 登录账号（邮箱）
+     * @param account 登录账号（用户名或邮箱）
      */
-    private void clearLoginFail(String email) {
-        stringRedisTemplate.delete(RedisKeyUtil.loginFail(email));
-        stringRedisTemplate.delete(RedisKeyUtil.loginLock(email));
+    private void clearLoginFail(String account) {
+        stringRedisTemplate.delete(RedisKeyUtil.loginFail(account));
+        stringRedisTemplate.delete(RedisKeyUtil.loginLock(account));
     }
 
     /**
