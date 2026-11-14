@@ -26,7 +26,8 @@ CREATE TABLE `user_info` (
     `last_login_time` DATETIME     DEFAULT NULL COMMENT '最后登录时间',
     PRIMARY KEY (`uid`),
     UNIQUE KEY `uk_email` (`email`),
-    UNIQUE KEY `uk_user_name` (`user_name`)
+    UNIQUE KEY `uk_user_name` (`user_name`),
+    KEY `idx_user_register_time_uid` (`register_time`, `uid`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '全局用户主表';
 
@@ -262,3 +263,23 @@ CREATE TABLE `oauth_custom_token` (
     KEY `idx_oauth_custom_token_uid` (`uid`, `create_time`) COMMENT '按用户查询其签发的自定义令牌并按签发时间倒序'
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '用户自定义有效期的access_token签发记录';
+
+-- -------------------------------------------------------------
+-- 13. 用户昵称审核台账（每个 UID 仅保留首次审核结果）
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `user_nickname_audit`;
+CREATE TABLE `user_nickname_audit` (
+    `uid`               BIGINT       NOT NULL COMMENT '用户 UID，唯一主键，重复不插入或更新',
+    `nickname`          VARCHAR(64)  DEFAULT NULL COMMENT '本次送审的昵称快照',
+    `register_time`     DATETIME     NOT NULL COMMENT '用户注册时间快照',
+    `audit_result`      VARCHAR(16)  NOT NULL COMMENT 'PASS/REVIEW/BLOCK/ERROR，所有结论均保存',
+    `label`             VARCHAR(128) DEFAULT NULL COMMENT '腾讯云命中的内容分类',
+    `job_id`            VARCHAR(128) DEFAULT NULL COMMENT '腾讯云审核任务 ID',
+    `request_id`        VARCHAR(128) DEFAULT NULL COMMENT '腾讯云请求 ID',
+    `error_code`        INT          DEFAULT NULL COMMENT '审核失败时的业务错误码',
+    `error_message`     VARCHAR(512) DEFAULT NULL COMMENT '审核失败摘要，不记录密钥或 SDK 原始响应',
+    `audit_time`        DATETIME(3)  NOT NULL COMMENT '本次审核时间（北京时间）',
+    PRIMARY KEY (`uid`),
+    KEY `idx_nickname_audit_register_result` (`register_time`, `audit_result`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '用户昵称审核台账，每个用户只保存首次结果';

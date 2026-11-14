@@ -14,6 +14,7 @@
  *   <li>{@link com.orange.service.scheduler.AkSkinStatisticsScheduler} 皮肤持有统计，每小时 10 分</li>
  *   <li>{@link com.orange.service.scheduler.EfPoolRecordTaskScheduler} 寻访导入任务，每秒 / token 覆盖，每分钟</li>
  *   <li>{@link com.orange.service.scheduler.OAuthClientOriginCacheScheduler} Origin 缓存对账，默认 60 秒</li>
+ *   <li>{@link com.orange.service.scheduler.NicknameAuditScheduler} 昵称历史回溯审核，每 5 分钟</li>
  * </ul>
  *
  * @author UserCenter

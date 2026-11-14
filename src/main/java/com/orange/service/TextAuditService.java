@@ -3,7 +3,7 @@ package com.orange.service;
 import com.orange.entity.dto.audit.TextAuditResult;
 
 /**
- * 文本内容同步审核服务，目前仅提供能力，不接入注册、资料修改或 Controller。
+ * 文本内容同步审核服务，供昵称历史审核任务等调用，不接入注册、资料修改或 Controller。
  * 不执行自动替换、打码或用户数据写入。
  */
 public interface TextAuditService {
