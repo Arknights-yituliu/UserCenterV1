@@ -42,6 +42,22 @@ tencent:
     template-id: 53553
     register-template-id: 57132
     login-template-id: 57133
+  # 数据万象文本同步审核：填好存储桶和审核策略后再启用
+  ci:
+    enabled: false
+    # 必须与绑定数据万象的存储桶地域一致
+    region: ap-guangzhou
+    # 完整存储桶名称，包含 APPID 后缀，例如 audit-1250000000
+    bucket: ""
+    # 审核策略 ID；留空时使用云端默认策略
+    biz-type: ""
+    # 以下超时单位均为毫秒
+    connection-timeout-ms: 3000
+    socket-timeout-ms: 5000
+    request-timeout-ms: 8000
+    # 不配置独立密钥时，复用上面的 tencent.secretId / tencent.secretKey
+    # secret-id: ${CI_SECRET_ID}
+    # secret-key: ${CI_SECRET_KEY}
 
 # OAuth2 通知与页面地址；令牌等有效期在 OAuthProperties 中维护
 oauth:
