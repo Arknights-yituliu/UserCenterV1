@@ -42,4 +42,27 @@ class UserContextScopeTest {
         assertDoesNotThrow(() -> UserContext.requireScope(OAuthScope.CONFIG_WRITE));
         assertDoesNotThrow(() -> UserContext.requireScope(OAuthScope.GAMA_DATA_WRITE));
     }
+
+    @Test
+    void requireScopeAllowsChildScopeWhenParentGranted() {
+        // 上级范围 gama-data.read 覆盖两个游戏的读取范围
+        UserContext.setScope("gama-data.read");
+
+        assertDoesNotThrow(() -> UserContext.requireScope(OAuthScope.AK_DATA_READ));
+        assertDoesNotThrow(() -> UserContext.requireScope(OAuthScope.EF_DATA_READ));
+        // 读权限不隐含写权限
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> UserContext.requireScope(OAuthScope.AK_DATA_WRITE));
+        assertEquals(80008, exception.getCode());
+    }
+
+    @Test
+    void requireScopeRejectsOtherGameAndParentWhenChildGranted() {
+        // 只持有明日方舟范围时，不能访问终末地，也不能反向获得上级范围
+        UserContext.setScope("ak-data.read");
+
+        assertDoesNotThrow(() -> UserContext.requireScope(OAuthScope.AK_DATA_READ));
+        assertThrows(BusinessException.class, () -> UserContext.requireScope(OAuthScope.EF_DATA_READ));
+        assertThrows(BusinessException.class, () -> UserContext.requireScope(OAuthScope.GAMA_DATA_READ));
+    }
 }

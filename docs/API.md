@@ -159,27 +159,27 @@
 
 | API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
 |---|---|---|---|---|
-| `/oauth2/ak-accounts` | GET | 是 | OAuth access_token + `gama-data.read` scope | 查询当前 OAuth 用户可用的数据来源列表（森空岛账号 + 手动上传，含来源标识）。 |
-| `/oauth2/ak-accounts/operators` | GET | 是 | OAuth access_token + `gama-data.read` scope | 全量读取干员数据：`akUid` 必填，`source` 可选（`manual` / `skland`），不传时按 `akUid` 是否等于当前令牌用户 UID 自动识别手动条目。响应仅允许私人缓存且每次回源校验。 |
-| `/oauth2/ak-accounts/operators/save` | POST | 是 | OAuth access_token + `gama-data.write` scope | 批量保存角色信息、干员数据与物品存量，目标账号取自请求体 playerInfo.akUid。 |
-| `/oauth2/ak-accounts/manual-operators/save` | POST | 是 | OAuth access_token + `gama-data.write` scope | 保存当前令牌用户本人的手动修改版干员数据，有则比较更新，无则新增。 |
+| `/oauth2/ak-accounts` | GET | 是 | OAuth access_token + `ak-data.read` scope | 查询当前 OAuth 用户可用的数据来源列表（森空岛账号 + 手动上传，含来源标识）。 |
+| `/oauth2/ak-accounts/operators` | GET | 是 | OAuth access_token + `ak-data.read` scope | 全量读取干员数据：`akUid` 必填，`source` 可选（`manual` / `skland`），不传时按 `akUid` 是否等于当前令牌用户 UID 自动识别手动条目。响应仅允许私人缓存且每次回源校验。 |
+| `/oauth2/ak-accounts/operators/save` | POST | 是 | OAuth access_token + `ak-data.write` scope | 批量保存角色信息、干员数据与物品存量，目标账号取自请求体 playerInfo.akUid。 |
+| `/oauth2/ak-accounts/manual-operators/save` | POST | 是 | OAuth access_token + `ak-data.write` scope | 保存当前令牌用户本人的手动修改版干员数据，有则比较更新，无则新增。 |
 
 ### 终末地玩家数据（`/oauth2/ef-accounts/**`）
 
 | API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
 |---|---|---|---|---|
-| `/oauth2/ef-accounts` | GET | 是 | OAuth access_token + `gama-data.read` scope | 查询当前令牌用户已绑定的终末地角色列表（不含玩家数据正文），按最近导入时间倒序。 |
-| `/oauth2/ef-accounts/player-data` | GET | 是 | OAuth access_token + `gama-data.read` scope | 读取指定角色的玩家数据：`roleId` 必填、`serverId` 可选，须已绑定到令牌用户；响应 Cache-Control 为 private, no-cache。 |
-| `/oauth2/ef-accounts/player-data/save` | POST | 是 | OAuth access_token + `gama-data.write` scope | 保存终末地玩家数据：整份 JSON 文本直接落库，已有则覆盖，首次上传同时建立角色绑定。 |
+| `/oauth2/ef-accounts` | GET | 是 | OAuth access_token + `ef-data.read` scope | 查询当前令牌用户已绑定的终末地角色列表（不含玩家数据正文），按最近导入时间倒序。 |
+| `/oauth2/ef-accounts/player-data` | GET | 是 | OAuth access_token + `ef-data.read` scope | 读取指定角色的玩家数据：`roleId` 必填、`serverId` 可选，须已绑定到令牌用户；响应 Cache-Control 为 private, no-cache。 |
+| `/oauth2/ef-accounts/player-data/save` | POST | 是 | OAuth access_token + `ef-data.write` scope | 保存终末地玩家数据：整份 JSON 文本直接落库，已有则覆盖，首次上传同时建立角色绑定。 |
 
 ### 终末地寻访记录（`/oauth2/ef-pool-records/**`）
 
 | API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
 |---|---|---|---|---|
-| `/oauth2/ef-pool-records/create-task` | POST | 是 | OAuth access_token + `gama-data.write` scope | 创建寻访记录导入任务，任务归属取令牌用户 uid，返回 taskId 供轮询。 |
-| `/oauth2/ef-pool-records/check-task` | GET | 是 | OAuth access_token + `gama-data.read` scope | 查询任务状态，仅任务创建者可见，完成时返回 uid / roleId / nickName。 |
-| `/oauth2/ef-pool-records/accounts` | GET | 是 | OAuth access_token + `gama-data.read` scope | 查询当前令牌用户导入过寻访记录的终末地账户列表，按导入时间倒序。 |
-| `/oauth2/ef-pool-records/record` | GET | 是 | OAuth access_token + `gama-data.read` scope | 按 `roleId` 读取干员与武器寻访记录，须已绑定当前令牌用户；响应 Cache-Control 为 private, no-cache。 |
+| `/oauth2/ef-pool-records/create-task` | POST | 是 | OAuth access_token + `ef-data.write` scope | 创建寻访记录导入任务，任务归属取令牌用户 uid，返回 taskId 供轮询。 |
+| `/oauth2/ef-pool-records/check-task` | GET | 是 | OAuth access_token + `ef-data.read` scope | 查询任务状态，仅任务创建者可见，完成时返回 uid / roleId / nickName。 |
+| `/oauth2/ef-pool-records/accounts` | GET | 是 | OAuth access_token + `ef-data.read` scope | 查询当前令牌用户导入过寻访记录的终末地账户列表，按导入时间倒序。 |
+| `/oauth2/ef-pool-records/record` | GET | 是 | OAuth access_token + `ef-data.read` scope | 按 `roleId` 读取干员与武器寻访记录，须已绑定当前令牌用户；响应 Cache-Control 为 private, no-cache。 |
 
 ### 自定义令牌（仅限已开通直连认证的客户端）
 

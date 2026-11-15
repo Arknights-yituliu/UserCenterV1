@@ -136,10 +136,16 @@ Authorization: Bearer <UC_SESSION_TOKEN>
 | `user.profile` | 预留给个人资料读写能力 |
 | `config.read` | 读取当前客户端名下的用户配置与配置配额 |
 | `config.write` | 创建、修改或删除当前客户端名下的用户配置 |
-| `gama-data.read` | 读取用户游戏数据 |
-| `gama-data.write` | 写入用户游戏数据 |
+| `gama-data.read` | 读取用户游戏数据；作为上级范围覆盖全部游戏的读取能力 |
+| `gama-data.write` | 写入用户游戏数据；作为上级范围覆盖全部游戏的写入能力 |
+| `ak-data.read` | 读取用户明日方舟账号、干员、仓库与抽卡数据（上级：`gama-data.read`） |
+| `ak-data.write` | 保存或删除用户明日方舟账号、干员与仓库数据（上级：`gama-data.write`） |
+| `ef-data.read` | 读取用户终末地角色、玩家数据与寻访记录（上级：`gama-data.read`） |
+| `ef-data.write` | 保存用户终末地角色与玩家数据、创建寻访记录导入任务（上级：`gama-data.write`） |
 
 客户端登记的 scopes 是其可申请范围上限；授权请求未携带 `scope` 时，服务端会签发该客户端登记的全部范围。
+
+**范围的上下级关系**：`ak-data.read` / `ef-data.read` 的上级是 `gama-data.read`，写范围同理以 `gama-data.write` 为上级。持有上级范围即视为持有其全部子范围，因此只登记 `gama-data.read` 的存量客户端仍可访问全部游戏接口；反之，只登记 `ak-data.read` 的令牌不能访问终末地接口，读取范围也不会给出写入能力（`UserContext.requireScope` 按 `OAuthScope.covers` 判定）。
 
 #### 4.2.1 元范围 `all`（仅限管理员手工授予）
 

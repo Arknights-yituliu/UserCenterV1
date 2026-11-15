@@ -23,8 +23,9 @@ import java.util.List;
  * OAuth 授权访问的终末地寻访记录接口
  *
  * <p>流程与用户侧一致：创建导入任务（归属取 access_token 中的 uid）→ 轮询任务状态 →
- * 从「导入过的账户」列表中选择角色读取寻访记录。查询类接口需要 {@code gama-data.read}，
- * 创建任务会写入数据，需要 {@code gama-data.write}。任务归属与角色绑定校验均按令牌用户完成，
+ * 从「导入过的账户」列表中选择角色读取寻访记录。查询类接口需要 {@code ef-data.read}，
+ * 创建任务会写入数据，需要 {@code ef-data.write}；上级范围 {@code gama-data.read} /
+ * {@code gama-data.write} 同样放行。任务归属与角色绑定校验均按令牌用户完成，
  * 请求参数不能指定或覆盖用户身份。</p>
  *
  * @author UserCenter
@@ -57,7 +58,7 @@ public class OAuthEfPoolRecordController {
     @Operation(summary = "创建寻访记录导入任务（OAuth）")
     @PostMapping("/create-task")
     public Result<String> createTask(@RequestParam String hgToken) {
-        UserContext.requireScope(OAuthScope.GAMA_DATA_WRITE);
+        UserContext.requireScope(OAuthScope.EF_DATA_WRITE);
         return Result.success(poolRecordTaskService.createTask(hgToken, UserContext.requireUid()));
     }
 
@@ -70,7 +71,7 @@ public class OAuthEfPoolRecordController {
     @Operation(summary = "查询寻访记录任务状态（OAuth）")
     @GetMapping("/check-task")
     public Result<EfPoolRecordIdentityVO> checkTask(@RequestParam String taskId) {
-        UserContext.requireScope(OAuthScope.GAMA_DATA_READ);
+        UserContext.requireScope(OAuthScope.EF_DATA_READ);
         return Result.success(poolRecordTaskService.checkTask(taskId, UserContext.requireUid()));
     }
 
@@ -82,7 +83,7 @@ public class OAuthEfPoolRecordController {
     @Operation(summary = "查询导入过的终末地账户（OAuth）")
     @GetMapping("/accounts")
     public Result<List<EfPoolRecordAccountVO>> listAccounts() {
-        UserContext.requireScope(OAuthScope.GAMA_DATA_READ);
+        UserContext.requireScope(OAuthScope.EF_DATA_READ);
         return Result.success(poolRecordTaskService.listImportedAccounts(UserContext.requireUid()));
     }
 
@@ -95,7 +96,7 @@ public class OAuthEfPoolRecordController {
     @Operation(summary = "按角色读取寻访记录（OAuth）")
     @GetMapping("/record")
     public ResponseEntity<Result<EfPoolRecordVO>> getPoolRecordData(@RequestParam("roleId") String roleId) {
-        UserContext.requireScope(OAuthScope.GAMA_DATA_READ);
+        UserContext.requireScope(OAuthScope.EF_DATA_READ);
         EfPoolRecordVO data = poolRecordTaskService.getPoolRecordData(UserContext.requireUid(), roleId);
         return ResponseEntity.ok()
                 .header(HttpHeaders.CACHE_CONTROL, POOL_RECORD_CACHE_CONTROL)

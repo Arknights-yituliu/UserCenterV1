@@ -20,10 +20,14 @@ Authorization: Bearer <access_token>
 
 | scope | 可访问接口 |
 | --- | --- |
-| `gama-data.read` | 读取已绑定游戏账号和干员数据 |
-| `gama-data.write` | 保存游戏账号角色信息和干员数据 |
+| `ak-data.read` | 读取已绑定游戏账号、干员数据和仓库物品存量 |
+| `ak-data.write` | 保存游戏账号角色信息、干员数据与手动修改版干员数据，设置默认来源，解除绑定 |
+| `gama-data.read` | 上级范围：覆盖全部游戏的读取能力，等价于持有一切 `*-data.read` |
+| `gama-data.write` | 上级范围：覆盖全部游戏的写入能力，等价于持有一切 `*-data.write` |
 
-缺少所需 scope 时响应 `code=80008`，`msg` 形如 `缺少授权范围: gama-data.read`。客户端必须在注册时登记相应 scope，并在授权请求中申请它。
+缺少所需 scope 时响应 `code=80008`，`msg` 形如 `缺少授权范围: ak-data.read`。客户端必须在注册时登记相应 scope，并在授权请求中申请它。
+
+> 范围存在上下级关系：登记并申请 `gama-data.read` 的客户端可访问本组全部读接口（兼容存量客户端）；只登记 `ak-data.read` 的客户端**不能**访问终末地接口，反之亦然。写范围不隐含读范围。
 
 OAuth Token 仍同时绑定用户与客户端，用于客户端认证和 scope 校验；游戏账号绑定关系只按 Token 中的用户 `uid` 校验，不按 `client_id` 拆分。
 
@@ -73,7 +77,7 @@ GET /oauth2/ak-accounts
 Authorization: Bearer <access_token>
 ```
 
-需要 `gama-data.read`。返回当前 OAuth 用户可用的数据来源，包含森空岛自动导入的已绑定账号与手动上传条目。用户设置的默认来源（`defaultFlag=true`）排在最前，其余按最近一次变更时间倒序，不含干员正文。
+需要 `ak-data.read`。返回当前 OAuth 用户可用的数据来源，包含森空岛自动导入的已绑定账号与手动上传条目。用户设置的默认来源（`defaultFlag=true`）排在最前，其余按最近一次变更时间倒序，不含干员正文。
 
 ### 2.1 成功响应
 
@@ -117,7 +121,7 @@ HTTP `200`：
 | HTTP 状态 | `code` | 含义 |
 | --- | --- | --- |
 | `200` | `80001` | access token 缺失、无效或已过期 |
-| `200` | `80008` | 缺少 `gama-data.read` |
+| `200` | `80008` | 缺少 `ak-data.read` |
 
 ### 2.3 设置默认数据来源
 
@@ -127,7 +131,7 @@ Authorization: Bearer <access_token>
 Content-Type: application/json
 ```
 
-需要 `gama-data.write`。设置读取干员数据不传 `akUid` 时默认返回的条目。每个用户只保留一条默认偏好，重复设置直接覆盖。
+需要 `ak-data.write`。设置读取干员数据不传 `akUid` 时默认返回的条目。每个用户只保留一条默认偏好，重复设置直接覆盖。
 
 ```json
 {
@@ -162,7 +166,7 @@ Content-Type: application/json
 | HTTP 状态 | `code` | 含义 |
 | --- | --- | --- |
 | `200` | `80001` | access token 缺失、无效或已过期 |
-| `200` | `80008` | 缺少 `gama-data.write`，或游戏账号不在当前令牌用户名下 |
+| `200` | `80008` | 缺少 `ak-data.write`，或游戏账号不在当前令牌用户名下 |
 | `200` | `10002` | `akUid` 格式非法、`source` 不受支持，或手动修改版数据不存在 |
 
 ### 2.4 解除游戏账号绑定
@@ -172,7 +176,7 @@ DELETE /oauth2/ak-accounts?akUid={akUid}
 Authorization: Bearer <access_token>
 ```
 
-需要 `gama-data.write`。解除当前令牌用户与指定游戏账号的绑定。
+需要 `ak-data.write`。解除当前令牌用户与指定游戏账号的绑定。
 
 | 参数 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
@@ -193,7 +197,7 @@ Authorization: Bearer <access_token>
 | HTTP 状态 | `code` | 含义 |
 | --- | --- | --- |
 | `200` | `80001` | access token 缺失、无效或已过期 |
-| `200` | `80008` | 缺少 `gama-data.write`，或游戏账号不在当前令牌用户名下 |
+| `200` | `80008` | 缺少 `ak-data.write`，或游戏账号不在当前令牌用户名下 |
 | `200` | `10002` | `akUid` 未携带或格式非法 |
 
 ## 3. 干员数据
@@ -203,7 +207,7 @@ GET /oauth2/ak-accounts/operators?akUid={akUid}&source={source}
 Authorization: Bearer <access_token>
 ```
 
-需要 `gama-data.read`。返回该数据条目中已持有（`owned=1`）的干员数据，星级筛选由调用方完成。`owned=0` 的记录仍会保存，但不出现在读取结果中。数据来源由 `source` 决定：
+需要 `ak-data.read`。返回该数据条目中已持有（`owned=1`）的干员数据，星级筛选由调用方完成。`owned=0` 的记录仍会保存，但不出现在读取结果中。数据来源由 `source` 决定：
 
 - 省略 `akUid`：返回用户设置的默认来源（`defaultFlag=true` 的条目）；未设置或默认来源已失效时取最近变更的条目。此时不能同时传 `source`；
 - 自动导入数据（`source=skland`，或省略 `source` 且未命中手动条目）：`akUid` 必须是当前令牌用户名下的游戏账号；
@@ -272,7 +276,7 @@ HTTP `200`，并携带响应头 `Cache-Control: private, no-cache`：
 | HTTP 状态 | `code` | 含义 |
 | --- | --- | --- |
 | `200` | `80001` | access token 缺失、无效或已过期 |
-| `200` | `80008` | 缺少 `gama-data.read`，或该游戏账号不在当前用户名下 |
+| `200` | `80008` | 缺少 `ak-data.read`，或该游戏账号不在当前用户名下 |
 | `200` | `10002` | `akUid` 格式非法、未传 `akUid` 时又指定了 `source`，或当前用户没有任何可用的数据来源 |
 
 查询他人账号与查询不存在的账号返回同一个 `80008`，服务端不区分、不暴露账号是否存在。
@@ -284,7 +288,7 @@ GET /oauth2/ak-accounts/items?akUid={akUid}
 Authorization: Bearer <access_token>
 ```
 
-需要 `gama-data.read`。返回该游戏账号最近一次上报的完整物品快照。物品没有手动/自动来源之分，`akUid` 必须是当前令牌用户名下的游戏账号。
+需要 `ak-data.read`。返回该游戏账号最近一次上报的完整物品快照。物品没有手动/自动来源之分，`akUid` 必须是当前令牌用户名下的游戏账号。
 
 ### 4.1 查询参数
 
@@ -330,7 +334,7 @@ HTTP `200`，并携带响应头 `Cache-Control: private, no-cache`：
 | HTTP 状态 | `code` | 含义 |
 | --- | --- | --- |
 | `200` | `80002` | access token 缺失、无效或已过期 |
-| `200` | `80003` | 缺少 `gama-data.read` 授权 |
+| `200` | `80003` | 缺少 `ak-data.read` 授权 |
 | `200` | `80008` | 该游戏账号不在当前令牌用户名下 |
 | `200` | `10002` | `akUid` 未携带或格式非法 |
 | `200` | `40001` | 服务端内部错误 |
@@ -345,7 +349,7 @@ Content-Type: application/json
 Authorization: Bearer <access_token>
 ```
 
-需要 `gama-data.write`。目标游戏账号取自请求体 `playerInfo.akUid`；请求体和响应结构与 `POST /user/ak-accounts/operators/save` 完全一致。
+需要 `ak-data.write`。目标游戏账号取自请求体 `playerInfo.akUid`；请求体和响应结构与 `POST /user/ak-accounts/operators/save` 完全一致。
 
 ### 5.1 请求字段
 
@@ -440,7 +444,7 @@ HTTP `200`：
 | HTTP 状态 | `code` | 含义 | 处理建议 |
 | --- | --- | --- | --- |
 | `200` | `80001` | access token 缺失、无效或已过期 | 刷新或重新获取 access token |
-| `200` | `80008` | 缺少 `gama-data.write` | 在授权请求中申请该 scope |
+| `200` | `80008` | 缺少 `ak-data.write` | 在授权请求中申请该 scope |
 | `200` | `10002` | 字段缺失、格式错误、数值越界或干员 `id` 重复 | 修正请求后重试 |
 | `200` | `30006` | 该游戏账号上传过于频繁 | 按 `data.retryAfterSeconds` 等待后重试 |
 | `200` | `40003` | 限流服务不可用 | 稍后重试 |
@@ -473,7 +477,7 @@ Content-Type: application/json
 Authorization: Bearer <access_token>
 ```
 
-需要 `gama-data.write`。请求体只需要干员数组，结构与 `POST /user/ak-accounts/manual-operators/save` 完全一致：
+需要 `ak-data.write`。请求体只需要干员数组，结构与 `POST /user/ak-accounts/manual-operators/save` 完全一致：
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
@@ -497,7 +501,7 @@ Authorization: Bearer <access_token>
 | HTTP 状态 | `code` | 含义 | 处理建议 |
 | --- | --- | --- | --- |
 | `200` | `80001` | access token 缺失、无效或已过期 | 刷新或重新获取 access token |
-| `200` | `80008` | 缺少 `gama-data.write` | 在授权请求中申请对应 scope |
+| `200` | `80008` | 缺少 `ak-data.write` | 在授权请求中申请对应 scope |
 | `200` | `10002` | 字段缺失、格式错误、数值越界或干员 `id` 重复 | 修正请求后重试 |
 | `200` | `40004` | 手动版数据保存冲突 | 重试整个请求 |
 | `200` | `40001` | 服务端内部错误 | 稍后重试并保留请求信息 |

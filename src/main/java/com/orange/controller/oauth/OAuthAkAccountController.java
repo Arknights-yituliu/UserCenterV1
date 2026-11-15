@@ -60,7 +60,7 @@ public class OAuthAkAccountController {
     @Operation(summary = "查询已绑定的游戏账号列表（OAuth）")
     @GetMapping
     public Result<List<AkAccountVO>> listAccounts() {
-        UserContext.requireScope(OAuthScope.GAMA_DATA_READ);
+        UserContext.requireScope(OAuthScope.AK_DATA_READ);
         return Result.success(akAccountService.listBoundAccounts(UserContext.requireUid()));
     }
 
@@ -76,7 +76,7 @@ public class OAuthAkAccountController {
     public ResponseEntity<Result<OperatorListVO>> listOperators(
             @RequestParam(value = "akUid", required = false) String akUid,
             @RequestParam(value = "source", required = false) String source) {
-        UserContext.requireScope(OAuthScope.GAMA_DATA_READ);
+        UserContext.requireScope(OAuthScope.AK_DATA_READ);
         OperatorListVO data = akAccountService.listOperators(UserContext.requireUid(), akUid, source);
         return ResponseEntity.ok()
                 .header(HttpHeaders.CACHE_CONTROL, OPERATOR_CACHE_CONTROL)
@@ -92,7 +92,7 @@ public class OAuthAkAccountController {
     @Operation(summary = "设置默认展示的数据来源（OAuth）")
     @PostMapping("/default/update")
     public Result<Void> setDefaultSource(@Valid @RequestBody AkDefaultSourceRequest request) {
-        UserContext.requireScope(OAuthScope.GAMA_DATA_WRITE);
+        UserContext.requireScope(OAuthScope.AK_DATA_WRITE);
         akAccountService.setDefaultSource(UserContext.requireUid(), request.getAkUid(), request.getSource());
         return Result.success();
     }
@@ -109,7 +109,7 @@ public class OAuthAkAccountController {
     @Operation(summary = "解除游戏账号绑定（OAuth）")
     @DeleteMapping
     public Result<Void> unbindAccount(@RequestParam("akUid") String akUid) {
-        UserContext.requireScope(OAuthScope.GAMA_DATA_WRITE);
+        UserContext.requireScope(OAuthScope.AK_DATA_WRITE);
         akAccountService.unbindAccount(UserContext.requireUid(), akUid);
         return Result.success();
     }
@@ -123,7 +123,7 @@ public class OAuthAkAccountController {
     @Operation(summary = "全量读取物品存量（OAuth）")
     @GetMapping("/items")
     public ResponseEntity<Result<ItemListVO>> listItems(@RequestParam("akUid") String akUid) {
-        UserContext.requireScope(OAuthScope.GAMA_DATA_READ);
+        UserContext.requireScope(OAuthScope.AK_DATA_READ);
         ItemListVO data = akAccountService.listItems(UserContext.requireUid(), akUid);
         return ResponseEntity.ok()
                 .header(HttpHeaders.CACHE_CONTROL, OPERATOR_CACHE_CONTROL)
@@ -139,7 +139,7 @@ public class OAuthAkAccountController {
     @Operation(summary = "批量保存角色信息与干员数据（OAuth）")
     @PostMapping("/operators/save")
     public Result<OperatorSaveResultVO> saveOperators(@Valid @RequestBody OperatorSaveRequest request) {
-        UserContext.requireScope(OAuthScope.GAMA_DATA_WRITE);
+        UserContext.requireScope(OAuthScope.AK_DATA_WRITE);
         return Result.success(akAccountService.saveOperators(UserContext.requireUid(), request));
     }
 
@@ -152,7 +152,7 @@ public class OAuthAkAccountController {
     @Operation(summary = "保存本人的手动修改版干员数据（OAuth）")
     @PostMapping("/manual-operators/save")
     public Result<OperatorSaveResultVO> saveManualOperators(@Valid @RequestBody OperatorStateManualSaveRequest request) {
-        UserContext.requireScope(OAuthScope.GAMA_DATA_WRITE);
+        UserContext.requireScope(OAuthScope.AK_DATA_WRITE);
         return Result.success(akOperatorStateManualService.saveManualOperators(UserContext.requireUid(), request));
     }
 }

@@ -313,7 +313,11 @@ GET /open/oauth/scopes
     { "code": "config.read", "desc": "读取该应用名下的用户配置，以及查看你的排班表" },
     { "code": "config.write", "desc": "创建、修改或删除该应用名下的用户配置，以及保存或删除你的排班表" },
     { "code": "gama-data.read", "desc": "读取用户游戏数据" },
-    { "code": "gama-data.write", "desc": "写入用户游戏数据" }
+    { "code": "gama-data.write", "desc": "写入用户游戏数据" },
+    { "code": "ak-data.read", "desc": "读取你的明日方舟账号、干员、仓库与抽卡数据" },
+    { "code": "ak-data.write", "desc": "保存或删除你的明日方舟账号、干员与仓库数据" },
+    { "code": "ef-data.read", "desc": "读取你的终末地角色、玩家数据与寻访记录" },
+    { "code": "ef-data.write", "desc": "保存你的终末地角色与玩家数据、创建寻访记录导入任务" }
   ]
 }
 ```
@@ -323,7 +327,7 @@ GET /open/oauth/scopes
 | `code` | string | 权限标识，即直签请求 `scope` 参数的合法取值 |
 | `desc` | string | 权限中文描述 |
 
-当前可选范围（6 项）：
+当前可选范围（10 项）：
 
 | 标识 | 说明 |
 | --- | --- |
@@ -331,8 +335,12 @@ GET /open/oauth/scopes
 | `user.profile` | 读取并修改你的个人资料 |
 | `config.read` | 读取该应用名下的用户配置，以及查看你的排班表 |
 | `config.write` | 创建、修改或删除该应用名下的用户配置，以及保存或删除你的排班表 |
-| `gama-data.read` | 读取用户游戏数据 |
-| `gama-data.write` | 写入用户游戏数据 |
+| `gama-data.read` | 读取用户游戏数据（上级范围，覆盖全部游戏） |
+| `gama-data.write` | 写入用户游戏数据（上级范围，覆盖全部游戏） |
+| `ak-data.read` | 读取你的明日方舟账号、干员、仓库与抽卡数据 |
+| `ak-data.write` | 保存或删除你的明日方舟账号、干员与仓库数据 |
+| `ef-data.read` | 读取你的终末地角色、玩家数据与寻访记录 |
+| `ef-data.write` | 保存你的终末地角色与玩家数据、创建寻访记录导入任务 |
 
 **注意**：本接口返回的是“系统全部可选权限”**全集**，仅用于展示可选项；某次直签实际能携带的权限仍受第 6 节收敛规则约束——不得超过凭证自身已有范围，否则返回 `90003`。
 

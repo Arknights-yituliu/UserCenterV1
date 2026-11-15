@@ -25,8 +25,9 @@ import java.util.List;
 /**
  * OAuth 授权访问的终末地玩家数据接口
  *
- * <p>查询绑定角色与读取玩家数据需要 {@code gama-data.read}，保存玩家数据需要
- * {@code gama-data.write}。用户身份取自 access_token，请求参数不能指定或覆盖；
+ * <p>查询绑定角色与读取玩家数据需要 {@code ef-data.read}，保存玩家数据需要
+ * {@code ef-data.write}；上级范围 {@code gama-data.read} / {@code gama-data.write} 同样放行。
+ * 用户身份取自 access_token，请求参数不能指定或覆盖；
  * 角色归属校验与用户侧接口一致，玩家数据按 {@code roleId} + {@code serverId} 由全部绑定用户共享。</p>
  *
  * @author UserCenter
@@ -58,7 +59,7 @@ public class OAuthEfPlayerDataController {
     @Operation(summary = "查询已绑定的终末地角色列表（OAuth）")
     @GetMapping
     public Result<List<EfAccountVO>> listAccounts() {
-        UserContext.requireScope(OAuthScope.GAMA_DATA_READ);
+        UserContext.requireScope(OAuthScope.EF_DATA_READ);
         return Result.success(efPlayerDataService.listBoundAccounts(UserContext.requireUid()));
     }
 
@@ -74,7 +75,7 @@ public class OAuthEfPlayerDataController {
     public ResponseEntity<Result<EfPlayerDataVO>> getPlayerData(
             @RequestParam("roleId") String roleId,
             @RequestParam(value = "serverId", required = false) String serverId) {
-        UserContext.requireScope(OAuthScope.GAMA_DATA_READ);
+        UserContext.requireScope(OAuthScope.EF_DATA_READ);
         EfPlayerDataVO data = efPlayerDataService.getPlayerData(UserContext.requireUid(), roleId, serverId);
         return ResponseEntity.ok()
                 .header(HttpHeaders.CACHE_CONTROL, PLAYER_DATA_CACHE_CONTROL)
@@ -90,7 +91,7 @@ public class OAuthEfPlayerDataController {
     @Operation(summary = "保存终末地玩家数据（OAuth）")
     @PostMapping("/player-data/save")
     public Result<EfPlayerDataSaveResultVO> savePlayerData(@Valid @RequestBody EfPlayerDataSaveRequest request) {
-        UserContext.requireScope(OAuthScope.GAMA_DATA_WRITE);
+        UserContext.requireScope(OAuthScope.EF_DATA_WRITE);
         return Result.success(efPlayerDataService.savePlayerData(UserContext.requireUid(), request));
     }
 }

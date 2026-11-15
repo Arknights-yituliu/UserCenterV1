@@ -27,10 +27,14 @@ Authorization: Bearer <access_token>
 
 | scope | 可访问接口 |
 | --- | --- |
-| `gama-data.read` | 查询已绑定角色、读取玩家数据、查询任务状态、查询已导入账户、读取寻访记录 |
-| `gama-data.write` | 保存玩家数据、创建寻访记录导入任务 |
+| `ef-data.read` | 查询已绑定角色、读取玩家数据、查询任务状态、查询已导入账户、读取寻访记录 |
+| `ef-data.write` | 保存玩家数据、创建寻访记录导入任务 |
+| `gama-data.read` | 上级范围：覆盖全部游戏的读取能力，等价于持有一切 `*-data.read` |
+| `gama-data.write` | 上级范围：覆盖全部游戏的写入能力，等价于持有一切 `*-data.write` |
 
-缺少所需 scope 时响应 `code=80008`，`msg` 形如 `缺少授权范围: gama-data.read`。客户端必须在注册时登记相应 scope，并在授权请求中申请它。
+缺少所需 scope 时响应 `code=80008`，`msg` 形如 `缺少授权范围: ef-data.read`。客户端必须在注册时登记相应 scope，并在授权请求中申请它。
+
+> 玩家数据是一整份 JSON（角色、干员与仓库都在这份数据内），因此读取 `player-data` 只需 `ef-data.read` 一个范围，不再按干员 / 仓库细分。范围存在上下级关系：登记并申请 `gama-data.read` 的客户端可访问本组全部读接口（兼容存量客户端）；只登记 `ef-data.read` 的客户端**不能**访问明日方舟接口。写范围不隐含读范围。
 
 OAuth Token 同时绑定用户与客户端，用于客户端认证和 scope 校验；角色绑定关系与寻访记录归属只按 Token 中的用户 `uid` 校验，不按 `client_id` 拆分。
 
@@ -82,7 +86,7 @@ GET /oauth2/ef-accounts
 Authorization: Bearer <access_token>
 ```
 
-需要 `gama-data.read`。返回当前令牌用户已绑定的全部终末地角色，不含玩家数据正文，按最近导入时间倒序，调用方取首条即可默认展示最新数据。
+需要 `ef-data.read`。返回当前令牌用户已绑定的全部终末地角色，不含玩家数据正文，按最近导入时间倒序，调用方取首条即可默认展示最新数据。
 
 成功响应 HTTP `200`：
 
@@ -115,7 +119,7 @@ Authorization: Bearer <access_token>
 | HTTP 状态 | `code` | 含义 |
 | --- | --- | --- |
 | `200` | `80001` | access token 缺失、无效或已过期 |
-| `200` | `80008` | 缺少 `gama-data.read` |
+| `200` | `80008` | 缺少 `ef-data.read` |
 | `200` | `40001` | 服务端内部错误 |
 
 ### 2.2 读取玩家数据
@@ -125,7 +129,7 @@ GET /oauth2/ef-accounts/player-data?roleId={roleId}&serverId={serverId}
 Authorization: Bearer <access_token>
 ```
 
-需要 `gama-data.read`。角色由 `roleId` + `serverId` 定位，**该角色必须已绑定到当前令牌用户**，否则返回 `code=80008`，不能读取他人角色数据。
+需要 `ef-data.read`。角色由 `roleId` + `serverId` 定位，**该角色必须已绑定到当前令牌用户**，否则返回 `code=80008`，不能读取他人角色数据。
 
 | 参数 | 位置 | 必填 | 说明 |
 | --- | --- | --- | --- |
@@ -167,7 +171,7 @@ Authorization: Bearer <access_token>
 | HTTP 状态 | `code` | 含义 |
 | --- | --- | --- |
 | `200` | `80001` | access token 缺失、无效或已过期 |
-| `200` | `80008` | 缺少 `gama-data.read`，或该角色未绑定到当前令牌用户 |
+| `200` | `80008` | 缺少 `ef-data.read`，或该角色未绑定到当前令牌用户 |
 | `200` | `10002` | 缺少 `roleId` 或角色标识格式非法 |
 | `200` | `40001` | 服务端内部错误或存储数据损坏 |
 查询他人角色与查询不存在的角色返回同一个 `80008`，服务端不区分、不暴露角色是否存在。
@@ -180,7 +184,7 @@ Content-Type: application/json
 Authorization: Bearer <access_token>
 ```
 
-需要 `gama-data.write`。目标角色由请求体中的 `roleId` + `serverId` 定位，**当前令牌用户首次上传某个角色时直接建立绑定关系**。
+需要 `ef-data.write`。目标角色由请求体中的 `roleId` + `serverId` 定位，**当前令牌用户首次上传某个角色时直接建立绑定关系**。
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
@@ -236,7 +240,7 @@ Authorization: Bearer <access_token>
 | HTTP 状态 | `code` | 含义 |
 | --- | --- | --- |
 | `200` | `80001` | access token 缺失、无效或已过期 |
-| `200` | `80008` | 缺少 `gama-data.write` |
+| `200` | `80008` | 缺少 `ef-data.write` |
 | `200` | `10002` | 字段缺失、角色标识格式非法、`playerData` 非对象或超过 2MB |
 | `200` | `30006` | 该角色上传过于频繁，按 `data.retryAfterSeconds` 等待后重试 |
 | `200` | `40003` | 限流服务不可用 |
@@ -268,7 +272,7 @@ POST /oauth2/ef-pool-records/create-task?hgToken={hgToken}
 Authorization: Bearer <access_token>
 ```
 
-需要 `gama-data.write`（本接口会写入任务与角色绑定关系）。任务归属取令牌中的 `uid`，导入完成后服务端把角色档案与「用户-角色」关系写入绑定表，该角色才会出现在账户列表中。
+需要 `ef-data.write`（本接口会写入任务与角色绑定关系）。任务归属取令牌中的 `uid`，导入完成后服务端把角色档案与「用户-角色」关系写入绑定表，该角色才会出现在账户列表中。
 
 | 参数 | 位置 | 必填 | 说明 |
 | --- | --- | --- | --- |
@@ -289,7 +293,7 @@ Authorization: Bearer <access_token>
 | HTTP 状态 | `code` | 含义 |
 | --- | --- | --- |
 | `200` | `80001` | access token 缺失、无效或已过期 |
-| `200` | `80008` | 缺少 `gama-data.write` |
+| `200` | `80008` | 缺少 `ef-data.write` |
 | `200` | `10001` | `hgToken` 未携带或为空白 |
 | `200` | `30005` | 同一 hgToken 1 分钟内重复创建任务 |
 | `200` | `40003` | 限流服务不可用 |
@@ -301,7 +305,7 @@ GET /oauth2/ef-pool-records/check-task?taskId={taskId}
 Authorization: Bearer <access_token>
 ```
 
-需要 `gama-data.read`。仅任务创建者可见，其他用户的任务一律返回 `code=80008`。
+需要 `ef-data.read`。仅任务创建者可见，其他用户的任务一律返回 `code=80008`。
 
 | 参数 | 位置 | 必填 | 说明 |
 | --- | --- | --- | --- |
@@ -332,7 +336,7 @@ Authorization: Bearer <access_token>
 | HTTP 状态 | `code` | 含义 |
 | --- | --- | --- |
 | `200` | `80001` | access token 缺失、无效或已过期 |
-| `200` | `80008` | 缺少 `gama-data.read`，或任务不属于当前令牌用户 |
+| `200` | `80008` | 缺少 `ef-data.read`，或任务不属于当前令牌用户 |
 | `200` | `10001` | `taskId` 未携带，或任务不存在 / 已过期 |
 | `200` | `10003` | 任务尚未完成（仍在处理中或执行失败），可继续轮询 |
 
@@ -343,7 +347,7 @@ GET /oauth2/ef-pool-records/accounts
 Authorization: Bearer <access_token>
 ```
 
-需要 `gama-data.read`。返回当前令牌用户导入过寻访记录的终末地账户，按最近导入时间倒序，同角色只保留最新一条。
+需要 `ef-data.read`。返回当前令牌用户导入过寻访记录的终末地账户，按最近导入时间倒序，同角色只保留最新一条。
 
 成功响应 HTTP `200`：
 
@@ -374,7 +378,7 @@ Authorization: Bearer <access_token>
 | HTTP 状态 | `code` | 含义 |
 | --- | --- | --- |
 | `200` | `80001` | access token 缺失、无效或已过期 |
-| `200` | `80008` | 缺少 `gama-data.read` |
+| `200` | `80008` | 缺少 `ef-data.read` |
 | `200` | `40001` | 服务端内部错误 |
 
 ### 3.4 读取寻访记录
@@ -384,7 +388,7 @@ GET /oauth2/ef-pool-records/record?roleId={roleId}
 Authorization: Bearer <access_token>
 ```
 
-需要 `gama-data.read`。角色必须已归属当前令牌用户，否则返回 `code=80008`。
+需要 `ef-data.read`。角色必须已归属当前令牌用户，否则返回 `code=80008`。
 
 | 参数 | 位置 | 必填 | 说明 |
 | --- | --- | --- | --- |
@@ -490,7 +494,7 @@ Authorization: Bearer <access_token>
 | HTTP 状态 | `code` | 含义 |
 | --- | --- | --- |
 | `200` | `80001` | access token 缺失、无效或已过期 |
-| `200` | `80008` | 缺少 `gama-data.read`，或该角色未归属当前令牌用户 |
+| `200` | `80008` | 缺少 `ef-data.read`，或该角色未归属当前令牌用户 |
 | `200` | `10001` | `roleId` 未携带或为空 |
 
 ## 4. 常见错误总览

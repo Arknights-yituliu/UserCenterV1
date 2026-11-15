@@ -1678,7 +1678,9 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      * 权限收敛：把请求范围限制在凭证已有范围之内（只减不增）。
      *
      * <p>用于直签接口（{@code /user/oauth/custom-tokens}、{@code /oauth2/token/from-refresh}）的最小权限场景：调用方可指定一个子集换取更小权限的
-     * 短时 access_token，但不能借此扩大权限。凭证范围为元范围 {@code all} 时视为覆盖全部已知权限。</p>
+     * 短时 access_token，但不能借此扩大权限。凭证范围为元范围 {@code all} 时视为覆盖全部已知权限。
+     * 范围存在上下级关系，凭证持有上级范围（如 {@code gama-data.read}）时可收敛为其子范围
+     * （如 {@code ak-data.read}），判断见 {@link OAuthScope#covers(String, OAuthScope)}。</p>
      *
      * @param heldScope      凭证已有权限串（英文逗号分隔，可能为元范围 all）
      * @param requestedScope 请求收敛到的权限串
@@ -1695,10 +1697,14 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
                 throw new BusinessException(ResultCode.OAUTH_SCOPE_INVALID, "存在系统不支持的授权范围: " + code);
             }
         }
-        // 凭证含元范围 all 时覆盖全部权限，任意已知范围都是其子集；否则要求严格子集
+        // 逐项校验覆盖关系：凭证的任一已授予范围能覆盖所需范围即可（含上级范围覆盖子范围）
         Set<String> held = splitScopes(heldScope);
-        if (!held.contains(OAuthScope.ALL.getCode()) && !held.containsAll(requested)) {
-            throw new BusinessException(ResultCode.OAUTH_SCOPE_INVALID, "scope 不能超出凭证已有权限");
+        for (String code : requested) {
+            OAuthScope required = OAuthScope.findByCode(code).orElseThrow();
+            boolean covered = held.stream().anyMatch(value -> OAuthScope.covers(value, required));
+            if (!covered) {
+                throw new BusinessException(ResultCode.OAUTH_SCOPE_INVALID, "scope 不能超出凭证已有权限");
+            }
         }
         return String.join(",", requested);
     }
