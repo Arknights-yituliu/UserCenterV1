@@ -1,5 +1,5 @@
 -- =============================================================
--- 模块三：终末地（玩家数据、角色绑定）
+-- 模块三：终末地（玩家数据、角色绑定、寻访记录）
 --
 -- 依赖：先执行 schema.sql 建库，再执行 schema-user.sql（绑定关系逻辑上指向 user_info.uid）。
 -- 本文件可独立重跑：所有建表均为 DROP TABLE IF EXISTS + CREATE。
@@ -52,3 +52,83 @@ CREATE TABLE `ef_account_binding` (
     KEY `idx_ef_owner_update` (`owner_uid`, `update_time`) COMMENT '按用户查询已绑定角色并按最近导入时间倒序'
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '终末地角色与用户中心账号绑定关系及角色档案';
+
+-- -------------------------------------------------------------
+-- 3. 寻访记录导入任务
+--
+-- 创建任务只落库 hgToken 与归属，调度器每秒取一条 start_flag = 0 的任务执行导入；
+-- token 为敏感凭证，创建 15 分钟后由定时任务覆盖为占位值，避免长期留存。
+-- owner_uid 允许 NULL：匿名接口下线前创建、尚未执行的历史任务没有归属。
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `ef_player_pool_record_task`;
+CREATE TABLE `ef_player_pool_record_task` (
+    `task_id`       VARCHAR(64)  NOT NULL COMMENT '任务ID（task + 雪花ID），创建接口返回给调用方',
+    `token`         VARCHAR(512) NULL COMMENT '前端提交的 hgToken，完成后替换为占位值，过期后被覆盖',
+    `complete_flag` TINYINT      NOT NULL DEFAULT 0 COMMENT '是否已完成导入：0否 1是',
+    `role_id`       VARCHAR(32)  NOT NULL DEFAULT '' COMMENT '终末地游戏内角色UID，导入完成后回填',
+    `owner_uid`     BIGINT       NULL COMMENT '创建任务的用户中心UID；匿名接口遗留任务为NULL',
+    `start_flag`    TINYINT      NOT NULL DEFAULT 0 COMMENT '是否已被调度器取走开始处理：0否 1是',
+    `create_time`   DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '任务创建时间',
+    `update_time`   DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '任务最近更新时间',
+    PRIMARY KEY (`task_id`),
+    KEY `idx_ef_task_start` (`start_flag`, `create_time`) COMMENT '调度器取最早创建且未开始的任务',
+    KEY `idx_ef_task_create_time` (`create_time`) COMMENT '按创建时间区间覆盖过期 token',
+    KEY `idx_ef_task_owner` (`owner_uid`) COMMENT '按创建者校验任务归属'
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '终末地寻访记录导入任务';
+
+-- -------------------------------------------------------------
+-- 4. 干员寻访记录
+--
+-- 一行一条干员寻访记录，唯一键 role_id + seq_id：重复导入时走
+-- ON DUPLICATE KEY UPDATE「只补不毁」，新值为空不清空历史值。
+-- 赠礼类记录（kind=gift_intel_book）没有 char_id / char_name，
+-- 由服务端映射为 gift_ 前缀伪编码落库，保证记录条数不丢、也不产生空值行。
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `ef_character_pool_record`;
+CREATE TABLE `ef_character_pool_record` (
+    `id`         BIGINT       NOT NULL COMMENT '记录ID，由雪花算法生成',
+    `role_id`    VARCHAR(32)  NOT NULL COMMENT '终末地游戏内角色UID',
+    `pool_id`    VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '卡池ID',
+    `pool_name`  VARCHAR(128) NOT NULL DEFAULT '' COMMENT '卡池名称',
+    `char_id`    VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '角色编码；赠礼类记录为 gift_ 前缀伪编码',
+    `char_name`  VARCHAR(128) NOT NULL DEFAULT '' COMMENT '角色名称；赠礼类记录为展示名',
+    `rarity`     INT          NOT NULL DEFAULT 0 COMMENT '稀有度',
+    `is_free`    TINYINT      NOT NULL DEFAULT 0 COMMENT '是否免费抽取：0否 1是',
+    `is_new`     TINYINT      NOT NULL DEFAULT 0 COMMENT '是否新角色：0否 1是',
+    `gacha_ts`   VARCHAR(20)  NOT NULL DEFAULT '' COMMENT '寻访时间戳（毫秒字符串，上游原样保存）',
+    `seq_id`     VARCHAR(32)  NOT NULL DEFAULT '' COMMENT '记录序列ID，与 role_id 共同去重',
+    `lang`       VARCHAR(16)  NOT NULL DEFAULT 'zh-cn' COMMENT '数据语言',
+    `pool_type`  VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '卡池类型（E_CharacterGachaPoolType_*）',
+    `server_id`  VARCHAR(16)  NOT NULL DEFAULT '1' COMMENT '服务器ID',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_ef_char_role_seq` (`role_id`, `seq_id`) COMMENT '同一角色的同一序列只保留一条记录',
+    KEY `idx_ef_char_role_pool` (`role_id`, `pool_type`) COMMENT '按角色读取记录、统计新手卡池抽数'
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '终末地干员寻访记录';
+
+-- -------------------------------------------------------------
+-- 5. 武器寻访记录
+--
+-- 与干员记录同构，写入走 INSERT IGNORE，由唯一键 role_id + seq_id 静默去重。
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `ef_weapon_pool_record`;
+CREATE TABLE `ef_weapon_pool_record` (
+    `id`          BIGINT       NOT NULL COMMENT '记录ID，由雪花算法生成',
+    `role_id`     VARCHAR(32)  NOT NULL COMMENT '终末地游戏内角色UID',
+    `pool_id`     VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '卡池ID',
+    `pool_name`   VARCHAR(128) NOT NULL DEFAULT '' COMMENT '卡池名称',
+    `weapon_id`   VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '武器ID',
+    `weapon_name` VARCHAR(128) NOT NULL DEFAULT '' COMMENT '武器名称',
+    `weapon_type` VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '武器类型',
+    `rarity`      INT          NOT NULL DEFAULT 0 COMMENT '稀有度',
+    `is_new`      TINYINT      NOT NULL DEFAULT 0 COMMENT '是否新武器：0否 1是',
+    `gacha_ts`    VARCHAR(20)  NOT NULL DEFAULT '' COMMENT '寻访时间戳（毫秒字符串，上游原样保存）',
+    `seq_id`      VARCHAR(32)  NOT NULL DEFAULT '' COMMENT '记录序列ID，与 role_id 共同去重',
+    `lang`        VARCHAR(16)  NOT NULL DEFAULT 'zh-cn' COMMENT '数据语言',
+    `server_id`   VARCHAR(16)  NOT NULL DEFAULT '1' COMMENT '服务器ID',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_ef_weapon_role_seq` (`role_id`, `seq_id`) COMMENT '同一角色的同一序列只保留一条记录',
+    KEY `idx_ef_weapon_role` (`role_id`) COMMENT '按角色读取武器寻访记录'
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '终末地武器寻访记录';
