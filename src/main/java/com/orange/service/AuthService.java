@@ -20,7 +20,7 @@ public interface AuthService {
      *
      * @param request 注册参数
      * @param ip      注册 IP
-     * @param clientId   来源客户端 id
+     * @param clientId   来源客户端 id（必填，缺失抛 10001）
      * @return 登录响应（含 token）
      */
     LoginVO register(RegisterRequest request, String ip, String clientId);
@@ -31,7 +31,7 @@ public interface AuthService {
      * @param request 登录参数
      * @param ip      登录 IP
      * @param ua      浏览器 UA
-     * @param clientId   来源客户端 id
+     * @param clientId   来源客户端 id（必填，缺失抛 10001）
      * @return 登录响应（含 token）
      */
     LoginVO login(LoginRequest request, String ip, String ua, String clientId);
@@ -110,7 +110,7 @@ public interface AuthService {
      * 签发会话：生成 token 并写入 Redis（设备数不限，删除 key 即踢下线）
      *
      * @param uid   用户 uid
-     * @param clientId 来源客户端 id（可为空）
+     * @param clientId 来源客户端 id（登录 / 注册入口已强制非空）
      * @return 会话 token
      */
     String createSession(Long uid, String clientId);

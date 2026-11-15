@@ -14,8 +14,8 @@
 |---|---|---|---|---|
 | `/` | GET | 否 | - | 根路径健康检查，返回后端启动成功提示，用于部署后验证服务可用。 |
 | `/auth/send-code` | POST | 否 | - | 发送邮箱验证码（注册/换绑/重置密码等用途），按 IP 与邮箱限流防滥用。 |
-| `/auth/register` | POST | 否 | - | 注册（邮箱+用户名+密码+昵称+验证码），成功后自动登录并返回会话 token。来源客户端经 `UC-Client-Id` 头标识。 |
-| `/auth/login` | POST | 否 | - | 登录（密码或邮箱验证码两种方式），成功后返回会话 token，前端后续以 Authorization 或 UC-Token 头携带。 |
+| `/auth/register` | POST | 否 | - | 注册（邮箱+用户名+密码+昵称+验证码），成功后自动登录并返回会话 token。来源客户端经**必填**头 `UC-Client-Id` 标识（缺失返回 `10001`，不创建账号）。 |
+| `/auth/login` | POST | 否 | - | 登录（密码或邮箱验证码两种方式），成功后返回会话 token，前端后续以 Authorization 或 UC-Token 头携带。须携带**必填**头 `UC-Client-Id`（缺失或超 64 字符返回 `10001`）。 |
 | `/auth/reset-code` | POST | 否 | - | 发送重设密码验证码，发到账号绑定邮箱，无需登录，按 IP 限流。 |
 | `/auth/reset-password` | POST | 否 | - | 通过邮箱验证码重设密码，无需登录，成功后踢出该账号全部会话。 |
 | `/open/oauth/scopes` | GET | 否 | - | 公开查询系统全部可选 OAuth 权限（code+中文描述），不含元范围 all，无用户数据。 |

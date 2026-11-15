@@ -8,6 +8,7 @@ import com.orange.common.exception.BusinessException;
 import com.orange.common.exception.GlobalExceptionHandler;
 import com.orange.common.util.Result;
 import com.orange.common.util.RedisKeyUtil;
+import com.orange.entity.dto.SessionInfo;
 import com.orange.entity.dto.auth.LoginRequest;
 import com.orange.entity.dto.auth.RegisterRequest;
 import com.orange.entity.po.UserInfo;
@@ -21,6 +22,7 @@ import jakarta.validation.Validator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.SetOperations;
@@ -225,6 +227,69 @@ class AuthServiceImplTest {
 
         assertEquals(ResultCode.CODE_ERROR.getCode(), exception.getCode());
         verify(redisTemplate).expire(RedisKeyUtil.rate("register-email", ACCOUNT), 3600L, TimeUnit.SECONDS);
+    }
+
+    @Test
+    void loginWithoutClientIdIsRejectedBeforeAnyCredentialCheck() {
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.login(passwordRequest(), IP, "test", null));
+
+        assertEquals(ResultCode.PARAM_ERROR.getCode(), exception.getCode());
+        // 缺头时不消耗 IP 限流额度，也不触达用户表与验证码服务
+        verifyNoInteractions(redisTemplate, userInfoMapper, emailCodeService);
+    }
+
+    @Test
+    void loginWithBlankClientIdIsRejected() {
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.login(passwordRequest(), IP, "test", "   "));
+
+        assertEquals(ResultCode.PARAM_ERROR.getCode(), exception.getCode());
+        verifyNoInteractions(redisTemplate, userInfoMapper, emailCodeService);
+    }
+
+    @Test
+    void loginWithOverlongClientIdIsRejected() {
+        String tooLong = "c".repeat(65);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.login(passwordRequest(), IP, "test", tooLong));
+
+        assertEquals(ResultCode.PARAM_ERROR.getCode(), exception.getCode());
+        verifyNoInteractions(redisTemplate, userInfoMapper, emailCodeService);
+    }
+
+    @Test
+    void registerWithoutClientIdIsRejectedBeforeAnyCredentialCheck() {
+        RegisterRequest request = new RegisterRequest();
+        request.setEmail(ACCOUNT);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.register(request, IP, null));
+
+        assertEquals(ResultCode.PARAM_ERROR.getCode(), exception.getCode());
+        verifyNoInteractions(redisTemplate, userInfoMapper, emailCodeService);
+    }
+
+    @Test
+    void clientIdIsTrimmedBeforeBeingStoredInSession() throws Exception {
+        when(redisTemplate.opsForSet()).thenReturn(setOperations);
+        UserInfo user = new UserInfo();
+        user.setUid(9L);
+        user.setStatus(1);
+        when(userInfoMapper.selectOne(any())).thenReturn(user);
+        LoginRequest request = new LoginRequest();
+        request.setAccountType("email");
+        request.setEmail(ACCOUNT);
+        request.setVerificationCode("123456");
+
+        service.login(request, IP, "test", "  client-1  ");
+
+        ArgumentCaptor<String> sessionJson = ArgumentCaptor.forClass(String.class);
+        verify(valueOperations).set(anyString(), sessionJson.capture(), eq(7776000L), eq(TimeUnit.SECONDS));
+        SessionInfo session = new ObjectMapper().findAndRegisterModules()
+                .readValue(sessionJson.getValue(), SessionInfo.class);
+        assertEquals("client-1", session.getClientId());
     }
 
     private LoginRequest passwordRequest() {

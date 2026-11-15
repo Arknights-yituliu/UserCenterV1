@@ -65,6 +65,9 @@ public class AuthServiceImpl implements AuthService {
     /** 登录方式常量：邮箱验证码 */
     private static final String TYPE_EMAIL_CODE = "email";
 
+    /** 来源客户端标识最大长度（与 user_config.client_id / login_log.client_id 列宽一致） */
+    private static final int CLIENT_ID_MAX_LENGTH = 64;
+
     private final UserInfoMapper userMapper;
     private final LoginLogMapper loginLogMapper;
     private final OAuthClientMapper oauthClientMapper;
@@ -123,17 +126,19 @@ public class AuthServiceImpl implements AuthService {
      *
      * @param request 注册参数
      * @param ip      注册 IP
-     * @param clientId   来源客户端 id
+     * @param clientId   来源客户端 id（必填，缺失抛 10001）
      * @return 登录响应（含 token）
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public LoginVO register(RegisterRequest request, String ip, String clientId) {
+        // 来源客户端标识必填：注册成功即签发会话，缺失会写出无法使用用户配置接口的会话
+        String sessionClientId = requireClientId(clientId);
         // 先按来源 IP 和邮箱限流，防止无凭证批量探测邮箱/用户名占用
         enforceRegisterRateLimit("register", ip, request.getEmail());
         // 校验 + 创建用户（含邮箱验证码校验、唯一性校验、密码加密）
         UserInfo user = createRegisteredUser(request, ip);
-        return buildLoginVO(user, createSession(user.getUid(), clientId));
+        return buildLoginVO(user, createSession(user.getUid(), sessionClientId));
     }
 
     /**
@@ -189,11 +194,14 @@ public class AuthServiceImpl implements AuthService {
      * @param request 登录参数
      * @param ip      登录 IP
      * @param ua      浏览器 UA
-     * @param clientId   来源客户端 id
+     * @param clientId   来源客户端 id（必填，缺失抛 10001）
      * @return 登录响应（含 token）
      */
     @Override
     public LoginVO login(LoginRequest request, String ip, String ua, String clientId) {
+        // 来源客户端标识必填：会话按来源客户端隔离用户配置，缺失会让 /user/config/**
+        // 在登录后全部返回 10001，因此在入口直接拦下，避免签发半残会话
+        String sessionClientId = requireClientId(clientId);
         // 账号维度的失败计数只能约束「针对同一账号」的爆破，攻击者轮换账号名即可绕过；
         // 因此先按来源 IP 做一次总请求限流，与直连登录的 ip-request-limit 口径对齐。
         enforceLoginIpRateLimit(ip);
@@ -220,8 +228,8 @@ public class AuthServiceImpl implements AuthService {
         user.setLastLoginTime(LocalDateTime.now());
         userMapper.updateById(user);
 
-        String token = createSession(user.getUid(), clientId);
-        writeLoginLog(user.getUid(), clientId, loginType, ip, ua, 1);
+        String token = createSession(user.getUid(), sessionClientId);
+        writeLoginLog(user.getUid(), sessionClientId, loginType, ip, ua, 1);
         return buildLoginVO(user, token);
     }
 
@@ -677,16 +685,39 @@ public class AuthServiceImpl implements AuthService {
     }
 
     /**
+     * 校验并规范化来源客户端标识（登录 / 注册必填请求头 {@code UC-Client-Id}）
+     *
+     * <p>该标识决定会话归属的客户端，用户自助面接口（如 {@code /user/config/**}）按它隔离
+     * 数据；会话一旦签发就无法再补写，所以只能在登录 / 注册入口强制必填。长度上限与
+     * {@code user_config.client_id}、{@code login_log.client_id} 的列宽（64）保持一致，
+     * 避免校验通过后在写库阶段才炸。</p>
+     *
+     * @param clientId 请求头原始值
+     * @return 去除首尾空白后的客户端标识
+     */
+    private String requireClientId(String clientId) {
+        if (!StringUtils.hasText(clientId)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "缺少来源客户端标识（UC-Client-Id）");
+        }
+        String normalized = clientId.trim();
+        if (normalized.length() > CLIENT_ID_MAX_LENGTH) {
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "来源客户端标识长度不能超过 " + CLIENT_ID_MAX_LENGTH + " 个字符");
+        }
+        return normalized;
+    }
+
+    /**
      * 签发会话：生成 token 并写入 Redis（设备数不限，删除 key 即踢下线）
      *
      * @param uid   用户 uid
-     * @param clientId 来源客户端 id（可为空）
+     * @param clientId 来源客户端 id（登录 / 注册已在入口校验非空，此处仅做兜底规范化）
      * @return 会话 token
      */
     @Override
     public String createSession(Long uid, String clientId) {
         String token = SignUtil.generateToken();
-        SessionInfo session = new SessionInfo(uid, clientId == null ? "" : clientId, LocalDateTime.now());
+        SessionInfo session = new SessionInfo(uid, clientId == null ? "" : clientId.trim(), LocalDateTime.now());
         try {
             stringRedisTemplate.opsForValue().set(
                     RedisKeyUtil.token(token),
