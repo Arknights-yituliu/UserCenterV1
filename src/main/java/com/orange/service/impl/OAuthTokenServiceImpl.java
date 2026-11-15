@@ -911,9 +911,9 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      * <p>权限基准取用户对目标应用的有效授权（受用户自定义授权范围约束），
      * 可选传 scope 收敛为子集，超出即拒绝（防提权）。</p>
      *
-     * <p>目标应用：传入 {@code clientId} 表示「代某个已登记应用签发」，会校验该应用存在、启用且已审批；
-     * 不传则签成「用户个人令牌」——user 侧前端本身不注册 oauth client，因此用保留标识
-     * {@link #USER_SELF_CLIENT_ID} 承载归属，权限上限为系统可自助范围（不含元范围 {@code all}）。
+     * <p>目标应用：传入其它 {@code clientId} 表示「代某个已登记应用签发」，会校验该应用存在、启用且已审批；
+     * 不传、或传保留标识 {@link #USER_SELF_CLIENT_ID}，则签成「用户个人令牌」——user 侧前端本身不注册
+     * oauth client，该标识直接放行、不查 {@code oauth_client}，权限上限为系统可自助范围（不含 {@code all}）。
      * 注意与登录来源客户端无关：{@code UC-Client-Id} 只表示从哪个前端登录，不参与令牌归属。</p>
      *
      * <p>元范围 {@code all} 不允许自助签发（应用登记了 all 时必须显式用 scope 收窄），
@@ -926,11 +926,12 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         if (uid == null) {
             throw new BusinessException(ResultCode.NOT_LOGIN);
         }
-        // 传了 client_id → 代该应用签发（查表校验启用+审批）；
-        // 不传 → 用户个人令牌，用保留标识承载，不查 oauth_client。
-        OAuthClient client = StringUtils.hasText(requestedClientId)
-                ? requireEnabledClient(requestedClientId.trim())
-                : userSelfClient();
+        // 保留标识或空缺 → 用户个人令牌，直接放行、不查 oauth_client；
+        // 其它值 → 代该应用签发，查表校验启用+审批。
+        String targetClientId = requestedClientId == null ? null : requestedClientId.trim();
+        boolean personalToken = !StringUtils.hasText(targetClientId)
+                || USER_SELF_CLIENT_ID.equals(targetClientId);
+        OAuthClient client = personalToken ? userSelfClient() : requireEnabledClient(targetClientId);
         String heldScope = resolveGrantScope(client, null, uid);
         // 先按请求收敛（只减不增），再对最终范围做策略校验
         String finalScope = StringUtils.hasText(requestedScope)

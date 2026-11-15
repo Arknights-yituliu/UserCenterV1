@@ -157,6 +157,17 @@ class OAuthTokenServiceImplTest {
     }
 
     @Test
+    void explicitReservedClientIdSkipsClientLookup() {
+        // 显式传 this_land_cloud 等同于个人令牌：直接放行，不查 oauth_client
+        service.issueAccessTokenFromSession(9L, "this_land_cloud", 3600L, null, "个人令牌");
+
+        ArgumentCaptor<OAuthCustomToken> record = ArgumentCaptor.forClass(OAuthCustomToken.class);
+        verify(oauthCustomTokenMapper).insert(record.capture());
+        assertEquals("this_land_cloud", record.getValue().getClientId());
+        verifyNoInteractions(oauthClientMapper);
+    }
+
+    @Test
     void personalTokenRejectsAllScope() {
         BusinessException exception = assertThrows(BusinessException.class,
                 () -> service.issueAccessTokenFromSession(9L, null, 3600L, "all", "个人令牌"));

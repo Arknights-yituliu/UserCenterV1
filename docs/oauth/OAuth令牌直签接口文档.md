@@ -63,7 +63,7 @@ POST /oauth2/token/from-refresh   # 凭证为 refresh_token（协议域，凭证
 | 参数 | 必填 | 说明 |
 | --- | --- | --- |
 | `refresh_token` | `/oauth2/token/from-refresh` 必填 | OAuth 刷新令牌，本端点的认证凭证 |
-| `client_id` | 否 | **目标应用**的客户端 ID。`/user/oauth/custom-tokens`：传了表示「代该已登记应用签发」，须启用且已审批（否则 `90001` / `90013`）；**不传则签成「用户个人令牌」**，归属保留标识 `this_land_cloud`（不入 `oauth_client` 表，因为 user 侧前端本身不注册 oauth client）。`/oauth2/token/from-refresh` 时同样可不传，传了则须与令牌归属一致 |
+| `client_id` | 否 | **目标应用**的客户端 ID。`/user/oauth/custom-tokens`：传**其它值**表示「代该已登记应用签发」，须启用且已审批（否则 `90001` / `90013`）；**不传（含空白）或显式传保留标识 `this_land_cloud`** 则签成「用户个人令牌」，该标识直接放行、不查 `oauth_client`（user 侧前端本身不注册 oauth client）。`/oauth2/token/from-refresh` 时同样可不传，传了则须与令牌归属一致 |
 | `expires_in` | 是 | 期望的 `access_token` 有效期（秒），必须为大于 0 的整数，**上限 318038400 秒（10 年零 1 个月）**，超限返回 `10001` |
 | `scope` | 否 | 期望收敛到的权限范围，英文逗号分隔。省略表示沿用凭证原有范围 |
 | `name` | 是 | 本次签发的名称，用户用于在「我的自定义令牌」中区分用途；去空白后非空且不超过 50 字符 |
@@ -104,8 +104,8 @@ POST /oauth2/token/from-refresh   # 凭证为 refresh_token（协议域，凭证
 
 1. `UserAuthInterceptor` 从请求头解析登录会话，注入 `UserContext`；未登录或会话失效返回 `80001`。
 2. 确定目标应用：
-   - **传了 `client_id`**：代该应用签发，查 `oauth_client` 表校验启用 + 已审批，否则 `90001` / `90013`；授权范围取用户对该应用的有效授权。
-   - **没传（含空白）**：签成「用户个人令牌」，令牌归属保留标识 `this_land_cloud`。user 侧前端不注册 oauth client，因此该标识**不查表、不落库**，只作为令牌记录里的归属与数据隔离维度。权限上限取系统可自助范围（`OAuthScope.selectable()` 全集，天然不含 `all`）。
+   - **传了其它 `client_id`**：代该应用签发，查 `oauth_client` 表校验启用 + 已审批，否则 `90001` / `90013`；授权范围取用户对该应用的有效授权。
+   - **没传（含空白）或显式传 `this_land_cloud`**：签成「用户个人令牌」，令牌归属保留标识 `this_land_cloud`。user 侧前端不注册 oauth client，因此该标识**直接放行、不查表**，只作为令牌记录里的归属与数据隔离维度。权限上限取系统可自助范围（`OAuthScope.selectable()` 全集，天然不含 `all`）。
    - 两种情况都与会话里的来源客户端标识（`UC-Client-Id`）无关——后者只表示"从哪个前端登录"，不参与令牌归属。
 3. 授权范围取 **`resolveGrantScope(client, null, uid)`**，即用户对当前应用的有效授权——**用户自定义授权范围表（`oauth_user_scope`）在此生效**，用户在确认页的裁剪/追加会被延续。个人令牌路径下该表不参与（`this_land_cloud` 下不存在自定义记录），直接用系统可自助范围。
 4. **不接受元范围 `all`**：先按请求 `scope` 做只减不增的收敛，再检查最终范围；若仍为 `all` 返回 `90003`。因此目标应用登记了 `all` 时，调用方必须显式传具体 `scope`（如 `user.read`），否则无法自助签发。该限制的目的：`all` 仅代表管理员手工授予的平台级可信应用，若允许用户自助领取，审计上无法区分"管理员授权"与"用户自签"。
@@ -196,7 +196,7 @@ expires_in=600
 &name=dashboard-readonly
 ```
 
-> 不传 `client_id` 即为「用户个人令牌」，令牌归属 `this_land_cloud`。
+> 不传 `client_id` 即为「用户个人令牌」，令牌归属 `this_land_cloud`；也可显式写 `client_id=this_land_cloud`，效果相同（该标识直接放行、不查客户端表）。
 
 ### 9.2 前端会话签发（收敛到只读）
 

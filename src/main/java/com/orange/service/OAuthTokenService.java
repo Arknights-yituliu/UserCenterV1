@@ -149,9 +149,10 @@ public interface OAuthTokenService {
      * 「我的自定义令牌」列表中查看；因此 name 为必填。</p>
      *
      * @param uid              登录用户 uid（来自用户会话认证上下文）
-     * @param clientId         目标客户端 ID（可选）：传了表示代该应用签发，须已登记、启用且已审批
-     *                         （否则 90001/90013）；为空表示签成「用户个人令牌」，归属保留标识
-     *                         {@code this_land_cloud}，权限上限取系统可自助范围（不含 all）
+     * @param clientId         目标客户端 ID（可选）：传其它值表示代该应用签发，须已登记、启用且已审批
+     *                         （否则 90001/90013）；传空或保留标识 {@code this_land_cloud} 表示签成
+     *                         「用户个人令牌」，该标识直接放行、不查 oauth_client，
+     *                         权限上限取系统可自助范围（不含 all）
      * @param expiresInSeconds access_token 有效期（秒）
      * @param scope            期望收敛到的权限范围（英文逗号分隔，可空表示沿用凭证原范围）
      * @param name             本次签发的名称（必填，不超过 50 字符）
