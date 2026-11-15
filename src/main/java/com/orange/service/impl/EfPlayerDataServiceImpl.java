@@ -95,19 +95,31 @@ public class EfPlayerDataServiceImpl implements EfPlayerDataService {
     }
 
     /**
-     * 读取指定角色的玩家数据：先校验绑定归属，再把 JSON 文本解析为对象返回
+     * 读取玩家数据：未指定角色时读取当前用户已绑定角色中最近保存的数据
      *
      * <p>绑定关系不存在时返回业务码 80008，避免用户读取他人角色数据；
-     * 绑定存在但数据行缺失（异常清理场景）时返回 null。</p>
+     * 绑定存在但数据行缺失（异常清理场景）时返回 null；
+     * 未指定角色且无可用数据时返回参数错误，与明日方舟默认读取行为一致。</p>
      *
      * @param uid      用户中心 UID
-     * @param roleId   终末地游戏内角色 UID
-     * @param serverId 服务器 ID，可省略（按空串处理）
+     * @param roleId   终末地游戏内角色 UID，省略或空串时读取最新玩家数据
+     * @param serverId 服务器 ID，指定角色时省略按空串处理；未指定角色时不可单独指定
      * @return 玩家数据；绑定存在但数据行缺失时返回 null
      */
     @Override
     public EfPlayerDataVO getPlayerData(Long uid, String roleId, String serverId) {
         String normalizedServerId = normalizeServerId(serverId);
+        if (roleId == null || roleId.isEmpty()) {
+            if (!normalizedServerId.isEmpty()) {
+                throw new BusinessException(ResultCode.PARAM_VALID_ERROR, "未指定roleId时不能指定serverId");
+            }
+            EfPlayerData latest = playerDataMapper.selectLatestByOwner(uid);
+            if (latest == null) {
+                throw new BusinessException(ResultCode.PARAM_VALID_ERROR, "当前用户暂无可用的终末地玩家数据");
+            }
+            return new EfPlayerDataVO(latest.getRoleId(), latest.getServerId(),
+                    parsePlayerData(latest), latest.getUpdateTime());
+        }
         validateIdentity(roleId, normalizedServerId);
         if (bindingMapper.countBinding(roleId, normalizedServerId, uid) == 0) {
             throw new BusinessException(ResultCode.FORBIDDEN);

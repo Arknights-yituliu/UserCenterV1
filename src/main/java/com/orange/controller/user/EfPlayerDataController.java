@@ -60,16 +60,16 @@ public class EfPlayerDataController {
     }
 
     /**
-     * 读取指定角色的玩家数据：角色由 roleId + serverId 定位，且必须已绑定到当前用户
+     * 读取玩家数据：省略角色时默认读取最新导入，指定角色时必须已绑定到当前用户
      *
-     * @param roleId   终末地游戏内角色 UID
-     * @param serverId 服务器 ID，可省略（按空串处理）
+     * @param roleId   终末地游戏内角色 UID，可省略（读取最新玩家数据）
+     * @param serverId 服务器 ID，指定角色时可省略（按空串处理）
      * @return 玩家数据 JSON 对象，响应仅允许私人缓存
      */
-    @Operation(summary = "读取终末地玩家数据")
+    @Operation(summary = "读取终末地玩家数据", description = "不传roleId时默认返回当前用户已绑定角色中最新导入的玩家数据")
     @GetMapping("/player-data")
     public ResponseEntity<Result<EfPlayerDataVO>> getPlayerData(
-            @RequestParam("roleId") String roleId,
+            @RequestParam(value = "roleId", required = false) String roleId,
             @RequestParam(value = "serverId", required = false) String serverId) {
         EfPlayerDataVO data = efPlayerDataService.getPlayerData(UserContext.requireUid(), roleId, serverId);
         return ResponseEntity.ok()

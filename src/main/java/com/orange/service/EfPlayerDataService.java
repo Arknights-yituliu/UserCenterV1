@@ -26,12 +26,12 @@ public interface EfPlayerDataService {
     List<EfAccountVO> listBoundAccounts(Long uid);
 
     /**
-     * 读取指定角色的玩家数据：先校验当前用户对该角色的绑定关系，再按角色定位数据
+     * 读取玩家数据：指定角色时校验绑定归属，未指定时读取已绑定角色中最近保存的数据
      *
      * @param uid      用户中心 UID
-     * @param roleId   终末地游戏内角色 UID
-     * @param serverId 服务器 ID，可省略（按空串处理）
-     * @return 玩家数据；绑定存在但数据行缺失时返回 null
+     * @param roleId   终末地游戏内角色 UID，省略或空串时读取最新玩家数据
+     * @param serverId 服务器 ID，指定角色时省略按空串处理；未指定角色时不可单独指定
+     * @return 玩家数据；指定角色已绑定但数据行缺失时返回 null，默认读取无可用数据时返回参数错误
      */
     EfPlayerDataVO getPlayerData(Long uid, String roleId, String serverId);
 

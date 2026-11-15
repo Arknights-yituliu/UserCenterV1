@@ -124,6 +124,17 @@ Authorization: Bearer <access_token>
 
 ### 2.2 读取玩家数据
 
+不传参数时，默认返回当前令牌用户已绑定角色中最近保存的一份玩家数据：
+
+```http
+GET /oauth2/ef-accounts/player-data
+Authorization: Bearer <access_token>
+```
+
+默认选择按玩家数据的 `updateTime` 倒序，同一时间按 `roleId`、`serverId` 升序；仅导入寻访记录或玩家数据已被清理的角色不参与选择。没有可用玩家数据时返回 `code=10002`。
+
+也可以指定角色读取：
+
 ```http
 GET /oauth2/ef-accounts/player-data?roleId={roleId}&serverId={serverId}
 Authorization: Bearer <access_token>
@@ -133,8 +144,8 @@ Authorization: Bearer <access_token>
 
 | 参数 | 位置 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `roleId` | query | 是 | 终末地游戏内角色 UID，不超过 32 位可见 ASCII 字符 |
-| `serverId` | query | 否 | 服务器 ID，不超过 16 位可见 ASCII 字符；省略时按空串定位 |
+| `roleId` | query | 否 | 终末地游戏内角色 UID，不超过 32 位可见 ASCII 字符；省略或空串时读取最新玩家数据 |
+| `serverId` | query | 否 | 服务器 ID，不超过 16 位可见 ASCII 字符；指定 `roleId` 时省略按空串定位；未指定 `roleId` 时不可单独指定非空 `serverId` |
 
 成功响应 HTTP `200`，并携带响应头 `Cache-Control: private, no-cache`：
 
@@ -160,7 +171,7 @@ Authorization: Bearer <access_token>
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `roleId` | string | 角色 UID |
-| `serverId` | string | 服务器 ID，未传时为 `""` |
+| `serverId` | string | 实际返回角色的服务器 ID；显式指定角色且省略服务器时为 `""` |
 | `playerData` | object | 保存时提交的 JSON 对象，服务端原样返回 |
 | `updateTime` | string | 最近一次保存时间 |
 
@@ -172,7 +183,7 @@ Authorization: Bearer <access_token>
 | --- | --- | --- |
 | `200` | `80001` | access token 缺失、无效或已过期 |
 | `200` | `80008` | 缺少 `ef-data.read`，或该角色未绑定到当前令牌用户 |
-| `200` | `10002` | 缺少 `roleId` 或角色标识格式非法 |
+| `200` | `10002` | 无可用默认玩家数据、角色标识格式非法，或未指定 `roleId` 却单独指定 `serverId` |
 | `200` | `40001` | 服务端内部错误或存储数据损坏 |
 查询他人角色与查询不存在的角色返回同一个 `80008`，服务端不区分、不暴露角色是否存在。
 

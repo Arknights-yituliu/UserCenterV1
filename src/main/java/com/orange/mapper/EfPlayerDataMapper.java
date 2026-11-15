@@ -47,4 +47,19 @@ public interface EfPlayerDataMapper extends BaseMapper<EfPlayerData> {
     @Select("SELECT * FROM ef_player_data WHERE role_id = #{roleId} AND server_id = #{serverId}")
     EfPlayerData selectByRoleAndServer(@Param("roleId") String roleId,
                                        @Param("serverId") String serverId);
+
+    /**
+     * 查询当前用户已绑定角色中最近保存的玩家数据，跳过仅有寻访记录或数据已清理的角色
+     *
+     * <p>按玩家数据保存时间排序，避免寻访记录导入刷新绑定时间影响默认选择；
+     * 保存时间相同时按角色与服务器排序，保证结果稳定。</p>
+     *
+     * @param ownerUid 用户中心 UID，排除匿名导入档案
+     * @return 最新玩家数据，无可用数据时返回 null
+     */
+    @Select("SELECT d.* FROM ef_player_data d "
+            + "INNER JOIN ef_account_binding b ON b.role_id = d.role_id AND b.server_id = d.server_id "
+            + "WHERE b.owner_uid = #{ownerUid} AND b.owner_uid > 0 "
+            + "ORDER BY d.update_time DESC, d.role_id ASC, d.server_id ASC LIMIT 1")
+    EfPlayerData selectLatestByOwner(@Param("ownerUid") Long ownerUid);
 }

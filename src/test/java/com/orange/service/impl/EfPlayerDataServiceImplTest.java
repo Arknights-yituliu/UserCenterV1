@@ -10,6 +10,8 @@ import com.orange.mapper.EfAccountBindingMapper;
 import com.orange.mapper.EfPlayerDataMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -119,6 +121,58 @@ class EfPlayerDataServiceImplTest {
         when(playerDataMapper.selectByRoleAndServer("role-1", "")).thenReturn(null);
 
         assertThat(service().getPlayerData(UID, "role-1", null)).isNull();
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    void readsLatestPlayerDataWhenRoleIdOmitted(String roleId) {
+        EfPlayerData latest = new EfPlayerData();
+        latest.setRoleId("latest-role");
+        latest.setServerId("2");
+        latest.setPlayerData("{\"level\":60}");
+        latest.setUpdateTime(LocalDateTime.of(2026, 11, 16, 12, 0));
+        when(playerDataMapper.selectLatestByOwner(UID)).thenReturn(latest);
+
+        EfPlayerDataVO result = service().getPlayerData(UID, roleId, null);
+
+        assertThat(result.getRoleId()).isEqualTo("latest-role");
+        assertThat(result.getServerId()).isEqualTo("2");
+        assertThat(result.getPlayerData().get("level").asInt()).isEqualTo(60);
+        assertThat(result.getUpdateTime()).isEqualTo(latest.getUpdateTime());
+        verify(bindingMapper, never()).countBinding(anyString(), anyString(), anyLong());
+        verify(playerDataMapper, never()).selectByRoleAndServer(anyString(), anyString());
+    }
+
+    @Test
+    void rejectsDefaultReadWhenNoPlayerDataAvailable() {
+        when(playerDataMapper.selectLatestByOwner(UID)).thenReturn(null);
+
+        assertThatThrownBy(() -> service().getPlayerData(UID, null, null))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("code", 10002)
+                .hasMessage("当前用户暂无可用的终末地玩家数据");
+    }
+
+    @Test
+    void rejectsServerIdWithoutRoleId() {
+        assertThatThrownBy(() -> service().getPlayerData(UID, null, "1"))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("code", 10002);
+
+        verify(playerDataMapper, never()).selectLatestByOwner(anyLong());
+    }
+
+    @Test
+    void rejectsCorruptLatestPlayerData() {
+        EfPlayerData latest = new EfPlayerData();
+        latest.setRoleId("latest-role");
+        latest.setServerId("1");
+        latest.setPlayerData("invalid-json");
+        when(playerDataMapper.selectLatestByOwner(UID)).thenReturn(latest);
+
+        assertThatThrownBy(() -> service().getPlayerData(UID, null, null))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("code", 40001);
     }
 
     /**
