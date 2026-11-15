@@ -3,11 +3,13 @@ package com.orange.service.impl;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.orange.common.config.OAuthProperties;
+import com.orange.common.context.UserContext;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.util.OAuthUtil;
 import com.orange.common.util.RedisKeyUtil;
 import com.orange.entity.po.OAuthClient;
+import com.orange.entity.po.OAuthCustomToken;
 import com.orange.entity.po.OAuthGrant;
 import com.orange.entity.vo.oauth.OAuthClientGrantGroupVO;
 import com.orange.entity.vo.oauth.OAuthGrantItemVO;
@@ -20,6 +22,7 @@ import com.orange.mapper.OAuthGrantMapper;
 import com.orange.mapper.OAuthUserScopeMapper;
 import com.orange.mapper.UserInfoMapper;
 import com.orange.service.OAuthTokenStore;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -39,6 +42,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -52,6 +56,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -105,6 +110,126 @@ class OAuthTokenServiceImplTest {
                 userInfoMapper, redisTemplate, objectMapper, oauthTokenStore,
                 new OAuthProperties("admin@example.com", "https://auth.example.com/login",
                         "https://auth.example.com/consent"));
+    }
+
+    @AfterEach
+    void tearDown() {
+        UserContext.clear();
+    }
+
+    @Test
+    void sessionIssueUsesRequestedClientIdAndIgnoresSessionSourceClient() {
+        UserContext.setClientId("web-console");
+        when(oauthClientMapper.selectById("app-a")).thenReturn(enabledClient("app-a"));
+
+        service.issueAccessTokenFromSession(9L, "app-a", 3600L, null, "长期令牌");
+
+        ArgumentCaptor<OAuthCustomToken> record = ArgumentCaptor.forClass(OAuthCustomToken.class);
+        verify(oauthCustomTokenMapper).insert(record.capture());
+        assertEquals("app-a", record.getValue().getClientId());
+        // 会话来源标识只代表“从哪个前端登录”，不能被当成目标应用去查表或兜底
+        verify(oauthClientMapper, never()).selectById("web-console");
+    }
+
+    @Test
+    void sessionIssueWithoutClientIdIssuesPersonalToken() {
+        // user 侧前端不注册 oauth client：不传 client_id 时应签成个人令牌，且不去查客户端表
+        UserContext.setClientId("web-console");
+
+        service.issueAccessTokenFromSession(9L, null, 3600L, null, "个人令牌");
+
+        ArgumentCaptor<OAuthCustomToken> record = ArgumentCaptor.forClass(OAuthCustomToken.class);
+        verify(oauthCustomTokenMapper).insert(record.capture());
+        assertEquals("this_land_cloud", record.getValue().getClientId());
+        assertTrue(record.getValue().getScope().contains("user.read"));
+        assertFalse(record.getValue().getScope().contains("all"));
+        verifyNoInteractions(oauthClientMapper);
+    }
+
+    @Test
+    void personalTokenScopeIsNarrowedToRequestedScopes() {
+        service.issueAccessTokenFromSession(9L, "  ", 3600L, "user.read", "个人令牌");
+
+        ArgumentCaptor<OAuthCustomToken> record = ArgumentCaptor.forClass(OAuthCustomToken.class);
+        verify(oauthCustomTokenMapper).insert(record.capture());
+        assertEquals("this_land_cloud", record.getValue().getClientId());
+        assertEquals("user.read", record.getValue().getScope());
+    }
+
+    @Test
+    void personalTokenRejectsAllScope() {
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.issueAccessTokenFromSession(9L, null, 3600L, "all", "个人令牌"));
+
+        assertEquals(ResultCode.OAUTH_SCOPE_INVALID.getCode(), exception.getCode());
+        verifyNoInteractions(oauthCustomTokenMapper);
+    }
+
+    @Test
+    void sessionIssueRejectsAllScopeWhenClientRegisteredAll() {
+        when(oauthClientMapper.selectById("app-all")).thenReturn(allScopeClient("app-all"));
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.issueAccessTokenFromSession(9L, "app-all", 3600L, null, "长期令牌"));
+
+        assertEquals(ResultCode.OAUTH_SCOPE_INVALID.getCode(), exception.getCode());
+        verifyNoInteractions(oauthCustomTokenMapper);
+    }
+
+    @Test
+    void sessionIssueAllowsConcreteScopeForAllScopeClient() {
+        when(oauthClientMapper.selectById("app-all")).thenReturn(allScopeClient("app-all"));
+
+        service.issueAccessTokenFromSession(9L, "app-all", 3600L, "user.read", "长期令牌");
+
+        ArgumentCaptor<OAuthCustomToken> record = ArgumentCaptor.forClass(OAuthCustomToken.class);
+        verify(oauthCustomTokenMapper).insert(record.capture());
+        assertEquals("user.read", record.getValue().getScope());
+    }
+
+    @Test
+    void directIssueRejectsExpiryBeyondTenYearsOneMonth() {
+        // 上限 = (365 × 10 + 31) 天 = 3681 天 = 318038400 秒，多一秒即拒绝
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.issueAccessTokenFromSession(9L, null, 318_038_401L, null, "长期令牌"));
+
+        assertEquals(ResultCode.PARAM_ERROR.getCode(), exception.getCode());
+        verifyNoInteractions(oauthCustomTokenMapper);
+    }
+
+    @Test
+    void directIssueAcceptsExpiryAtLimit() {
+        service.issueAccessTokenFromSession(9L, null, 318_038_400L, null, "长期令牌");
+
+        verify(oauthCustomTokenMapper).insert(any(OAuthCustomToken.class));
+    }
+
+    @Test
+    void directIssueRejectsMaxLongExpiryWithoutOverflow() {
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.issueAccessTokenFromSession(9L, null, Long.MAX_VALUE, null, "长期令牌"));
+
+        assertEquals(ResultCode.PARAM_ERROR.getCode(), exception.getCode());
+        verifyNoInteractions(oauthCustomTokenMapper);
+    }
+
+    private OAuthClient allScopeClient(String clientId) {
+        OAuthClient client = new OAuthClient();
+        client.setId(clientId);
+        client.setScopes("all");
+        client.setAuthMethods("client_secret_post");
+        client.setOwnerEnabled(1);
+        client.setAdminApproved(1);
+        return client;
+    }
+
+    private OAuthClient enabledClient(String clientId) {
+        OAuthClient client = new OAuthClient();
+        client.setId(clientId);
+        client.setScopes("user.read");
+        client.setOwnerEnabled(1);
+        client.setAdminApproved(1);
+        return client;
     }
 
     @Test

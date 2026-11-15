@@ -13,7 +13,7 @@ POST /oauth2/token/from-refresh   # 凭证为 refresh_token（协议域，凭证
 
 | 端点 | 凭证 | 认证方式 | 权限基准 | 典型调用方 |
 | --- | --- | --- | --- | --- |
-| `/user/oauth/custom-tokens` | 当前登录会话 | `UserAuthInterceptor` 从请求头解析 → `UserContext` | 用户对目标应用的有效授权（受自定义授权范围约束） | **本系统自有前端**（用户已登录） |
+| `/user/oauth/custom-tokens` | 当前登录会话 | `UserAuthInterceptor` 从请求头解析 → `UserContext` | 传 `client_id`：用户对该应用的有效授权（受自定义授权范围约束）；不传：系统可自助范围全集（个人令牌，归属 `this_land_cloud`） | **本系统自有前端**（用户已登录） |
 | `/oauth2/token/from-refresh` | `refresh_token` | 端点内校验凭证，无拦截器 | 刷新令牌记录中的 scope（不重算用户自定义范围） | 已持有 OAuth 刷新令牌的服务端 |
 
 ### 1.1 与标准协议的关系
@@ -63,8 +63,8 @@ POST /oauth2/token/from-refresh   # 凭证为 refresh_token（协议域，凭证
 | 参数 | 必填 | 说明 |
 | --- | --- | --- |
 | `refresh_token` | `/oauth2/token/from-refresh` 必填 | OAuth 刷新令牌，本端点的认证凭证 |
-| `client_id` | 条件必填 | 目标客户端 ID。`/user/oauth/custom-tokens` 会话未携带来源客户端时必须传；`/oauth2/token/from-refresh` 时可不传，传了则须与令牌归属一致 |
-| `expires_in` | 是 | 期望的 `access_token` 有效期（秒），必须为大于 0 的整数 |
+| `client_id` | 否 | **目标应用**的客户端 ID。`/user/oauth/custom-tokens`：传了表示「代该已登记应用签发」，须启用且已审批（否则 `90001` / `90013`）；**不传则签成「用户个人令牌」**，归属保留标识 `this_land_cloud`（不入 `oauth_client` 表，因为 user 侧前端本身不注册 oauth client）。`/oauth2/token/from-refresh` 时同样可不传，传了则须与令牌归属一致 |
+| `expires_in` | 是 | 期望的 `access_token` 有效期（秒），必须为大于 0 的整数，**上限 318038400 秒（10 年零 1 个月）**，超限返回 `10001` |
 | `scope` | 否 | 期望收敛到的权限范围，英文逗号分隔。省略表示沿用凭证原有范围 |
 | `name` | 是 | 本次签发的名称，用户用于在「我的自定义令牌」中区分用途；去空白后非空且不超过 50 字符 |
 
@@ -103,8 +103,12 @@ POST /oauth2/token/from-refresh   # 凭证为 refresh_token（协议域，凭证
 ### 5.1 会话直签（`POST /user/oauth/custom-tokens`，凭证为登录会话）
 
 1. `UserAuthInterceptor` 从请求头解析登录会话，注入 `UserContext`；未登录或会话失效返回 `80001`。
-2. 确定目标客户端：优先取会话记录的来源客户端 `clientId`（`UserContext.getClientId()`），为空时使用请求参数 `client_id`；两者都为空返回 `10001`。
-3. 授权范围取 **`resolveGrantScope(client, null, uid)`**，即用户对当前应用的有效授权——**用户自定义授权范围表（`oauth_user_scope`）在此生效**，用户在确认页的裁剪/追加会被延续。
+2. 确定目标应用：
+   - **传了 `client_id`**：代该应用签发，查 `oauth_client` 表校验启用 + 已审批，否则 `90001` / `90013`；授权范围取用户对该应用的有效授权。
+   - **没传（含空白）**：签成「用户个人令牌」，令牌归属保留标识 `this_land_cloud`。user 侧前端不注册 oauth client，因此该标识**不查表、不落库**，只作为令牌记录里的归属与数据隔离维度。权限上限取系统可自助范围（`OAuthScope.selectable()` 全集，天然不含 `all`）。
+   - 两种情况都与会话里的来源客户端标识（`UC-Client-Id`）无关——后者只表示"从哪个前端登录"，不参与令牌归属。
+3. 授权范围取 **`resolveGrantScope(client, null, uid)`**，即用户对当前应用的有效授权——**用户自定义授权范围表（`oauth_user_scope`）在此生效**，用户在确认页的裁剪/追加会被延续。个人令牌路径下该表不参与（`this_land_cloud` 下不存在自定义记录），直接用系统可自助范围。
+4. **不接受元范围 `all`**：先按请求 `scope` 做只减不增的收敛，再检查最终范围；若仍为 `all` 返回 `90003`。因此目标应用登记了 `all` 时，调用方必须显式传具体 `scope`（如 `user.read`），否则无法自助签发。该限制的目的：`all` 仅代表管理员手工授予的平台级可信应用，若允许用户自助领取，审计上无法区分"管理员授权"与"用户自签"。
 
 ### 5.2 刷新令牌直签（`POST /oauth2/token/from-refresh`，凭证 `refresh_token`）
 
@@ -126,7 +130,7 @@ POST /oauth2/token/from-refresh   # 凭证为 refresh_token（协议域，凭证
 | 列 | 内容 |
 | --- | --- |
 | `uid` | 签发用户 |
-| `client_id` | 目标客户端 ID |
+| `client_id` | 目标客户端 ID；个人令牌时为保留标识 `this_land_cloud` |
 | `name` | 请求方填写的名称（≤50 字符） |
 | `token` | 本次签发的 `access_token` **明文** |
 | `scope` | 本次令牌实际携带的权限范围 |
@@ -150,7 +154,7 @@ POST /oauth2/token/from-refresh   # 凭证为 refresh_token（协议域，凭证
 
 补充规则：
 
-- 判定基准是**凭证自身已有范围**。会话直签路径的基准即第 5.1 节的 `resolveGrantScope` 结果，因此同样受用户自定义授权范围约束。
+- 判定基准是**凭证自身已有范围**。会话直签路径的基准即第 5.1 节的 `resolveGrantScope` 结果：代应用签发时受该应用登记范围与用户自定义授权范围约束；个人令牌（不传 `client_id`）时基准为系统可自助范围全集。
 - 凭证范围若为元范围 `all`，视为覆盖全部已知权限，任何系统已知的具体权限都属其子集。
 - 请求集合中的每一项都必须是系统已知标识，未知字符串一律拒绝，防止任意值被写入令牌。
 
@@ -160,11 +164,11 @@ POST /oauth2/token/from-refresh   # 凭证为 refresh_token（协议域，凭证
 
 | HTTP | code | 含义 | 处理建议 |
 | --- | --- | --- | --- |
-| 200 | `10001` | 参数错误：`expires_in` 非正、`/oauth2/token/from-refresh` 未传 `refresh_token`、`scope` 为空串、`name` 为空或超过 50 字符、会话与请求均无 `client_id` | 修正请求参数 |
+| 200 | `10001` | 参数错误：`expires_in` 非正或超过上限（318038400 秒 = 10 年零 1 个月）、`/oauth2/token/from-refresh` 未传 `refresh_token`、`scope` 为空串、`name` 为空或超过 50 字符 | 修正请求参数 |
 | 200 | `40001` | 系统繁忙（未处理异常） | 稍后重试并联系管理员 |
 | 200 | `80001` | 未登录或登录已失效（`/user/oauth/custom-tokens` 会话无效） | 引导用户重新登录后重试 |
 | 200 | `90001` | 客户端不存在或已停用 | 检查 `client_id`，停止调用并联系管理员 |
-| 200 | `90003` | 权限范围不合法（超范围或未知标识） | 改为凭证已有范围的子集 |
+| 200 | `90003` | 权限范围不合法（超范围或未知标识）；`/user/oauth/custom-tokens` 最终范围为元范围 `all` 时也返回此码 | 改为凭证已有范围的具体子集 |
 | 200 | `90009` | 令牌无效、已过期，或与 `client_id` 不匹配 | 清除本地凭证并重新授权 |
 | 200 | `90013` | 客户端待管理员审批或已被封禁 | 联系管理员完成审批或解除封禁 |
 
@@ -172,14 +176,16 @@ POST /oauth2/token/from-refresh   # 凭证为 refresh_token（协议域，凭证
 
 1. **无 `client_secret` 保护**：`/oauth2/token/from-refresh` 仅凭 `refresh_token` 本身认证，等价于「持有刷新令牌即可换发访问令牌」。凭证必须以服务端密钥管理方式保存，严禁下发到浏览器或客户端应用。`/user/oauth/custom-tokens` 则由登录会话认证，其安全边界等同用户自身的登录态。
 2. **必须使用 HTTPS**；`/oauth2/token/from-refresh` 应通过网关对来源 IP 做白名单约束（本端点本身不做来源校验）。
-3. **`expires_in` 由调用方决定**，务必按最小必要原则设置；本端点不会替调用方收敛过长有效期。
-4. **不要把 `scope` 当作提权手段**：它在设计上只能下降。若业务确实需要为用户增加授权，应走用户本人的授权流程（确认页 `POST /oauth2/consent` 或用户侧接口 `POST /user/oauth/grants/scopes/grant`），这两处有明确的用户意图确认。
-5. **日志脱敏**：凭证、`access_token` 明文不得写入日志、监控或错误上报。
-6. **`access_token` 明文落库**：按需求本端点签发的 `access_token` 会以明文写入 `oauth_custom_token` 表，供用户在「我的自定义令牌」中复制复用。该表因此成为敏感数据源：需限制数据库访问权限、纳入备份加密与审计；如需下线该能力，应把 `token` 列加密存储或改为仅存摘要（届时用户将无法回看令牌原文）。
+3. **`expires_in` 上限 10 年零 1 个月**（318038400 秒）：直签令牌是跨系统长期凭证，无上限等于可签发事实永久凭证，因此超限直接返回 `10001` 拒绝，**不做静默截断**；同时避免极端入参导致 `LocalDateTime.plusSeconds` 溢出。即便在上限内，仍建议按最小必要原则设置。
+4. **元范围 `all` 不能自助签发**：`/user/oauth/custom-tokens` 的最终范围若为 `all` 直接返回 `90003`，只有管理员为机密客户端手工登记并授予时，`all` 才出现在授权码/直连等流程中。这样用户自签的令牌不会与"平台级可信应用"混为一谈。个人令牌（不传 `client_id`）的上限是系统可自助范围集合，本身就不含 `all`。
+5. **保留标识 `this_land_cloud`** 只用于承载「用户个人令牌」的归属，不会出现在 `oauth_client` 表中，管理员不应创建同名真实客户端。该标识会出现在令牌记录、`oauth_custom_token.client_id` 以及按客户端隔离的数据（如 `/oauth2/config/**` 的配置归属）中，属预期行为。
+6. **不要把 `scope` 当作提权手段**：它在设计上只能下降。若业务确实需要为用户增加授权，应走用户本人的授权流程（确认页 `POST /oauth2/consent` 或用户侧接口 `POST /user/oauth/grants/scopes/grant`），这两处有明确的用户意图确认。
+7. **日志脱敏**：凭证、`access_token` 明文不得写入日志、监控或错误上报。
+8. **`access_token` 明文落库**：按需求本端点签发的 `access_token` 会以明文写入 `oauth_custom_token` 表，供用户在「我的自定义令牌」中复制复用。该表因此成为敏感数据源：需限制数据库访问权限、纳入备份加密与审计；如需下线该能力，应把 `token` 列加密存储或改为仅存摘要（届时用户将无法回看令牌原文）。
 
 ## 9. 调用示例
 
-### 9.1 前端会话签发（沿用范围）
+### 9.1 前端会话签发（个人令牌，沿用系统可自助范围）
 
 ```http
 POST {UC_BASE_URL}/user/oauth/custom-tokens
@@ -189,6 +195,8 @@ Content-Type: application/x-www-form-urlencoded
 expires_in=600
 &name=dashboard-readonly
 ```
+
+> 不传 `client_id` 即为「用户个人令牌」，令牌归属 `this_land_cloud`。
 
 ### 9.2 前端会话签发（收敛到只读）
 
@@ -201,6 +209,20 @@ expires_in=600
 &scope=user.read
 &name=dashboard-readonly
 ```
+
+### 9.2.1 代某个已登记应用签发（可选）
+
+```http
+POST {UC_BASE_URL}/user/oauth/custom-tokens
+Authorization: Bearer {UC_SESSION_TOKEN}
+Content-Type: application/x-www-form-urlencoded
+
+client_id={TARGET_CLIENT_ID}
+&expires_in=600
+&name=for-third-party-site
+```
+
+> 传了 `client_id` 就按该应用校验启用 + 已审批，令牌归属该应用；该应用需为管理员已审批的客户端，否则返回 `90001` / `90013`。
 
 ### 9.3 用刷新令牌换取短时令牌
 

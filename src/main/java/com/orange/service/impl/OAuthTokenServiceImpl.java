@@ -3,7 +3,6 @@ package com.orange.service.impl;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.orange.common.config.OAuthProperties;
-import com.orange.common.context.UserContext;
 import com.orange.common.enums.OAuthClientAuthMethod;
 import com.orange.common.enums.OAuthGrantType;
 import com.orange.common.enums.OAuthScope;
@@ -92,6 +91,23 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
 
     /** uid 反向索引中 refresh_token 成员前缀 */
     private static final String OAUTH_REFRESH_MEMBER_PREFIX = "refresh:";
+
+    /**
+     * 「用户个人令牌」使用的保留客户端标识
+     *
+     * <p>user 侧前端不注册 oauth client，但令牌记录必须以 client_id 作为归属与数据隔离维度，
+     * 因此用该保留值承载：它不落 oauth_client 表，也不参与任何按应用的授权流程。
+     * 管理员不得创建同名真实客户端，避免归属歧义。</p>
+     */
+    public static final String USER_SELF_CLIENT_ID = "this_land_cloud";
+
+    /**
+     * 直签令牌有效期上限：10 年零 1 个月
+     *
+     * <p>按 365 天/年、31 天/月折算：{@code (365 × 10 + 31) 天 = 3681 天 = 318038400 秒}。
+     * 直签令牌是跨系统长期凭证，必须有一个硬上限，否则等同于可签发永久凭证。</p>
+     */
+    private static final long MAX_DIRECT_ISSUE_TTL_SECONDS = (365L * 10 + 31) * 24 * 60 * 60;
 
     /** 反向索引惰性清理触发概率分母（每签发 1/100 概率触发一次） */
     private static final int GRANT_INDEX_CLEANUP_PROBABILITY = 100;
@@ -894,6 +910,14 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      *
      * <p>权限基准取用户对目标应用的有效授权（受用户自定义授权范围约束），
      * 可选传 scope 收敛为子集，超出即拒绝（防提权）。</p>
+     *
+     * <p>目标应用：传入 {@code clientId} 表示「代某个已登记应用签发」，会校验该应用存在、启用且已审批；
+     * 不传则签成「用户个人令牌」——user 侧前端本身不注册 oauth client，因此用保留标识
+     * {@link #USER_SELF_CLIENT_ID} 承载归属，权限上限为系统可自助范围（不含元范围 {@code all}）。
+     * 注意与登录来源客户端无关：{@code UC-Client-Id} 只表示从哪个前端登录，不参与令牌归属。</p>
+     *
+     * <p>元范围 {@code all} 不允许自助签发（应用登记了 all 时必须显式用 scope 收窄），
+     * 避免终端用户绕过管理员授权拿到平台级全权限令牌。</p>
      */
     @Override
     public OAuthTokenVO issueAccessTokenFromSession(Long uid, String requestedClientId,
@@ -902,17 +926,40 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         if (uid == null) {
             throw new BusinessException(ResultCode.NOT_LOGIN);
         }
-        // 会话未携带来源客户端（如系统自有前端），才回落到请求参数
-        String sessionClientId = UserContext.getClientId();
-        if (!StringUtils.hasText(sessionClientId)) {
-            sessionClientId = requestedClientId;
+        // 传了 client_id → 代该应用签发（查表校验启用+审批）；
+        // 不传 → 用户个人令牌，用保留标识承载，不查 oauth_client。
+        OAuthClient client = StringUtils.hasText(requestedClientId)
+                ? requireEnabledClient(requestedClientId.trim())
+                : userSelfClient();
+        String heldScope = resolveGrantScope(client, null, uid);
+        // 先按请求收敛（只减不增），再对最终范围做策略校验
+        String finalScope = StringUtils.hasText(requestedScope)
+                ? narrowScope(heldScope, requestedScope)
+                : heldScope;
+        // 自助签发不接受元范围 all：all 代表平台级可信应用（管理员手工授予），
+        // 若允许用户自助领取，审计上无法区分「管理员授权」与「用户自签」。
+        // 应用登记了 all 时，用户必须显式用 scope 收窄到具体范围。
+        if (splitScopes(finalScope).contains(OAuthScope.ALL.getCode())) {
+            throw new BusinessException(ResultCode.OAUTH_SCOPE_INVALID,
+                    "不支持自助签发全权限令牌（all），请通过 scope 参数指定具体权限");
         }
-        if (!StringUtils.hasText(sessionClientId)) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "client_id 不能为空");
-        }
-        OAuthClient client = requireEnabledClient(sessionClientId);
-        String scope = resolveGrantScope(client, null, uid);
-        return issueCustomAccessToken(uid, client, scope, null, expiresInSeconds, requestedScope, trimmedName);
+        return issueCustomAccessToken(uid, client, finalScope, null, expiresInSeconds, null, trimmedName);
+    }
+
+    /**
+     * 构造「用户个人令牌」的承载客户端（内存对象，不查库、不落库）
+     *
+     * <p>登记范围取系统可自助范围 {@link OAuthScope#selectable()}，天然不含元范围
+     * {@code all}，因此个人令牌的权限上限就是"用户可自助授予的全部具体权限"，
+     * 再叠加请求 scope 做只减不增的收敛。</p>
+     *
+     * @return 承载保留客户端标识的临时客户端对象
+     */
+    private OAuthClient userSelfClient() {
+        OAuthClient client = new OAuthClient();
+        client.setId(USER_SELF_CLIENT_ID);
+        client.setScopes(String.join(",", selectableScopeCodes()));
+        return client;
     }
 
     /**
@@ -952,6 +999,9 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     /**
      * 校验直签接口的公共参数（有效期与名称）
      *
+     * <p>有效期设上限：直签令牌是跨系统长期凭证，无上限等于可签发事实永久凭证；
+     * 同时避免 {@code LocalDateTime.plusSeconds} 在极端入参下溢出。</p>
+     *
      * @param expiresInSeconds 期望有效期（秒）
      * @param name             本次签发的名称
      * @return 去空白后的名称
@@ -959,6 +1009,10 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     private String validateDirectIssueParams(Long expiresInSeconds, String name) {
         if (expiresInSeconds == null || expiresInSeconds <= 0) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "expires_in 必须为大于 0 的秒数");
+        }
+        if (expiresInSeconds > MAX_DIRECT_ISSUE_TTL_SECONDS) {
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "expires_in 不能超过 " + MAX_DIRECT_ISSUE_TTL_SECONDS + " 秒（10 年零 1 个月）");
         }
         String trimmedName = name == null ? null : name.trim();
         if (!StringUtils.hasText(trimmedName)) {

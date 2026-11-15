@@ -99,7 +99,7 @@
 | `/user/oauth/grants/scopes/grant` | POST | 是 | 用户会话 | 为已授权应用追加权限（只增不减），同步到已签发令牌，立即生效。 |
 | `/user/oauth/grants/scopes/revoke` | POST | 是 | 用户会话 | 取消对某应用的已授权权限（只减不增，剩余不可为空），同步到已签发令牌。 |
 | `/user/oauth/custom-tokens` | GET | 是 | 用户会话 | 查看我签发的自定义有效期 access_token 列表（含已过期记录），按签发时间倒序。 |
-| `/user/oauth/custom-tokens` | POST | 是 | 用户会话 | 用当前登录会话直签自定义有效期 access_token，可选 scope 收敛（只能减权不能扩权），需填名称。 |
+| `/user/oauth/custom-tokens` | POST | 是 | 用户会话 | 用当前登录会话直签自定义有效期 access_token。`client_id` 可选：传了代该已登记应用签发，不传则签为「用户个人令牌」（归属保留标识 `this_land_cloud`）；scope 只能收敛不能扩权，不接受 `all`（返回 `90003`）；`expires_in` 上限 10 年零 1 个月；需填名称。 |
 | `/user/oauth/custom-tokens/revoke` | POST | 是 | 用户会话 | 吊销我名下的一条自定义令牌：Redis 立即失效并删除记录，幂等，可跨应用吊销自己的令牌。 |
 
 ### OAuth 客户端自助管理（`/user/oauth/client/**`）

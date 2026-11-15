@@ -180,7 +180,10 @@ public class UserController {
      *
      * <p>name 为必填：签发成功后落一条自定义令牌记录，供用户在「我的自定义令牌」列表查看。</p>
      *
-     * @param clientId  目标客户端 ID（会话来源客户端缺失时才需要传）
+     * <p>目标应用可选：传 {@code client_id} 表示代该已登记应用签发；不传则签成「用户个人令牌」
+     * （user 侧前端本身不注册 oauth client，由保留标识 {@code this_land_cloud} 承载归属）。</p>
+     *
+     * @param clientId  目标客户端 ID（可选，不传即签为用户个人令牌）
      * @param expiresIn 期望的 access_token 有效期（秒，必须大于 0）
      * @param scope     期望收敛到的权限范围（英文逗号分隔，可空表示沿用凭证原范围）
      * @param name      本次签发的名称（必填，不超过 50 字符）
