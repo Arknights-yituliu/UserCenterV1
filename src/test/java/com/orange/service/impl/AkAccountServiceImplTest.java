@@ -2,6 +2,9 @@ package com.orange.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.orange.common.exception.BusinessException;
+import com.orange.entity.dto.akoperator.AkPlayerInfoRequest;
+import com.orange.entity.dto.akoperator.OperatorItemRequest;
+import com.orange.entity.dto.akoperator.OperatorSaveRequest;
 import com.orange.entity.po.AkAccountBinding;
 import com.orange.entity.po.AkDefaultSource;
 import com.orange.entity.po.AkOperatorState;
@@ -9,6 +12,7 @@ import com.orange.entity.po.AkOperatorStateManualSummary;
 import com.orange.entity.po.AkPlayerInfo;
 import com.orange.entity.vo.akoperator.AkAccountVO;
 import com.orange.entity.vo.akoperator.OperatorListVO;
+import com.orange.entity.vo.akoperator.OperatorSaveResultVO;
 import com.orange.entity.vo.akoperator.OperatorVO;
 import com.orange.mapper.AkAccountBindingMapper;
 import com.orange.mapper.AkDefaultSourceMapper;
@@ -21,16 +25,21 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -96,6 +105,9 @@ class AkAccountServiceImplTest {
         assertThat(accounts.get(0).getSource()).isEqualTo(AkAccountVO.SOURCE_MANUAL);
         assertThat(accounts.get(0).getCreateTime()).isNull();
         assertThat(accounts.get(0).getUpdateTime()).isEqualTo(summary.getUpdateTime());
+        assertThat(accounts.get(0).getChannelName()).isEmpty();
+        assertThat(accounts.get(0).getChannelMasterId()).isEmpty();
+        assertThat(accounts.get(0).getNickName()).isEmpty();
     }
 
     @Test
@@ -365,6 +377,89 @@ class AkAccountServiceImplTest {
         service().unbindAccount(UID, "ak-1");
 
         verify(unbindExecutor).unbind(UID, "ak-1");
+    }
+
+    @Test
+    void exposesAccountProfileFieldsFromBinding() {
+        AkAccountBinding binding = new AkAccountBinding();
+        binding.setAkUid("ak-1");
+        binding.setOwnerUid(UID);
+        binding.setChannelName("官服");
+        binding.setChannelMasterId("1001");
+        binding.setNickName("管理员");
+        binding.setUpdateTime(LocalDateTime.of(2026, 1, 2, 0, 0));
+        when(bindingMapper.selectByOwnerOrderByUpdateTime(UID)).thenReturn(List.of(binding));
+        AkPlayerInfo info = new AkPlayerInfo();
+        info.setAkUid("ak-1");
+        when(playerInfoMapper.selectByAkUids(anyList())).thenReturn(List.of(info));
+
+        List<AkAccountVO> accounts = service().listBoundAccounts(UID);
+
+        assertThat(accounts).hasSize(1);
+        assertThat(accounts.get(0).getChannelName()).isEqualTo("官服");
+        assertThat(accounts.get(0).getChannelMasterId()).isEqualTo("1001");
+        assertThat(accounts.get(0).getNickName()).isEqualTo("管理员");
+    }
+
+    @Test
+    void normalizesMissingAccountProfileFieldsToEmptyStrings() {
+        AkAccountBinding binding = new AkAccountBinding();
+        binding.setAkUid("ak-1");
+        binding.setOwnerUid(UID);
+        when(bindingMapper.selectByOwnerOrderByUpdateTime(UID)).thenReturn(List.of(binding));
+        AkPlayerInfo info = new AkPlayerInfo();
+        info.setAkUid("ak-1");
+        when(playerInfoMapper.selectByAkUids(anyList())).thenReturn(List.of(info));
+
+        List<AkAccountVO> accounts = service().listBoundAccounts(UID);
+
+        assertThat(accounts).hasSize(1);
+        assertThat(accounts.get(0).getChannelName()).isEmpty();
+        assertThat(accounts.get(0).getChannelMasterId()).isEmpty();
+        assertThat(accounts.get(0).getNickName()).isEmpty();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void passesAccountProfileFieldsToSaveExecutor() {
+        ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
+        when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.setIfAbsent(anyString(), anyString(), any(Duration.class))).thenReturn(true);
+
+        AkPlayerInfoRequest playerInfo = new AkPlayerInfoRequest();
+        playerInfo.setAkUid("ak-1");
+        playerInfo.setChannelName("官服");
+        playerInfo.setChannelMasterId("1001");
+        playerInfo.setNickName("管理员");
+        OperatorItemRequest operator = new OperatorItemRequest();
+        operator.setId("char-1");
+        OperatorSaveRequest request = new OperatorSaveRequest();
+        request.setPlayerInfo(playerInfo);
+        request.setOperators(List.of(operator));
+        when(saveExecutor.save(eq("ak-1"), eq(UID), anyList(), isNull(), isNull(), isNull(),
+                eq("官服"), eq("1001"), eq("管理员"))).thenReturn(new OperatorSaveResultVO(1, 0, 0));
+
+        OperatorSaveResultVO result = service().saveOperators(UID, request);
+
+        assertThat(result).isNotNull();
+        assertThat(result.getCreatedCount()).isEqualTo(1);
+    }
+
+    @Test
+    void forwardsAccountProfileFieldsToBindingMapper() {
+        when(operatorMapper.selectByAkUidAndIds(eq("ak-1"), anyList())).thenReturn(Collections.emptyList());
+        AkOperatorSaveExecutor executor = new AkOperatorSaveExecutor(bindingMapper, playerInfoMapper,
+                operatorMapper, itemDataMapper, skinMapper,
+                mock(com.orange.mapper.AkPlayerInfoSnapshotMapper.class));
+        AkOperatorState state = new AkOperatorState();
+        state.setAkUid("ak-1");
+        state.setOperatorId("char-1");
+
+        executor.save("ak-1", UID, List.of(state), null, null, null, "官服", "1001", "管理员");
+        executor.save("ak-1", UID, List.of(state), null, null, null, null, null, null);
+
+        verify(bindingMapper).upsertBinding("ak-1", UID, "官服", "1001", "管理员");
+        verify(bindingMapper).upsertBinding("ak-1", UID, null, null, null);
     }
 
     private AkAccountServiceImpl service() {

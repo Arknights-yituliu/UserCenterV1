@@ -9,6 +9,7 @@ import com.orange.common.exception.RateLimitedException;
 import com.orange.common.util.LogUtil;
 import com.orange.common.util.RedisKeyUtil;
 import com.orange.common.util.SignUtil;
+import com.orange.entity.dto.akoperator.AkPlayerInfoRequest;
 import com.orange.entity.dto.akoperator.ItemEntryRequest;
 import com.orange.entity.dto.akoperator.OperatorItemRequest;
 import com.orange.entity.dto.akoperator.OperatorSaveRequest;
@@ -400,12 +401,13 @@ public class AkAccountServiceImpl implements AkAccountService {
      *
      * @param uid     用户中心 UID
      * @param request 保存参数（角色信息 + 干员数组 + 可选物品数组 + 可选皮肤数组 + 可选 player/info 文本），
-     *                目标游戏账号取自 request.playerInfo.akUid
+     *                目标游戏账号取自 request.playerInfo.akUid；账号展示信息取自 playerInfo 的三个可选字段
      * @return 新增/更新/未变更条数统计（仅统计干员），三项之和等于传入干员记录数
      */
     @Override
     public OperatorSaveResultVO saveOperators(Long uid, OperatorSaveRequest request) {
-        String akUid = request.getPlayerInfo().getAkUid();
+        AkPlayerInfoRequest playerInfo = request.getPlayerInfo();
+        String akUid = playerInfo.getAkUid();
         validateAkUid(akUid);
         // 先归一化（缺省/null/空字符串补 0）再校验重复 ID，保证比较语义与落库值一致
         List<AkOperatorState> operators = normalizeOperators(akUid, request.getOperators());
@@ -416,7 +418,8 @@ public class AkAccountServiceImpl implements AkAccountService {
         // 参数校验通过后占用该 ak_uid 的限流名额；首次上传不做凭据校验，绑定关系由写事务建立
         acquireSaveQuota(akUid);
 
-        return saveWithRetry(akUid, uid, operators, itemData, skins, playerData);
+        return saveWithRetry(akUid, uid, operators, itemData, skins, playerData,
+                playerInfo.getChannelName(), playerInfo.getChannelMasterId(), playerInfo.getNickName());
     }
 
     /**
@@ -429,7 +432,10 @@ public class AkAccountServiceImpl implements AkAccountService {
      * @param operators  本次提交的干员记录（已归一化）
      * @param itemData   本次上报的物品 JSON 文本，null 表示不上报物品
      * @param skins      本次上报的皮肤记录（已归一化），null 表示不上报皮肤
-     * @param playerData 本次上报的 player/info 文本，null 表示不上报
+     * @param playerData      本次上报的 player/info 文本，null 表示不上报
+     * @param channelName     本次上报的渠道名称，null 表示未上报
+     * @param channelMasterId 本次上报的渠道主账号标识，null 表示未上报
+     * @param nickName        本次上报的游戏内角色昵称，null 表示未上报
      * @return 新增/更新/未变更条数统计
      */
     private OperatorSaveResultVO saveWithRetry(String akUid,
@@ -437,10 +443,14 @@ public class AkAccountServiceImpl implements AkAccountService {
                                                List<AkOperatorState> operators,
                                                String itemData,
                                                List<AkSkinState> skins,
-                                               String playerData) {
+                                               String playerData,
+                                               String channelName,
+                                               String channelMasterId,
+                                               String nickName) {
         for (int attempt = 0; ; attempt++) {
             try {
-                return saveExecutor.save(akUid, uid, operators, itemData, skins, playerData);
+                return saveExecutor.save(akUid, uid, operators, itemData, skins, playerData,
+                        channelName, channelMasterId, nickName);
             } catch (DuplicateKeyException | PessimisticLockingFailureException e) {
                 if (attempt >= SAVE_MAX_RETRY) {
                     LogUtil.warn(AkAccountServiceImpl.class, "干员数据保存冲突重试耗尽, akUidHash={}, attempts={}",
@@ -646,7 +656,8 @@ public class AkAccountServiceImpl implements AkAccountService {
     /**
      * 绑定关系实体转已绑定账号视图对象
      *
-     * <p>账号 UID 取自绑定表，创建时间与最近导入时间一并返回，供前端排序与展示。</p>
+     * <p>账号 UID 取自绑定表，创建时间与最近导入时间一并返回，供前端排序与展示；
+     * 三个账号展示字段一并返回，null 统一按空串输出，避免前端额外判空。</p>
      *
      * @param binding 绑定关系实体
      * @return 账号视图对象
@@ -657,6 +668,9 @@ public class AkAccountServiceImpl implements AkAccountService {
         vo.setSource(AkAccountVO.SOURCE_SKLAND);
         vo.setCreateTime(binding.getCreateTime());
         vo.setUpdateTime(binding.getUpdateTime());
+        vo.setChannelName(emptyIfNull(binding.getChannelName()));
+        vo.setChannelMasterId(emptyIfNull(binding.getChannelMasterId()));
+        vo.setNickName(emptyIfNull(binding.getNickName()));
         return vo;
     }
 
@@ -714,6 +728,16 @@ public class AkAccountServiceImpl implements AkAccountService {
         if (!StringUtils.hasText(akUid) || !AK_UID_PATTERN.matcher(akUid).matches()) {
             throw new BusinessException(ResultCode.PARAM_VALID_ERROR, "游戏账号UID必须为不超过32位的可见ASCII字符");
         }
+    }
+
+    /**
+     * 账号展示字段归一化：null 视为空串（与列默认值一致，手动上传条目也返回空串）
+     *
+     * @param value 原始值
+     * @return 非 null 字符串
+     */
+    private String emptyIfNull(String value) {
+        return value == null ? "" : value;
     }
 
     /**

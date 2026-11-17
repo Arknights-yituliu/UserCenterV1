@@ -15,6 +15,10 @@ import java.time.LocalDateTime;
  *
  * <p>表主键为代理自增 id，{@code (akUid, ownerUid)} 由唯一键 {@code uk_ak_owner} 保证业务唯一。</p>
  *
+ * <p>{@code channelName / channelMasterId / nickName} 是森空岛绑定列表里的账号展示信息，
+ * 由保存接口随 playerInfo 上报，只用于账号列表展示，不参与归属校验与去重；按绑定行冗余存放，
+ * 未上报时数据库中为空串或沿用旧值。</p>
+ *
  * @author UserCenter
  */
 @TableName("ak_account_binding")
@@ -29,6 +33,15 @@ public class AkAccountBinding {
 
     /** 用户中心 UID（绑定关系的所有者），与 akUid 组成业务唯一键 uk_ak_owner */
     private Long ownerUid;
+
+    /** 渠道名称（森空岛 bindingList.channelName，如官服、B服），未上报时为空串 */
+    private String channelName;
+
+    /** 渠道主账号标识（森空岛 bindingList.channelMasterId），未上报时为空串 */
+    private String channelMasterId;
+
+    /** 游戏内角色昵称（森空岛 bindingList.nickName），未上报时为空串 */
+    private String nickName;
 
     /** 绑定关系创建时间：首次导入该账号数据时建立绑定并写入 */
     private LocalDateTime createTime;
@@ -78,6 +91,30 @@ public class AkAccountBinding {
      */
     public void setOwnerUid(Long ownerUid) {
         this.ownerUid = ownerUid;
+    }
+
+    public String getChannelName() {
+        return channelName;
+    }
+
+    public void setChannelName(String channelName) {
+        this.channelName = channelName;
+    }
+
+    public String getChannelMasterId() {
+        return channelMasterId;
+    }
+
+    public void setChannelMasterId(String channelMasterId) {
+        this.channelMasterId = channelMasterId;
+    }
+
+    public String getNickName() {
+        return nickName;
+    }
+
+    public void setNickName(String nickName) {
+        this.nickName = nickName;
     }
 
     public LocalDateTime getCreateTime() {

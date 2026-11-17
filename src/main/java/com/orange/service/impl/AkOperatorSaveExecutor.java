@@ -80,6 +80,9 @@ public class AkOperatorSaveExecutor {
      * @param itemData           本次上报的物品 JSON 文本，null 表示不上报物品
      * @param submittedSkins     本次提交的皮肤记录（已归一化），null 或空表示不上报皮肤
      * @param playerData         本次上报的 player/info 文本，null 或空表示不上报，已有镜像保持不变
+     * @param channelName        本次上报的渠道名称，null 表示未上报，绑定关系中沿用旧值
+     * @param channelMasterId    本次上报的渠道主账号标识，null 表示未上报，绑定关系中沿用旧值
+     * @param nickName           本次上报的游戏内角色昵称，null 表示未上报，绑定关系中沿用旧值
      * @return 新增/更新/未变更条数统计（仅统计干员）
      */
     @Transactional(rollbackFor = Exception.class)
@@ -88,8 +91,11 @@ public class AkOperatorSaveExecutor {
                                      List<AkOperatorState> submittedOperators,
                                      String itemData,
                                      List<AkSkinState> submittedSkins,
-                                     String playerData) {
-        ensureBinding(akUid, uid);
+                                     String playerData,
+                                     String channelName,
+                                     String channelMasterId,
+                                     String nickName) {
+        ensureBinding(akUid, uid, channelName, channelMasterId, nickName);
         savePlayerInfo(akUid);
         saveItems(akUid, itemData);
         saveSkins(akUid, submittedSkins);
@@ -113,16 +119,21 @@ public class AkOperatorSaveExecutor {
     }
 
     /**
-     * 在事务中保证本人绑定存在，并把“最近导入时间”推进到本次导入
+     * 在事务中保证本人绑定存在，刷新账号展示信息并把“最近导入时间”推进到本次导入
      *
      * <p>首次导入建立绑定（create_time 与 update_time 由数据库默认值写入），此后每次导入
-     * 只刷新 update_time，使账号列表能按最近导入时间倒序。并发重复插入由组合主键兜底。</p>
+     * 刷新 update_time，使账号列表能按最近导入时间倒序。并发重复插入由组合主键兜底。
+     * 三个展示字段为可选上报：null 时由 upsert 沿用旧值，不影响历史数据。</p>
      *
-     * @param akUid    游戏账号 UID
-     * @param uid      用户中心 UID
+     * @param akUid           游戏账号 UID
+     * @param uid             用户中心 UID
+     * @param channelName     渠道名称，null 表示本次未上报
+     * @param channelMasterId 渠道主账号标识，null 表示本次未上报
+     * @param nickName        游戏内角色昵称，null 表示本次未上报
      */
-    private void ensureBinding(String akUid, Long uid) {
-        bindingMapper.upsertBinding(akUid, uid);
+    private void ensureBinding(String akUid, Long uid,
+                               String channelName, String channelMasterId, String nickName) {
+        bindingMapper.upsertBinding(akUid, uid, channelName, channelMasterId, nickName);
     }
 
     /**

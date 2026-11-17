@@ -93,14 +93,20 @@ HTTP `200`：
       "source": "skland",
       "defaultFlag": true,
       "createTime": "2026-09-20T10:00:00",
-      "updateTime": "2026-09-28T18:30:00"
+      "updateTime": "2026-09-28T18:30:00",
+      "channelName": "官服",
+      "channelMasterId": "1001",
+      "nickName": "管理员"
     },
     {
       "akUid": "1234567890123456789",
       "source": "manual",
       "defaultFlag": false,
       "createTime": null,
-      "updateTime": "2026-09-27T21:15:00"
+      "updateTime": "2026-09-27T21:15:00",
+      "channelName": "",
+      "channelMasterId": "",
+      "nickName": ""
     }
   ]
 }
@@ -113,6 +119,11 @@ HTTP `200`：
 | `defaultFlag` | boolean | 是否为用户设置的默认数据来源；读取干员数据不传 `akUid` 时默认返回该条目 |
 | `createTime` | string / null | 森空岛为绑定关系创建时间；手动上传条目没有创建时间，固定为 `null` |
 | `updateTime` | string | 森空岛为该账号最近一次导入时间；手动版为最近一次保存时间 |
+| `channelName` | string | 渠道名称（如官服、B服），取自森空岛绑定列表；手动上传条目固定为空串 |
+| `channelMasterId` | string | 渠道主账号标识；手动上传条目固定为空串 |
+| `nickName` | string | 游戏内角色昵称；手动上传条目固定为空串 |
+
+> 空串表示「尚未获取」，不代表昵称或渠道为空。存量账号在升级后首次上报之前会一直是空串（服务端不补拉历史数据），调用方请按「未知」兜底展示，例如回退显示 `akUid` 或「未获取到昵称」。
 
 无森空岛绑定且无手动数据时 `data` 为 `[]`。手动上传条目仅在用户存在手动数据时出现；绑定关系存在但角色信息缺失的账号不会出现在结果中（绑定关系本身仍保留）。调用方需通过 `source` 区分条目：`manual` 条目的干员数据应通过手动版读取接口获取，不能当作游戏账号 `akUid` 使用。未设置默认来源或默认来源已失效时，所有条目 `defaultFlag=false`，顺序回退为最近变更时间倒序。
 
@@ -356,6 +367,9 @@ Authorization: Bearer <access_token>
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `playerInfo.akUid` | string | 是 | 目标游戏账号 UID，不超过 32 位可见 ASCII 字符 |
+| `playerInfo.channelName` | string | 否 | 渠道名称（森空岛 `bindingList.channelName`，如官服、B服），最长 64 字符 |
+| `playerInfo.channelMasterId` | string | 否 | 渠道主账号标识（森空岛 `bindingList.channelMasterId`），最长 64 字符 |
+| `playerInfo.nickName` | string | 否 | 游戏内角色昵称（森空岛 `bindingList.nickName`），最长 64 字符 |
 | `operators` | array | 是 | 干员数组，不能为空 |
 | `operators[].id` | string | 是 | 稳定干员编码，1-64 位可见 ASCII 字符 |
 | `operators[].owned` | integer | 否 | 是否持有，0~1，缺省按 `1` |
@@ -372,12 +386,17 @@ Authorization: Bearer <access_token>
 
 数值字段可以省略、传 `null` 或空字符串，服务端统一按 `0` 落库（与显式传 `0` 等价，**不表示沿用旧值**）；`owned` 缺省按 `1` 落库。负数或超出上述范围会返回 `code=10002`。
 
+`playerInfo` 的三个账号展示字段最长 64 字符，省略或传 `null` 时**沿用绑定关系中的已有值**，显式传空串才会清空；首次建立绑定且未上报时落空串。它们只用于账号列表展示，不参与归属校验。
+
 ### 5.2 请求示例
 
 ```json
 {
   "playerInfo": {
-    "akUid": "123456789"
+    "akUid": "123456789",
+    "channelName": "官服",
+    "channelMasterId": "1001",
+    "nickName": "管理员"
   },
   "operators": [
     {
@@ -413,6 +432,8 @@ Authorization: Bearer <access_token>
 - `items` 与干员数据在同一事务内保存：物品为全量快照，携带 `items` 即整体覆盖该账号的物品数据；`items` 省略或为空数组时已有物品数据保持不变。
 - 同一个请求中的干员 `id` 不能重复，物品 `itemId` 也不能重复，重复返回 `code=10002`。
 - 当前用户首次上传某个游戏账号时直接建立绑定关系，无需预先绑定。
+- `playerInfo.channelName` / `channelMasterId` / `nickName` 随绑定关系一起保存：本次上报即覆盖，未上报沿用旧值；同一游戏账号被多个用户绑定时各自保留一份，账号列表只返回当前令牌用户那一条。
+- 这三个字段采用**自然回填**：服务端不主动补拉森空岛历史绑定列表，也不提供单独的补数接口。请接入方在每次保存时都尽量带上这三个字段，存量账号会在下一次导入时补齐；长期不导入的账号会一直保持空串。省略或传 `null` 只沿用旧值，不会抹掉已经回填的内容。
 - 同一游戏账号 2 秒内只接受一次保存请求，命中限流返回 `code=30006`，建议等待秒数在 `data.retryAfterSeconds` 中。
 
 ### 5.4 成功响应

@@ -8,7 +8,8 @@ import java.time.LocalDateTime;
  * <p>列表把用户设置的默认来源排在首位，其余按 {@code updateTime} 倒序，
  * 因此不指定账号时前端取首条即可展示默认数据。
  * 条目来源由 {@code source} 区分：森空岛自动导入的账号使用游戏账号 UID；
- * 手动上传条目没有游戏账号，{@code akUid} 复用用户中心 UID，且仅在用户存在手动数据时返回。</p>
+ * 手动上传条目没有游戏账号，{@code akUid} 复用用户中心 UID，且仅在用户存在手动数据时返回。
+ * {@code channelName / channelMasterId / nickName} 只对森空岛条目有值，手动条目固定为空串。</p>
  *
  * @author UserCenter
  */
@@ -34,6 +35,15 @@ public class AkAccountVO {
 
     /** 是否为用户设置的默认数据来源：true 表示读取干员数据不传 akUid 时默认返回该条目 */
     private boolean defaultFlag;
+
+    /** 渠道名称（如官服、B服），手动上传条目固定为空串 */
+    private String channelName = "";
+
+    /** 渠道主账号标识，手动上传条目固定为空串 */
+    private String channelMasterId = "";
+
+    /** 游戏内角色昵称，手动上传条目固定为空串 */
+    private String nickName = "";
 
     public String getAkUid() {
         return akUid;
@@ -83,5 +93,29 @@ public class AkAccountVO {
      */
     public void setDefaultFlag(boolean defaultFlag) {
         this.defaultFlag = defaultFlag;
+    }
+
+    public String getChannelName() {
+        return channelName;
+    }
+
+    public void setChannelName(String channelName) {
+        this.channelName = channelName;
+    }
+
+    public String getChannelMasterId() {
+        return channelMasterId;
+    }
+
+    public void setChannelMasterId(String channelMasterId) {
+        this.channelMasterId = channelMasterId;
+    }
+
+    public String getNickName() {
+        return nickName;
+    }
+
+    public void setNickName(String nickName) {
+        this.nickName = nickName;
     }
 }
