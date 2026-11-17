@@ -134,6 +134,8 @@ public class EfPlayerDataServiceImpl implements EfPlayerDataService {
     /**
      * 绑定关系转列表视图对象
      *
+     * <p>服务器展示信息与玩家昵称一并返回，null 统一按空串输出，避免前端额外判空。</p>
+     *
      * @param binding 绑定关系
      * @return 不含玩家数据正文的角色视图
      */
@@ -141,9 +143,22 @@ public class EfPlayerDataServiceImpl implements EfPlayerDataService {
         EfAccountVO account = new EfAccountVO();
         account.setRoleId(binding.getRoleId());
         account.setServerId(binding.getServerId());
+        account.setServerType(emptyIfNull(binding.getServerType()));
+        account.setServerName(emptyIfNull(binding.getServerName()));
+        account.setNickName(emptyIfNull(binding.getNickName()));
         account.setCreateTime(binding.getCreateTime());
         account.setUpdateTime(binding.getUpdateTime());
         return account;
+    }
+
+    /**
+     * 展示字段归一化：null 视为空串
+     *
+     * @param value 原始值
+     * @return 非 null 的字符串
+     */
+    private String emptyIfNull(String value) {
+        return value == null ? "" : value;
     }
 
     /**
@@ -169,7 +184,7 @@ public class EfPlayerDataServiceImpl implements EfPlayerDataService {
      * 保存终末地玩家数据：校验通过后在一次写事务内建立绑定并覆盖写入 JSON 文本
      *
      * @param uid     用户中心 UID
-     * @param request 保存参数（角色标识 + JSON 玩家数据）
+     * @param request 保存参数（角色标识 + 可选服务器展示信息 + JSON 玩家数据）
      * @return 本次写入的角色标识与保存时间
      */
     @Override
@@ -184,7 +199,8 @@ public class EfPlayerDataServiceImpl implements EfPlayerDataService {
         acquireSaveQuota(roleId, serverId);
 
         LocalDateTime now = LocalDateTime.now();
-        bindingMapper.upsertBinding(roleId, serverId, uid);
+        bindingMapper.upsertBinding(roleId, serverId, uid,
+                request.getServerType(), request.getServerName());
         playerDataMapper.upsertPlayerData(roleId, serverId, playerData, now);
         return new EfPlayerDataSaveResultVO(roleId, serverId, now);
     }

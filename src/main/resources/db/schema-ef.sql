@@ -34,15 +34,20 @@ CREATE TABLE `ef_player_data` (
 --
 -- 与 ak_account_binding 同构：一个 uid 可绑定多个角色，一个角色也可被多个 uid 绑定；
 -- 玩家数据按角色存一份，绑定表只存授权关系，供后续读取接口做归属校验。
+-- server_type / server_name 为客户端保存玩家数据时上报的服务器展示信息，可选：
+-- 未上报时落空串、后续导入沿用旧值，不参与唯一键与归属校验。
+-- nick_name 由寻访记录导入写入，三者都只用于角色列表展示。
 -- -------------------------------------------------------------
 DROP TABLE IF EXISTS `ef_account_binding`;
 CREATE TABLE `ef_account_binding` (
     `id`                   BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键',
     `role_id`              VARCHAR(32) NOT NULL COMMENT '终末地游戏内角色UID',
     `server_id`            VARCHAR(16) NOT NULL DEFAULT '' COMMENT '服务器ID；寻访记录导入不区分服务器，固定为空串',
+    `server_type`          VARCHAR(64) NOT NULL DEFAULT '' COMMENT '服务器类型（客户端保存玩家数据时上报，可选）',
+    `server_name`          VARCHAR(64) NOT NULL DEFAULT '' COMMENT '服务器名称（客户端保存玩家数据时上报，可选）',
     `owner_uid`            BIGINT      NOT NULL COMMENT '绑定该角色的用户中心UID；0 表示匿名导入档案，不对应任何用户',
     `hg_uid`               VARCHAR(64) NOT NULL DEFAULT '' COMMENT '鹰角通行证UID（原 endministrator_info.uid）',
-    `nick_name`            VARCHAR(64) NOT NULL DEFAULT '' COMMENT '玩家昵称（原 endministrator_info.nick_name）',
+    `nick_name`            VARCHAR(64) NOT NULL DEFAULT '' COMMENT '玩家昵称（原 endministrator_info.nick_name，寻访记录导入时写入）',
     `player_data_imported` TINYINT     NOT NULL DEFAULT 0 COMMENT '该角色是否已导入过玩家数据（角色详情）：0否 1是',
     `pool_record_imported` TINYINT     NOT NULL DEFAULT 0 COMMENT '该角色是否已导入过寻访记录：0否 1是',
     `create_time`          DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '绑定创建时间：首次导入该角色数据时写入',
@@ -51,7 +56,7 @@ CREATE TABLE `ef_account_binding` (
     UNIQUE KEY `uk_ef_owner` (`role_id`, `server_id`, `owner_uid`) COMMENT '同一角色、服务器与用户只保留一条绑定关系',
     KEY `idx_ef_owner_update` (`owner_uid`, `update_time`) COMMENT '按用户查询已绑定角色并按最近导入时间倒序'
 ) ENGINE = InnoDB
-  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '终末地角色与用户中心账号绑定关系及角色档案';
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '终末地角色与用户中心账号绑定关系、角色档案及服务器展示信息';
 
 -- -------------------------------------------------------------
 -- 3. 寻访记录导入任务

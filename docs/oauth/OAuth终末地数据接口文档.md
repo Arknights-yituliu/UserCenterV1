@@ -98,8 +98,20 @@ Authorization: Bearer <access_token>
     {
       "roleId": "123456789",
       "serverId": "1",
+      "serverType": "official",
+      "serverName": "官服",
+      "nickName": "",
       "createTime": "2026-10-30T19:00:00",
       "updateTime": "2026-10-30T20:00:00"
+    },
+    {
+      "roleId": "123456789",
+      "serverId": "",
+      "serverType": "",
+      "serverName": "",
+      "nickName": "管理员",
+      "createTime": "2026-10-29T09:00:00",
+      "updateTime": "2026-10-29T09:00:00"
     }
   ]
 }
@@ -108,9 +120,14 @@ Authorization: Bearer <access_token>
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `roleId` | string | 终末地游戏内角色 UID |
-| `serverId` | string | 服务器 ID，未传时为 `""` |
+| `serverId` | string | 服务器 ID，未传时为 `""`；寻访记录导入的绑定行固定为 `""` |
+| `serverType` | string | 服务器类型（调用方保存玩家数据时上报），取值由写入方定义、服务端不校验；未上报时为空串 |
+| `serverName` | string | 服务器名称（调用方保存玩家数据时上报），未上报时为空串 |
+| `nickName` | string | 玩家昵称（寻访记录导入时写入），未导入时为空串 |
 | `createTime` | string / null | 绑定创建时间：首次导入该角色数据时写入 |
 | `updateTime` | string | 最近一次导入该角色数据的时间 |
+
+> 三个展示字段按绑定行冗余存放：同一角色若既有玩家数据绑定（`serverId` 非空）又有寻访记录绑定（`serverId` 为 `""`），会是**两条独立条目**，各自保留自己的展示信息——寻访记录行通常只有 `nickName`，玩家数据行通常只有 `serverType` / `serverName`。空串表示「尚未获取」而非「值为空」，调用方请按「未知」兜底（如回退显示 `roleId`），或按 `roleId` 合并展示。
 
 没有绑定任何角色时 `data` 为 `[]`。
 
@@ -201,7 +218,11 @@ Authorization: Bearer <access_token>
 | --- | --- | --- | --- |
 | `roleId` | string | 是 | 终末地游戏内角色 UID（`card/detail` 的 `roleId`），不超过 32 位可见 ASCII 字符 |
 | `serverId` | string | 否 | 服务器 ID（国服常见 `1`），不超过 16 位可见 ASCII 字符；省略时按空串保存 |
+| `serverType` | string | 否 | 服务器类型，最长 64 字符；取值由写入方定义，服务端只校验长度 |
+| `serverName` | string | 否 | 服务器名称，最长 64 字符 |
 | `playerData` | object | 是 | 玩家数据 JSON 对象，整份原样保存，序列化后不超过 2MB |
+
+`serverType` / `serverName` 最长 64 字符，省略或传 `null` 时**沿用绑定关系中的已有值**，显式传空串才会清空；首次建立绑定且未上报时落空串。它们只用于角色列表展示，不参与角色定位与归属校验。
 
 请求示例：
 
@@ -209,6 +230,8 @@ Authorization: Bearer <access_token>
 {
   "roleId": "123456789",
   "serverId": "1",
+  "serverType": "official",
+  "serverName": "官服",
   "playerData": {
     "base": {
       "roleId": "123456789",
@@ -230,6 +253,7 @@ Authorization: Bearer <access_token>
 
 - 同一 `roleId` + `serverId` 已存在数据则**整份覆盖** `playerData` 并刷新保存时间，不存在则新增；不做字段级合并。
 - `playerData` 必须是 JSON **对象**，传入数组、字符串或 `null` 返回 `code=10002`。
+- `serverType` / `serverName` 随绑定关系一起保存，采用**自然回填**：服务端不主动补拉服务器信息，也不提供单独的补数接口。请接入方在每次保存时都尽量带上这两个字段，存量角色会在下一次导入时补齐；长期不导入的角色保持空串。省略或传 `null` 只沿用旧值，不会抹掉已经回填的内容；寻访记录导入不会写入或清空这两列。
 - 同一角色 2 秒内只接受一次保存请求，命中限流返回 `code=30006`，建议等待秒数在 `data.retryAfterSeconds` 中；该名额**所有绑定该角色的用户共享**。
 
 成功响应 HTTP `200`：

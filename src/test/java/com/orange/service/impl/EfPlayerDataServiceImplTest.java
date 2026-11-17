@@ -2,6 +2,7 @@ package com.orange.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.orange.common.exception.BusinessException;
+import com.orange.entity.dto.efplayer.EfPlayerDataSaveRequest;
 import com.orange.entity.po.EfAccountBinding;
 import com.orange.entity.po.EfPlayerData;
 import com.orange.entity.vo.efplayer.EfAccountVO;
@@ -15,15 +16,21 @@ import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -55,6 +62,9 @@ class EfPlayerDataServiceImplTest {
         EfAccountBinding binding = new EfAccountBinding();
         binding.setRoleId("role-1");
         binding.setServerId("1");
+        binding.setServerType("official");
+        binding.setServerName("官服");
+        binding.setNickName("管理员");
         binding.setCreateTime(LocalDateTime.of(2026, 10, 30, 12, 0));
         binding.setUpdateTime(LocalDateTime.of(2026, 10, 30, 13, 0));
         when(bindingMapper.selectByOwnerOrderByUpdateTime(UID)).thenReturn(List.of(binding));
@@ -64,6 +74,9 @@ class EfPlayerDataServiceImplTest {
         assertThat(accounts).hasSize(1);
         assertThat(accounts.get(0).getRoleId()).isEqualTo("role-1");
         assertThat(accounts.get(0).getServerId()).isEqualTo("1");
+        assertThat(accounts.get(0).getServerType()).isEqualTo("official");
+        assertThat(accounts.get(0).getServerName()).isEqualTo("官服");
+        assertThat(accounts.get(0).getNickName()).isEqualTo("管理员");
         assertThat(accounts.get(0).getUpdateTime()).isEqualTo(LocalDateTime.of(2026, 10, 30, 13, 0));
     }
 
@@ -185,6 +198,76 @@ class EfPlayerDataServiceImplTest {
                 .hasFieldOrPropertyWithValue("code", 10002);
 
         verify(bindingMapper, never()).countBinding(anyString(), anyString(), anyLong());
+    }
+
+    /**
+     * 绑定行缺少展示字段时统一按空串返回，避免前端额外判空
+     */
+    @Test
+    void normalizesMissingProfileFieldsToEmptyStrings() {
+        EfAccountBinding binding = new EfAccountBinding();
+        binding.setRoleId("role-1");
+        binding.setServerId("");
+        when(bindingMapper.selectByOwnerOrderByUpdateTime(UID)).thenReturn(List.of(binding));
+
+        EfAccountVO account = service().listBoundAccounts(UID).get(0);
+
+        assertThat(account.getServerType()).isEmpty();
+        assertThat(account.getServerName()).isEmpty();
+        assertThat(account.getNickName()).isEmpty();
+    }
+
+    /**
+     * 保存玩家数据时把客户端上报的服务器展示信息透传给绑定 Mapper
+     */
+    @Test
+    void passesServerProfileFieldsToBindingMapper() {
+        allowSaveQuota();
+        EfPlayerDataSaveRequest request = saveRequest("official", "官服");
+
+        service().savePlayerData(UID, request);
+
+        verify(bindingMapper).upsertBinding("role-1", "1", UID, "official", "官服");
+    }
+
+    /**
+     * 未上报服务器展示信息时传 null，由 Mapper 的 COALESCE 沿用旧值
+     */
+    @Test
+    void forwardsNullProfileFieldsWhenNotReported() {
+        allowSaveQuota();
+        EfPlayerDataSaveRequest request = saveRequest(null, null);
+
+        service().savePlayerData(UID, request);
+
+        verify(bindingMapper).upsertBinding(eq("role-1"), eq("1"), eq(UID), isNull(), isNull());
+    }
+
+    /**
+     * 放行保存限流，使保存链路可以走到绑定 Mapper
+     */
+    @SuppressWarnings("unchecked")
+    private void allowSaveQuota() {
+        ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
+        when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.setIfAbsent(anyString(), anyString(), any(Duration.class))).thenReturn(true);
+    }
+
+    /**
+     * 构造保存请求：玩家数据为空 JSON 对象即可通过序列化校验
+     *
+     * @param serverType 服务器类型，可为 null
+     * @param serverName 服务器名称，可为 null
+     * @return 保存请求
+     */
+    private EfPlayerDataSaveRequest saveRequest(String serverType, String serverName) {
+        EfPlayerDataSaveRequest request = new EfPlayerDataSaveRequest();
+        request.setRoleId("role-1");
+        request.setServerId("1");
+        request.setServerType(serverType);
+        request.setServerName(serverName);
+        request.setPlayerData(new ObjectMapper().createObjectNode());
+        return request;
     }
 
     /**

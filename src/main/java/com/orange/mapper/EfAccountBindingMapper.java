@@ -23,23 +23,39 @@ public interface EfAccountBindingMapper extends BaseMapper<EfAccountBinding> {
     /**
      * 建立或刷新玩家数据绑定：写入绑定关系并标记该角色已导入过玩家数据（角色详情）
      *
-     * @param roleId   终末地游戏内角色 UID
-     * @param serverId 服务器 ID（已归一化，非 null）
-     * @param ownerUid 用户中心 UID
+     * <p>服务器展示信息为可选项：{@code null} 表示本次未上报，插入时落空串、更新时沿用旧值；
+     * 显式传空串表示清空。这样旧客户端不上报这两个字段也不会抹掉已有服务器信息。
+     * 它们按绑定行冗余存放，只用于角色列表展示，不参与唯一键与归属校验。</p>
+     *
+     * @param roleId     终末地游戏内角色 UID
+     * @param serverId   服务器 ID（已归一化，非 null）
+     * @param ownerUid   用户中心 UID
+     * @param serverType 服务器类型，null 表示本次未上报
+     * @param serverName 服务器名称，null 表示本次未上报
      * @return 影响行数
      */
-    @Insert("INSERT INTO ef_account_binding (role_id, server_id, owner_uid, player_data_imported) "
-            + "VALUES (#{roleId}, #{serverId}, #{ownerUid}, 1) "
-            + "ON DUPLICATE KEY UPDATE player_data_imported = 1, update_time = NOW(3)")
+    @Insert("INSERT INTO ef_account_binding "
+            + "(role_id, server_id, server_type, server_name, owner_uid, player_data_imported) "
+            + "VALUES (#{roleId}, #{serverId}, "
+            + "COALESCE(#{serverType,jdbcType=VARCHAR}, ''), "
+            + "COALESCE(#{serverName,jdbcType=VARCHAR}, ''), "
+            + "#{ownerUid}, 1) "
+            + "ON DUPLICATE KEY UPDATE "
+            + "server_type = COALESCE(#{serverType,jdbcType=VARCHAR}, server_type), "
+            + "server_name = COALESCE(#{serverName,jdbcType=VARCHAR}, server_name), "
+            + "player_data_imported = 1, update_time = NOW(3)")
     int upsertBinding(@Param("roleId") String roleId,
                       @Param("serverId") String serverId,
-                      @Param("ownerUid") Long ownerUid);
+                      @Param("ownerUid") Long ownerUid,
+                      @Param("serverType") String serverType,
+                      @Param("serverName") String serverName);
 
     /**
      * 建立或刷新寻访记录绑定：写入角色档案并标记该角色已导入过寻访记录
      *
      * <p>寻访记录不区分服务器，server_id 固定为空串；同一角色已有绑定时不改归属，
-     * 只刷新角色档案与最近导入时间。</p>
+     * 只刷新角色档案与最近导入时间。本方法既不写入也不覆盖 server_type / server_name，
+     * 这两列由保存玩家数据时上报，避免寻访记录导入把已上报的服务器信息清空。</p>
      *
      * @param roleId   终末地游戏内角色 UID
      * @param ownerUid 用户中心 UID

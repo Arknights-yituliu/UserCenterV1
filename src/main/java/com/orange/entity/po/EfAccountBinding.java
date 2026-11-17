@@ -11,7 +11,11 @@ import java.time.LocalDateTime;
  *
  * <p>多对多关系：一个用户可绑定多个角色，一个角色也可被多个用户绑定；
  * 玩家数据与寻访记录按角色只存一份，本表记录授权归属，并冗余角色维度档案
- * （鹰角通行证 UID、玩家昵称、是否已导入寻访记录）。</p>
+ * （鹰角通行证 UID、玩家昵称、是否已导入寻访记录），以及客户端保存玩家数据时
+ * 上报的服务器展示信息（类型、名称）。</p>
+ *
+ * <p>{@code serverType / serverName} 为可选项：未上报时落空串、后续导入沿用旧值，
+ * 不参与唯一键与归属校验；{@code nickName} 由寻访记录导入写入。</p>
  *
  * @author UserCenter
  */
@@ -27,6 +31,12 @@ public class EfAccountBinding {
 
     /** 服务器 ID */
     private String serverId;
+
+    /** 服务器类型（客户端上报，可选），未上报时为空串 */
+    private String serverType;
+
+    /** 服务器名称（客户端上报，可选），未上报时为空串 */
+    private String serverName;
 
     /** 绑定该角色的用户中心 UID */
     private Long ownerUid;
@@ -71,6 +81,22 @@ public class EfAccountBinding {
 
     public void setServerId(String serverId) {
         this.serverId = serverId;
+    }
+
+    public String getServerType() {
+        return serverType;
+    }
+
+    public void setServerType(String serverType) {
+        this.serverType = serverType;
+    }
+
+    public String getServerName() {
+        return serverName;
+    }
+
+    public void setServerName(String serverName) {
+        this.serverName = serverName;
     }
 
     public Long getOwnerUid() {
