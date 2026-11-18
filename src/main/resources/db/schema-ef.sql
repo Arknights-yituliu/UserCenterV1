@@ -2,7 +2,8 @@
 -- 模块三：终末地（玩家数据、角色绑定、寻访记录）
 --
 -- 依赖：先执行 schema.sql 建库，再执行 schema-user.sql（绑定关系逻辑上指向 user_info.uid）。
--- 本文件可独立重跑：所有建表均为 DROP TABLE IF EXISTS + CREATE。
+-- 本文件可独立重跑：所有建表均为 CREATE TABLE IF NOT EXISTS，重复执行不会删除
+-- 已有数据，也不会修改已有表结构；需要清空重建请显式执行同目录的 reset.sql。
 -- 排序规则：全部 utf8mb4_bin。role_id 为游戏内角色 UID，区分大小写，
 -- 用 general_ci 会把仅大小写不同的角色误判为同一角色。
 -- =============================================================
@@ -16,8 +17,7 @@ USE `user_center`;
 -- 结构多变的大块 JSON（base/chars/domain/...），拆列成本高且随游戏版本频繁变化，
 -- 因此按需求直接把整份 JSON 文本存为一列，由写入方维护结构，服务端只做大小与归属校验。
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `ef_player_data`;
-CREATE TABLE `ef_player_data` (
+CREATE TABLE IF NOT EXISTS `ef_player_data` (
     `id`          BIGINT      NOT NULL AUTO_INCREMENT COMMENT '数据库自增行ID',
     `role_id`     VARCHAR(32) NOT NULL COMMENT '终末地游戏内角色UID（card/detail 的 roleId），数据归属键',
     `server_id`   VARCHAR(16) NOT NULL DEFAULT '' COMMENT '服务器ID（国服常见1），与 role_id 共同定位角色',
@@ -38,8 +38,7 @@ CREATE TABLE `ef_player_data` (
 -- 未上报时落空串、后续导入沿用旧值，不参与唯一键与归属校验。
 -- nick_name 由寻访记录导入写入，三者都只用于角色列表展示。
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `ef_account_binding`;
-CREATE TABLE `ef_account_binding` (
+CREATE TABLE IF NOT EXISTS `ef_account_binding` (
     `id`                   BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键',
     `role_id`              VARCHAR(32) NOT NULL COMMENT '终末地游戏内角色UID',
     `server_id`            VARCHAR(16) NOT NULL DEFAULT '' COMMENT '服务器ID；寻访记录导入不区分服务器，固定为空串',
@@ -65,8 +64,7 @@ CREATE TABLE `ef_account_binding` (
 -- token 为敏感凭证，创建 15 分钟后由定时任务覆盖为占位值，避免长期留存。
 -- owner_uid 允许 NULL：匿名接口下线前创建、尚未执行的历史任务没有归属。
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `ef_player_pool_record_task`;
-CREATE TABLE `ef_player_pool_record_task` (
+CREATE TABLE IF NOT EXISTS `ef_player_pool_record_task` (
     `task_id`       VARCHAR(64)  NOT NULL COMMENT '任务ID（task + 雪花ID），创建接口返回给调用方',
     `token`         VARCHAR(512) NULL COMMENT '前端提交的 hgToken，完成后替换为占位值，过期后被覆盖',
     `complete_flag` TINYINT      NOT NULL DEFAULT 0 COMMENT '是否已完成导入：0否 1是',
@@ -90,8 +88,7 @@ CREATE TABLE `ef_player_pool_record_task` (
 -- 赠礼类记录（kind=gift_intel_book）没有 char_id / char_name，
 -- 由服务端映射为 gift_ 前缀伪编码落库，保证记录条数不丢、也不产生空值行。
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `ef_character_pool_record`;
-CREATE TABLE `ef_character_pool_record` (
+CREATE TABLE IF NOT EXISTS `ef_character_pool_record` (
     `id`         BIGINT       NOT NULL COMMENT '记录ID，由雪花算法生成',
     `role_id`    VARCHAR(32)  NOT NULL COMMENT '终末地游戏内角色UID',
     `pool_id`    VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '卡池ID',
@@ -117,8 +114,7 @@ CREATE TABLE `ef_character_pool_record` (
 --
 -- 与干员记录同构，写入走 INSERT IGNORE，由唯一键 role_id + seq_id 静默去重。
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `ef_weapon_pool_record`;
-CREATE TABLE `ef_weapon_pool_record` (
+CREATE TABLE IF NOT EXISTS `ef_weapon_pool_record` (
     `id`          BIGINT       NOT NULL COMMENT '记录ID，由雪花算法生成',
     `role_id`     VARCHAR(32)  NOT NULL COMMENT '终末地游戏内角色UID',
     `pool_id`     VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '卡池ID',

@@ -2,7 +2,8 @@
 -- 模块一：用户服务（账号、日志、邮件、配置、排班、OAuth）
 --
 -- 依赖：先执行 schema.sql 完成建库与排序规则对齐。
--- 本文件可独立重跑：所有建表均为 DROP TABLE IF EXISTS + CREATE。
+-- 本文件可独立重跑：所有建表均为 CREATE TABLE IF NOT EXISTS，重复执行不会删除
+-- 已有数据，也不会修改已有表结构；需要清空重建请显式执行同目录的 reset.sql。
 -- 排序规则：业务表统一 utf8mb4_general_ci；需要精确比较的哈希摘要列
 -- （content_hash、token_hash、family_id）与 tlc_pat.token 明文列均列级显式 utf8mb4_bin，
 -- 后者是为了让 hex 令牌的大小写不被 general_ci 折叠。
@@ -13,8 +14,7 @@ USE `user_center`;
 -- -------------------------------------------------------------
 -- 1. 全局用户主表
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `user_info`;
-CREATE TABLE `user_info` (
+CREATE TABLE IF NOT EXISTS `user_info` (
     `uid`             BIGINT       NOT NULL COMMENT '对外业务编号（雪花ID，全局唯一，主键）',
     `email`           VARCHAR(128) DEFAULT NULL COMMENT '邮箱（登录账号）',
     `user_name`       VARCHAR(64)  DEFAULT NULL COMMENT '用户名（登录账号，兼容旧系统迁移用户）',
@@ -35,8 +35,7 @@ CREATE TABLE `user_info` (
 -- -------------------------------------------------------------
 -- 2. 登录日志表
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `login_log`;
-CREATE TABLE `login_log` (
+CREATE TABLE IF NOT EXISTS `login_log` (
     `id`         BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
     `uid`        BIGINT       DEFAULT NULL COMMENT '用户 uid（失败时可能为空）',
     `client_id`  VARCHAR(64)  DEFAULT NULL COMMENT '来源客户端 id（对应 oauth_client.client_id）',
@@ -54,8 +53,7 @@ CREATE TABLE `login_log` (
 -- -------------------------------------------------------------
 -- 3. 操作审计日志表
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `audit_log`;
-CREATE TABLE `audit_log` (
+CREATE TABLE IF NOT EXISTS `audit_log` (
     `id`            BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
     `operator_type` VARCHAR(16)  NOT NULL COMMENT '操作者类型：admin/user',
     `operator_id`   BIGINT       DEFAULT NULL COMMENT '操作者 id',
@@ -72,8 +70,7 @@ CREATE TABLE `audit_log` (
 -- -------------------------------------------------------------
 -- 4. SMTP 邮件渠道配置表（多渠道降级发送，配置存数据库可动态调整）
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `smtp_config`;
-CREATE TABLE `smtp_config` (
+CREATE TABLE IF NOT EXISTS `smtp_config` (
     `id`               BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
     `account_key`      VARCHAR(64)  NOT NULL COMMENT '渠道标识，如 mail-163-1 / mail-163-2',
     `host`             VARCHAR(128) NOT NULL COMMENT 'SMTP 服务器地址',
@@ -94,8 +91,7 @@ CREATE TABLE `smtp_config` (
 -- -------------------------------------------------------------
 -- 5. 用户配置表
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `user_config`;
-CREATE TABLE `user_config` (
+CREATE TABLE IF NOT EXISTS `user_config` (
     `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
     `uid`         BIGINT       NOT NULL COMMENT '用户 uid',
     `client_id`   VARCHAR(64)  NOT NULL COMMENT '客户端标识（对应 oauth_client.client_id）',
@@ -117,8 +113,7 @@ CREATE TABLE `user_config` (
 -- -------------------------------------------------------------
 -- 6. 用户配置容量配额表
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `user_config_quota`;
-CREATE TABLE `user_config_quota` (
+CREATE TABLE IF NOT EXISTS `user_config_quota` (
     `uid`         BIGINT          NOT NULL COMMENT '用户 uid',
     `used_bytes`  BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '已使用配置字节数',
     `limit_bytes` BIGINT UNSIGNED NOT NULL DEFAULT 512000 COMMENT '当前配置总配额，默认 500KB',
@@ -132,8 +127,7 @@ CREATE TABLE `user_config_quota` (
 -- -------------------------------------------------------------
 -- 7. 用户排班表
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `user_schedule`;
-CREATE TABLE `user_schedule` (
+CREATE TABLE IF NOT EXISTS `user_schedule` (
     `id`          BIGINT   NOT NULL COMMENT '排班表 ID（自制雪花 ID）',
     `uid`         BIGINT   NOT NULL COMMENT '所属用户 uid',
     `schedule`    LONGTEXT NOT NULL COMMENT '排班表内容（JSON 字符串）',
@@ -147,8 +141,7 @@ CREATE TABLE `user_schedule` (
 -- -------------------------------------------------------------
 -- 8. OAuth2 客户端注册表（第三方 Web 网站接入登记）
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `oauth_client`;
-CREATE TABLE `oauth_client` (
+CREATE TABLE IF NOT EXISTS `oauth_client` (
     `id`                VARCHAR(128) NOT NULL COMMENT '客户端ID（client_id）',
     `client_secret`     VARCHAR(256) DEFAULT NULL COMMENT '客户端密钥（BCrypt 哈希，公共客户端为空）',
     `client_name`       VARCHAR(128) NOT NULL COMMENT '客户端名称（第三方网站名）',
@@ -175,8 +168,7 @@ CREATE TABLE `oauth_client` (
 -- -------------------------------------------------------------
 -- 9. OAuth2 客户端 CORS Origin 表（独立审核和动态缓存）
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `oauth_client_origin`;
-CREATE TABLE `oauth_client_origin` (
+CREATE TABLE IF NOT EXISTS `oauth_client_origin` (
     `client_id`       VARCHAR(128) NOT NULL COMMENT 'OAuth客户端ID，一个客户端当前登记一个Origin',
     `client_name`     VARCHAR(128) NOT NULL COMMENT '客户端名称（冗余保存，供管理员审核展示）',
     `origin`          VARCHAR(255) NOT NULL COMMENT '规范化Origin（scheme、host和可选非默认端口）',
@@ -199,8 +191,7 @@ CREATE TABLE `oauth_client_origin` (
 -- 开启轮转的客户端，一次授权派生的全部令牌共享同一 family_id：
 -- 轮转只更新本行的 token_hash，重放判定后按 family_id 整族置吊销。
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `oauth_grant`;
-CREATE TABLE `oauth_grant` (
+CREATE TABLE IF NOT EXISTS `oauth_grant` (
     `id`          BIGINT          NOT NULL AUTO_INCREMENT COMMENT '主键',
     `uid`         BIGINT          NOT NULL COMMENT '授权用户 uid',
     `client_id`   VARCHAR(128)    NOT NULL COMMENT '被授权的 OAuth 客户端 ID',
@@ -227,8 +218,7 @@ CREATE TABLE `oauth_grant` (
 -- 签发令牌时若存在本记录，取「本次申请范围 ∩ 本表范围」作为最终授权范围，
 -- 从而让用户在确认页的裁剪/追加在下次登录时自动延续。
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `oauth_user_scope`;
-CREATE TABLE `oauth_user_scope` (
+CREATE TABLE IF NOT EXISTS `oauth_user_scope` (
     `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
     `uid`         BIGINT       NOT NULL COMMENT '用户 uid',
     `client_id`   VARCHAR(128) NOT NULL COMMENT 'OAuth 客户端 ID',
@@ -248,8 +238,7 @@ CREATE TABLE `oauth_user_scope` (
 -- 「我的自定义令牌」页面查看；按需求 token 明文保存，便于用户复制复用。
 -- 过期状态在查询时按 expire_time 计算，不依赖定时任务。
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `oauth_custom_token`;
-CREATE TABLE `oauth_custom_token` (
+CREATE TABLE IF NOT EXISTS `oauth_custom_token` (
     `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
     `uid`         BIGINT       NOT NULL COMMENT '签发用户 uid',
     `client_id`   VARCHAR(128) NOT NULL COMMENT '目标 OAuth 客户端 ID',
@@ -277,8 +266,7 @@ CREATE TABLE `oauth_custom_token` (
 -- 沿用它在 user_config 等表中的分区键语义。
 -- 阶段一不启用 Redis 缓存，校验按 token 明文查一次库即可。
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `tlc_pat`;
-CREATE TABLE `tlc_pat` (
+CREATE TABLE IF NOT EXISTS `tlc_pat` (
     `id`           BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
     `uid`          BIGINT       NOT NULL COMMENT '所属用户',
     `client_id`    VARCHAR(128) NOT NULL COMMENT '个人令牌固定 this_land_cloud',
@@ -291,7 +279,6 @@ CREATE TABLE `tlc_pat` (
     `payload`      TEXT             NULL COMMENT '自定义 payload 结构的 JSON 文本（PatPayload），不参与鉴权',
     `last_used_at` DATETIME         NULL COMMENT '最近一次使用时间（阶段二启用）',
     `create_time`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    `update_time`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_tlc_pat_token` (`token`) COMMENT '按明文唯一定位，兜底防重复入库',
     KEY `idx_tlc_pat_uid` (`uid`, `create_time`) COMMENT '按用户列出其令牌并按签发时间倒序',

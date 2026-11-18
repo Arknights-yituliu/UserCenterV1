@@ -2,7 +2,8 @@
 -- 模块二：明日方舟（账号绑定、干员、物品、皮肤、player/info 镜像、统计结果）
 --
 -- 依赖：先执行 schema.sql 建库，再执行 schema-user.sql（绑定关系逻辑上指向 user_info.uid）。
--- 本文件可独立重跑：所有建表均为 DROP TABLE IF EXISTS + CREATE。
+-- 本文件可独立重跑：所有建表均为 CREATE TABLE IF NOT EXISTS，重复执行不会删除
+-- 已有数据，也不会修改已有表结构；需要清空重建请显式执行同目录的 reset.sql。
 -- 排序规则：全部 utf8mb4_bin。游戏账号/角色 UID 与皮肤编码都区分大小写，
 -- 用 general_ci 会把仅大小写不同的账号或皮肤误判为同一条，导致数据被错误合并。
 -- =============================================================
@@ -21,8 +22,7 @@ USE `user_center`;
 -- 它们按绑定行冗余存放：同一 ak_uid 被多个 uid 绑定时各自保留一份，每次导入以
 -- 本次上报值覆盖；未上报（null）时沿用旧值，显式传空串才清空。故统一非空、默认空串。
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `ak_account_binding`;
-CREATE TABLE `ak_account_binding` (
+CREATE TABLE IF NOT EXISTS `ak_account_binding` (
     `id`                BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键',
     `ak_uid`            VARCHAR(32) NOT NULL COMMENT '游戏账号UID，一套干员数据的归属键',
     `owner_uid`         BIGINT      NOT NULL COMMENT '绑定此游戏账号的用户中心UID，同一游戏账号可有多个用户',
@@ -41,8 +41,7 @@ CREATE TABLE `ak_account_binding` (
 -- -------------------------------------------------------------
 -- 2. 按游戏账号 UID 去重的共享角色信息
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `ak_player_info`;
-CREATE TABLE `ak_player_info` (
+CREATE TABLE IF NOT EXISTS `ak_player_info` (
     `id`          BIGINT      NOT NULL AUTO_INCREMENT COMMENT '游戏角色数据库行ID',
     `ak_uid`      VARCHAR(32) NOT NULL COMMENT '游戏角色UID，与绑定表及干员表采用相同类型和排序规则',
     `create_time` BIGINT      NOT NULL COMMENT '记录创建时间的Unix毫秒时间戳，服务端生成',
@@ -60,8 +59,7 @@ CREATE TABLE `ak_player_info` (
 -- ak_uid 为对应来源的归属键：skland 存游戏账号 UID，manual 存用户中心 UID。
 -- 偏好只存指向、不复制数据；目标来源失效时读取侧回退到最近变更的条目，不阻断请求。
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `ak_default_source`;
-CREATE TABLE `ak_default_source` (
+CREATE TABLE IF NOT EXISTS `ak_default_source` (
     `id`          BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键',
     `uid`         BIGINT      NOT NULL COMMENT '用户中心UID',
     `source`      VARCHAR(16) NOT NULL COMMENT '来源：skland 森空岛自动导入 / manual 用户手动上传',
@@ -76,8 +74,7 @@ CREATE TABLE `ak_default_source` (
 -- -------------------------------------------------------------
 -- 4. 游戏账号干员养成状态（一行一个干员，按 ak_uid 归属）
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `ak_operator_state`;
-CREATE TABLE `ak_operator_state` (
+CREATE TABLE IF NOT EXISTS `ak_operator_state` (
     `id`               BIGINT      NOT NULL AUTO_INCREMENT COMMENT '数据库自增行ID，响应中称recordId',
     `ak_uid`           VARCHAR(32) NOT NULL COMMENT '游戏账号UID，按此账号读取与更新',
     `operator_id`      VARCHAR(64) NOT NULL COMMENT '稳定干员编码，对应JSON中的id',
@@ -108,8 +105,7 @@ CREATE TABLE `ak_operator_state` (
 -- 保存用户手工调整后的干员数据。一个 uid 只能有一份手动修改版，
 -- 由唯一键 uk_uid_operator_state_manual 保证，不存在版本号或历史表。
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `ak_operator_state_manual`;
-CREATE TABLE `ak_operator_state_manual` (
+CREATE TABLE IF NOT EXISTS `ak_operator_state_manual` (
     `id`               BIGINT          NOT NULL AUTO_INCREMENT COMMENT '主键，响应中称recordId',
     `uid`              BIGINT          NOT NULL COMMENT '用户中心UID，手动修改版按用户归属',
     `operator_id`      VARCHAR(64)     NOT NULL COMMENT '稳定干员编码，对应JSON中的id',
@@ -140,8 +136,7 @@ CREATE TABLE `ak_operator_state_manual` (
 -- 全量变化，按行拆表需要先比对再逐行写入，成本高且没有行级读取需求，因此把
 -- items 数组整体序列化为一个 JSON 文本列，每次携带 items 时整体覆盖。
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `ak_item_data`;
-CREATE TABLE `ak_item_data` (
+CREATE TABLE IF NOT EXISTS `ak_item_data` (
     `id`          BIGINT      NOT NULL AUTO_INCREMENT COMMENT '数据库自增行ID',
     `ak_uid`      VARCHAR(32) NOT NULL COMMENT '游戏账号UID，与绑定表及干员表采用相同类型和排序规则',
     `item_data`   LONGTEXT    NOT NULL COMMENT '物品存量JSON文本，items数组整体序列化，元素形如{"itemId":"3001","count":111}',
@@ -162,8 +157,7 @@ CREATE TABLE `ak_item_data` (
 -- updated_at 由服务端在真正发生变化时显式写入，不使用 ON UPDATE：本表按「比对后只写变化行」
 -- 的方式维护，自动刷新会让该列不再表示「最后一次实际变更」。
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `ak_skin_state`;
-CREATE TABLE `ak_skin_state` (
+CREATE TABLE IF NOT EXISTS `ak_skin_state` (
     `id`         BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
     `ak_uid`     VARCHAR(32)  NOT NULL COMMENT '游戏账号UID，按此账号归属皮肤数据',
     `skin_id`    VARCHAR(128) NOT NULL COMMENT '皮肤编码，形如 char_4064_mlynar@epoque#28，区分大小写',
@@ -187,8 +181,7 @@ CREATE TABLE `ak_skin_state` (
 -- 单个账号的数据约 200KB，故用 LONGTEXT，且不对该列建索引、不做前缀索引。
 -- 需要历史版本时另建归档表，不要在本表加版本维度。
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `ak_player_info_snapshot`;
-CREATE TABLE `ak_player_info_snapshot` (
+CREATE TABLE IF NOT EXISTS `ak_player_info_snapshot` (
     `id`          BIGINT      NOT NULL AUTO_INCREMENT COMMENT '数据库自增行ID',
     `ak_uid`      VARCHAR(32) NOT NULL COMMENT '游戏账号UID，与绑定表及干员表采用相同类型和排序规则',
     `player_data` LONGTEXT    NOT NULL COMMENT '前端上报的 player/info 文本，原样落库，服务端不解析不校验结构',
@@ -202,8 +195,7 @@ CREATE TABLE `ak_player_info_snapshot` (
 -- -------------------------------------------------------------
 -- 9. 干员养成数据统计结果表
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `ak_operator_state_statistics`;
-CREATE TABLE `ak_operator_state_statistics` (
+CREATE TABLE IF NOT EXISTS `ak_operator_state_statistics` (
     `id`              BIGINT          NOT NULL AUTO_INCREMENT COMMENT '主键',
     `char_id`         VARCHAR(64)     NOT NULL COMMENT '干员编码，对应 ak_operator_state.operator_id',
     `own`             BIGINT UNSIGNED NOT NULL COMMENT '拥有该干员的记录总数（operatorOwnedCount）',
@@ -235,8 +227,7 @@ CREATE TABLE `ak_operator_state_statistics` (
 -- 不存获得时间：玩家数据只能算出样本中的最早/最晚，容易被误读成上线时间或「是否在售」，
 -- 这两类信息由游戏静态数据与运营配置负责，不从玩家数据反推。
 -- -------------------------------------------------------------
-DROP TABLE IF EXISTS `ak_skin_statistics`;
-CREATE TABLE `ak_skin_statistics` (
+CREATE TABLE IF NOT EXISTS `ak_skin_statistics` (
     `id`              BIGINT          NOT NULL AUTO_INCREMENT COMMENT '主键',
     `skin_id`         VARCHAR(128)    NOT NULL COMMENT '皮肤编码，对应 ak_skin_state.skin_id，区分大小写',
     `own`             BIGINT UNSIGNED NOT NULL COMMENT '拥有该皮肤的账号数',
