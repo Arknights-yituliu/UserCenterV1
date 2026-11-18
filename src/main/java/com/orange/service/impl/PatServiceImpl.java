@@ -195,9 +195,12 @@ public class PatServiceImpl implements PatService {
     /**
      * 应用视角按明文吊销本应用为该用户签发的一条 PAT
      *
+     * <p>入参 token 由入口层（控制器 / {@code RequestUtil}）完成归一化，本方法只做
+     * 精确匹配，不再自行 trim，避免同一份凭证在不同层被重复归一化。</p>
+     *
      * @param uid      用户 uid（由 access_token 解析得出）
      * @param clientId 调用方应用 ID
-     * @param token    PAT 明文
+     * @param token    PAT 明文（已归一化）
      */
     @Override
     public void revokeByClient(Long uid, String clientId, String token) {
@@ -209,7 +212,7 @@ public class PatServiceImpl implements PatService {
         }
         oauthTokenService.requireDirectAuthEnabledClient(clientId);
         int deleted = tlcPatMapper.delete(Wrappers.<TlcPat>lambdaQuery()
-                .eq(TlcPat::getToken, token.trim())
+                .eq(TlcPat::getToken, token)
                 .eq(TlcPat::getUid, uid)
                 .eq(TlcPat::getClientId, clientId));
         LogUtil.debug(PatServiceImpl.class, "[PAT] 应用侧吊销: uid={}, clientId={}, deleted={}",
@@ -224,7 +227,10 @@ public class PatServiceImpl implements PatService {
      * 其余格式直接返回 null，不产生数据库查询；命中明文且未过期才返回主体，过期与不存在不作区分。
      * 库列用 {@code utf8mb4_bin}，大小写不会被折叠。</p>
      *
-     * @param raw 明文令牌
+     * <p>入参由 {@code RequestUtil.resolveToken} 完成归一化（剥离 Bearer 前缀与首尾空白），
+     * 本方法只做精确匹配，不重复 trim。</p>
+     *
+     * @param raw 明文令牌（已归一化）
      * @return 令牌主体；格式不符、未命中或已过期时返回 null
      */
     @Override

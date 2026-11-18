@@ -29,7 +29,7 @@ import java.util.List;
  *
  * <p><strong>根路径 {@code POST /oauth2/pat} 是协议级例外</strong>：它凭请求体里的
  * refresh_token 签发 PAT，不经过 access_token 拦截器（已在 {@code WebConfig} 单独排除），
- * 与 {@code /oauth2/token/from-refresh} 同属「自带协议级认证」的端点。uid 与 client_id
+ * 属「自带协议级认证」的端点。uid 与 client_id
  * 取自 refresh_token 记录，签发准入同样是 {@code direct_auth_enabled=1}。</p>
  *
  * <p><strong>路径必须在 {@code WebConfig} 显式注册</strong>：漏配的表现是「接口能访问但
@@ -91,7 +91,9 @@ public class OAuthPatController {
     @Operation(summary = "吊销本应用签发的一条个人访问令牌（仅限已开通直连认证的客户端）")
     @PostMapping("/revoke")
     public Result<Void> revoke(@Valid @RequestBody PatClientRevokeRequest request) {
-        patService.revokeByClient(UserContext.requireUid(), UserContext.getClientId(), request.getToken());
+        // 入口统一归一化：请求体里的明文可能带粘贴残留的空白，服务层只做精确匹配
+        String token = request.getToken() == null ? null : request.getToken().trim();
+        patService.revokeByClient(UserContext.requireUid(), UserContext.getClientId(), token);
         return Result.success();
     }
 }
