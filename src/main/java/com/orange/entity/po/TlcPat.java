@@ -60,13 +60,9 @@ public class TlcPat {
     /** 最近一次使用时间（阶段二启用） */
     private LocalDateTime lastUsedAt;
 
-    /** 记录创建时间 */
+    /** 记录创建时间（本表无 UPDATE 路径，故不设 update_time） */
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
-
-    /** 记录更新时间 */
-    @TableField(fill = FieldFill.INSERT_UPDATE)
-    private LocalDateTime updateTime;
 
     public Long getId() {
         return id;
@@ -162,13 +158,5 @@ public class TlcPat {
 
     public void setCreateTime(LocalDateTime createTime) {
         this.createTime = createTime;
-    }
-
-    public LocalDateTime getUpdateTime() {
-        return updateTime;
-    }
-
-    public void setUpdateTime(LocalDateTime updateTime) {
-        this.updateTime = updateTime;
     }
 }
