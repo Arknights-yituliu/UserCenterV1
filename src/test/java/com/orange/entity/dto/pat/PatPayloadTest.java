@@ -93,6 +93,26 @@ class PatPayloadTest {
     }
 
     @Test
+    void sourceAloneIsAValidPartialPayload() throws Exception {
+        PatPayload payload = objectMapper.readValue("{\"source\":\"mini_app\"}", PatPayload.class);
+
+        assertThat(payload.getSource()).isEqualTo("mini_app");
+        assertThat(payload.getGameUid()).isNull();
+        // 只填 source 也算有效 payload，不能被当空对象归一化成 DB 的 NULL
+        assertThat(payload.isEmpty()).isFalse();
+    }
+
+    @Test
+    void sourceIsSerializedWithSnakeCaseKeyAndNoAlias() throws Exception {
+        PatPayload payload = new PatPayload();
+        payload.setSource("web");
+
+        JsonNode json = objectMapper.readTree(objectMapper.writeValueAsString(payload));
+        assertThat(json.size()).isEqualTo(1);
+        assertThat(json.get("source").asText()).isEqualTo("web");
+    }
+
+    @Test
     void emptyEntitySerializesToEmptyObject() throws Exception {
         assertThat(objectMapper.writeValueAsString(new PatPayload())).isEqualTo("{}");
     }

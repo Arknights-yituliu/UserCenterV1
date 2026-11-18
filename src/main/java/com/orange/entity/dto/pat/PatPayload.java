@@ -18,7 +18,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * 字段保持 {@code null}。因此后续新增字段不需要迁移存量数据，读到旧行也不会因多出键而报错。
  * 代价是列表与签发响应只回传本类已定义的字段，不再「原样返回任意 KV」。</p>
  *
- * <p>两个字段都是 {@code String}。注意 Jackson 对 String 字段默认允许标量强转：JSON 里写
+ * <p>字段都是 {@code String}。注意 Jackson 对 String 字段默认允许标量强转：JSON 里写
  * 整型数字会转成十进制字符串，布尔与浮点也会分别转成 {@code "true"} / {@code "1.5"}，
  * 对象与数组则在绑定阶段直接报错。{@link com.orange.common.util.PatPayloadUtil} 负责
  * trim 与「绝不返回空串」，账号归属最终仍由业务层的绑定校验把关。</p>
@@ -38,6 +38,9 @@ public class PatPayload {
     /** 游戏名称在 JSON 里的字段名（DB 文本与对外接口统一用蛇形） */
     public static final String FIELD_GAME_NAME = "game_name";
 
+    /** 令牌来源在 JSON 里的字段名 */
+    public static final String FIELD_SOURCE = "source";
+
     /**
      * 干员数据接口要读取的游戏账号 UID，可空。
      *
@@ -53,6 +56,16 @@ public class PatPayload {
     private String gameName;
 
     /**
+     * 令牌来源标识，可空。
+     *
+     * <p>由签发方自行填写，用于区分同一用户名下不同渠道/场景签出的令牌（如 {@code web}、
+     * {@code mini_app}、{@code script}），便于在列表里辨认与后续按来源统计。服务端不校验取值、
+     * 不参与鉴权与取数，仅随签发、列表与消费端解析原样透传；长度由 payload 整体 ≤ 4KB 兜底。</p>
+     */
+    @JsonProperty(FIELD_SOURCE)
+    private String source;
+
+    /**
      * 是否所有字段都为空（等价于不传 payload）
      *
      * <p>用于签发时把「全空对象」归一化为 DB 的 {@code NULL}，与改造前 {@code {}} 落库为
@@ -62,7 +75,7 @@ public class PatPayload {
      */
     @JsonIgnore
     public boolean isEmpty() {
-        return gameUid == null && gameName == null;
+        return gameUid == null && gameName == null && source == null;
     }
 
     public String getGameUid() {
@@ -79,5 +92,13 @@ public class PatPayload {
 
     public void setGameName(String gameName) {
         this.gameName = gameName;
+    }
+
+    public String getSource() {
+        return source;
+    }
+
+    public void setSource(String source) {
+        this.source = source;
     }
 }
