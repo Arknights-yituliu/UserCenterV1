@@ -1,5 +1,12 @@
 # OAuth 令牌直签接口文档
 
+> **已下线（2026-11-19）**：本文描述的直签端点，以及同批下线的 4 个令牌增删查端点，均已从代码中删除，
+> 请求直接 404。涉及的具体路径：`GET/POST /user/oauth/custom-tokens`、
+> `POST /user/oauth/custom-tokens/revoke`、`POST /oauth2/token/from-refresh`、
+> `GET /oauth2/custom-tokens`、`POST /oauth2/custom-tokens/revoke`。
+> 长期凭证改由 PAT 承接：用户侧 `POST /user/pat`，应用侧 `POST /oauth2/pat`（见 `docs/archive/PAT接口文档.md`）。
+> 本文保留作历史参考，不再维护。
+
 ## 1. 文档说明
 
 本文档描述 UserCenter 的**令牌直签**接口：调用方直接提交一份「已有凭证」（用户登录会话或 OAuth `refresh_token`），换取指定有效期的 `access_token`。

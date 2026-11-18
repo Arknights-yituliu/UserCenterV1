@@ -2,9 +2,10 @@
 
 > 面向调用方：本系统自有前端、已开通直连认证的应用后端、以及需要用长期凭证读取数据的脚本/服务。
 > 全貌（分层、链路、未完成工作）见 `docs/pat/PAT整体架构.md`；接口总览见 `docs/API.md`；
-> 存储与迁移方案见 `docs/oauth/PAT改造方案-最终版.md`；消费端取数设计见 `docs/pat/PAT消费端接口设计.md`；
-> 落地差异见 `docs/pat/PAT落地核对报告.md`。
-> 版本基线：2026-11-18（全链路明文 + 轮换接口已删除 + 应用侧 refresh_token 签发）。
+> 存储与迁移方案见 `docs/archive/PAT改造方案-最终版.md`；消费端取数设计见 `docs/archive/PAT消费端接口设计.md`；
+> 落地差异见 `docs/archive/PAT落地核对报告.md`。
+> 版本基线：2026-11-19（全链路明文 + 轮换接口已删除 + 应用侧 refresh_token 签发；旧直签链路 6 端点下线，
+> 新旧对应关系见 2.4）。
 
 ## 1. 快速上手
 
@@ -63,6 +64,25 @@ Authorization: Bearer tlc_pat_0123456789abcdef...
 
 凭证**不得**放在 URL 查询串里。
 
+### 2.4 旧 API → 新 API 对应关系
+
+> **2026-11-19 起**，旧「自定义有效期 access_token」链路的 6 个端点已从代码中删除，请求直接返回 **404**——不是 410 过渡，也没有兜底响应。旧调用方按下表改打新地址即可。
+
+| 旧 API（已下线） | 原用途 | 新 API | 差异要点 |
+| --- | --- | --- | --- |
+| `POST /user/oauth/custom-tokens` | 用登录会话换一个长有效期 access_token | `POST /user/pat` | 新端点签发的是 **PAT**（`tlc_pat_` 前缀），不是 access_token；消费面从 `/oauth2/**` 换成 `/pat/**`；`name` 仍必填、`expires_in` 上限不变，新增可选 `payload`（`game_uid` 决定读谁的干员数据） |
+| `GET /user/oauth/custom-tokens` | 「我的自定义令牌」列表 | `GET /user/pat/list` | 字段基本对齐，新增 `tokenPrefix`、`payload`、`lastUsedAt`、`expiresInSeconds`；迁移来的旧令牌 `payload=null` |
+| `POST /user/oauth/custom-tokens/revoke` | 按明文吊销我的一条令牌 | `POST /user/pat/revoke` | 改为按 `id` 撤销（列表项自带 `id`），不再按明文；另有 `POST /user/pat/revoke-all` 一键全撤销 |
+| `POST /oauth2/token/from-refresh` | 拿 refresh_token 换长有效期 access_token | `POST /oauth2/pat` | 同样「不消费、不轮转」refresh_token，但产出 PAT；不再接受 `client_id`，归属由凭证自身决定；不再产出新的长期 access_token |
+| `GET /oauth2/custom-tokens` | 应用视角的签发记录列表 | `GET /oauth2/pat/list` | 同样强制 `uid + clientId` 隔离，准入仍是 `direct_auth_enabled=1` |
+| `POST /oauth2/custom-tokens/revoke` | 应用视角按明文吊销 | `POST /oauth2/pat/revoke` | 同样按明文 + `uid + clientId` 三条件精确删除，幂等 |
+
+配套变化：
+
+- **已发出去的旧令牌字符串不用换**。迁移后它们原样留在 `tlc_pat`，调用方只把请求地址从 `/oauth2/**` 改成 `/pat/**`。
+- 旧链路已无写入方，`oauth_custom_token` 表冻结为只读，只由一次性迁移端点遍历（见第 8 节）。
+- 旧端点配套的服务方法、DTO/VO 与拦截器路径已一并删除，代码里不再有兼容分支；遇到 404 请直接改调新地址，不要指望灰度开关。
+
 ## 3. 通用约定
 
 ### 3.1 请求与响应
@@ -115,8 +135,9 @@ PAT **不做摘要**。`tlc_pat.token` 保存令牌明文本身，Redis 预留�
 | --- | --- | --- |
 | `game_uid` | string / null | 干员数据接口要读取的游戏账号 UID，可空；也接受驼峰别名 `gameUid` |
 | `game_name` | string / null | 游戏名称，可空；当前不参与鉴权与取数，仅随签发与列表透传；也接受驼峰别名 `gameName` |
+| `source` | string / null | 令牌来源标识，可空；由签发方自行填写（如 `web`、`mini_app`、`script`），服务端**不校验取值、不参与鉴权与取数**，仅随签发、列表与消费端解析透传，便于在列表中辨认令牌用途 |
 
-两个字段都**允许全空或部分为空**：不传 payload、传 `{}`、或只填其中一个都合法。`game_name` 单独存在时 `payload` 不算空，会正常落库与回显，但消费端仍会因缺 `game_uid` 返回 `10002`。后续新增字段不需要迁移存量数据，缺字段的历史行自动为 `null`。
+三个字段都**允许全空或部分为空**：不传 payload、传 `{}`、或只填其中任意几个都合法。`game_name` / `source` 单独存在时 `payload` 不算空，会正常落库与回显，但消费端仍会因缺 `game_uid` 返回 `10002`。后续新增字段不需要迁移存量数据，缺字段的历史行自动为 `null`。
 
 `payload.game_uid` 的取值规则（消费端强制）：字段声明为 `String`，JSON 里写成整数会被 Jackson 转成十进制字符串；取值时 trim，空白、缺失一律返回 `10002`。布尔/浮点标量也会被 Jackson 强转成字符串（不再由取值层拒绝，最终由绑定校验挡下），对象/数组则在请求体绑定阶段报 `10001`。**新令牌必须提供 `game_uid`**，否则读取干员数据时返回 `10002`。签发后没有修改接口，改账号只能撤销后重新签发。
 
@@ -127,7 +148,7 @@ PAT **不做摘要**。`tlc_pat.token` 保存令牌明文本身，Redis 预留�
   "name": "干员数据同步脚本",
   "expires_in": 2592000,
   "scope": "ak-data.read",
-  "payload": { "game_uid": "12345678", "game_name": "明日方舟" }
+  "payload": { "game_uid": "12345678", "game_name": "明日方舟", "source": "script" }
 }
 ```
 
@@ -148,7 +169,8 @@ PAT **不做摘要**。`tlc_pat.token` 保存令牌明文本身，Redis 预留�
   "id": 21, "token": "tlc_pat_<64位hex>", "tokenPrefix": "tlc_pat_012",
   "name": "干员数据同步脚本", "clientId": "this_land_cloud",
   "scope": "ak-data.read", "expiresIn": 2592000,
-  "expireTime": "2026-12-18T15:00:00", "payload": {"game_uid": "12345678", "game_name": "明日方舟"},
+  "expireTime": "2026-12-18T15:00:00",
+  "payload": {"game_uid": "12345678", "game_name": "明日方舟", "source": "script"},
   "createdAt": "2026-11-18T15:00:00" } }
 ```
 
@@ -190,7 +212,7 @@ PAT **不做摘要**。`tlc_pat.token` 保存令牌明文本身，Redis 预留�
 
 ### 6.1 签发 `POST /oauth2/pat`
 
-**凭证**：请求体的 `refresh_token`。本端点不经过 access_token 拦截器（`WebConfig` 用 `excludePathPatterns("/oauth2/pat")` 精确排除根路径），与 `/oauth2/token/from-refresh` 同属自带协议级认证的端点。refresh_token **不消费、不轮转**，签出 PAT 后原凭证继续有效。
+**凭证**：请求体的 `refresh_token`。本端点不经过 access_token 拦截器（`WebConfig` 用 `excludePathPatterns("/oauth2/pat")` 精确排除根路径），属自带协议级认证的端点。refresh_token **不消费、不轮转**，签出 PAT 后原凭证继续有效。
 
 请求体（`PatIssueByRefreshRequest`）：
 
@@ -232,7 +254,7 @@ PAT **不做摘要**。`tlc_pat.token` 保存令牌明文本身，Redis 预留�
 | --- | --- | --- |
 | `token` | 是 | 非空、≤ 128 字符 |
 
-应用侧拿不到用户侧的列表 `id`，因此按明文提交；服务端按 `uid + client_id + token` 三条件精确删除（会 `trim()`），**幂等**，删不到也返回成功。
+应用侧拿不到用户侧的列表 `id`，因此按明文提交；服务端按 `uid + client_id + token` 三条件精确删除（token 在控制器入口 `trim()`，服务层只做精确匹配），**幂等**，删不到也返回成功。
 
 ## 7. 消费面：用 PAT 读干员数据
 
@@ -266,9 +288,9 @@ PAT **不做摘要**。`tlc_pat.token` 保存令牌明文本身，Redis 预留�
 - 打旧链路会返回 `90009`，这是预期行为，不是回归。
 - 消费端与迁移**必须同批上线**，否则会出现「旧令牌两边都不认」的失效窗口。
 
-### 内部迁移端点 `POST /internal/pat-migration/run`
+### 内部迁移端点 `GET /internal/pat-migration/run`
 
-一次性运维端点，**不设开关**：随应用启动直接注册，无参数、无鉴权、同步执行。既然没有开关，暴露面只能靠部署侧兜住——必须限定内网访问（网关、安全组或白名单），不得对外网开放。前置条件是新链路已能校验 PAT、旧表已备份、迁移期间停写；**跑完立即删除该 Controller 并重新发布**，不要把它留在后续版本里。
+一次性运维端点，**不设开关**：随应用启动直接注册，无参数、无鉴权、同步执行；用 `GET` 而非 `POST`，运维在浏览器地址栏直接访问即可触发。既然没有开关，暴露面只能靠部署侧兜住——必须限定内网访问（网关、安全组或白名单），不得对外网开放。前置条件是新链路已能校验 PAT、旧表已备份、迁移期间停写；**跑完立即删除该 Controller 并重新发布**，不要把它留在后续版本里。
 
 服务层 `run()` 已加锁串行：重复触发会排队执行，后一次因明文已入库被唯一键忽略而不再插入，`migrated + failed == total` 的口径不会被并发双跑打乱。
 
@@ -283,4 +305,5 @@ PAT **不做摘要**。`tlc_pat.token` 保存令牌明文本身，Redis 预留�
 - `POST /oauth2/pat` 是 `/oauth2/**` 认证域里唯一的协议级例外：不带 access_token，凭请求体 refresh_token 签发；`WebConfig` 只排除根路径，`/list`、`/revoke` 仍受 access_token 保护。
 - 阶段一不启用 Redis 校验缓存，每次消费请求按明文查一次库；阶段二若启用 `tlc:pat:*` 缓存，Redis 也需按敏感数据源管理。
 - 已有库升级**不能重跑** `db/schema-user.sql`（含 `DROP TABLE IF EXISTS`），需走增量 DDL；本次删除 `tlc_pat.source` 列同样需单独对已有库执行增量变更。
-- 尚未实现：旧 6 端点 `410 Gone`、前端切换与旧表导出删除、`last_used_at` 回写、家族索引成员改写、撤销应用授权联动清迁移来的 PAT。详见《PAT落地核对报告》第 5 节。
+- 旧 6 端点已于 2026-11-19 直接下线（删除，非 410），对应关系见 2.4；**前端若仍调旧地址会 404**，须先切到 `/user/pat/**`、`/oauth2/pat/**`。
+- 尚未实现：前端切换验证、旧表导出删除、`last_used_at` 回写、家族索引成员改写、撤销应用授权联动清迁移来的 PAT。详见 `docs/archive/PAT落地核对报告.md` 第 5 节。

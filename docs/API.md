@@ -101,9 +101,6 @@
 | `/user/oauth/grants/scopes` | GET | 是 | 用户会话 | 查看我对某应用的授权范围（已授予权限+可选权限），供前端渲染勾选状态。 |
 | `/user/oauth/grants/scopes/grant` | POST | 是 | 用户会话 | 为已授权应用追加权限（只增不减），同步到已签发令牌，立即生效。 |
 | `/user/oauth/grants/scopes/revoke` | POST | 是 | 用户会话 | 取消对某应用的已授权权限（只减不增，剩余不可为空），同步到已签发令牌。 |
-| `/user/oauth/custom-tokens` | GET | 是 | 用户会话 | 查看我签发的自定义有效期 access_token 列表（含已过期记录），按签发时间倒序。 |
-| `/user/oauth/custom-tokens` | POST | 是 | 用户会话 | 用当前登录会话直签自定义有效期 access_token。`client_id` 可选：传其它值代该已登记应用签发，不传或传保留标识 `this_land_cloud` 则签为「用户个人令牌」（直接放行、不查客户端表）；scope 只能收敛不能扩权，不接受 `all`（返回 `90003`）；`expires_in` 上限 10 年零 1 个月；需填名称。 |
-| `/user/oauth/custom-tokens/revoke` | POST | 是 | 用户会话 | 吊销我名下的一条自定义令牌：Redis 立即失效并删除记录，幂等，可跨应用吊销自己的令牌。 |
 
 ### 个人访问令牌自助管理（`/user/pat/**`）
 
@@ -118,7 +115,7 @@
 
 > 换令牌走「撤销 + 重新签发」，没有轮换接口；需要继承名称/有效期/payload 时由前端用列表项预填签发表单。
 
-> **payload 是固定结构实体 `PatPayload`**，DB 仍存 JSON 文本、读取时才反序列化成对象。**所有字段均可为空**（可传 `{}`、只填部分，或完全不传），未知键静默忽略、缺失字段为 `null`，序列化后 ≤ 4KB。当前字段：`game_uid`（string，消费端据此定位游戏账号；接受 `gameUid` 别名）与 `game_name`（string，游戏名称，可空、不参与鉴权；接受 `gameName` 别名）。列表与签发响应只回传已定义字段，不再原样返回任意 KV；新增字段无需迁移存量数据。
+> **payload 是固定结构实体 `PatPayload`**，DB 仍存 JSON 文本、读取时才反序列化成对象。**所有字段均可为空**（可传 `{}`、只填部分，或完全不传），未知键静默忽略、缺失字段为 `null`，序列化后 ≤ 4KB。当前字段：`game_uid`（string，消费端据此定位游戏账号；接受 `gameUid` 别名）、`game_name`（string，游戏名称，可空、不参与鉴权；接受 `gameName` 别名）与 `source`（string，令牌来源标识，由签发方自填如 `web`/`mini_app`/`script`，可空、不校验、仅透传）。列表与签发响应只回传已定义字段，不再原样返回任意 KV；新增字段无需迁移存量数据。
 
 ### OAuth 客户端自助管理（`/user/oauth/client/**`）
 
@@ -144,7 +141,6 @@
 | `/oauth2/consent/info` | GET | 是 | 用户会话 | 授权确认信息查询：确认页加载时调用，校验登录态与确认单归属，返回客户端名称、申请权限、回调地址。 |
 | `/oauth2/consent` | POST | 是 | 用户会话 | 授权确认/拒绝：同意则签发授权码并返回回跳地址，拒绝则回跳 error=access_denied，确认单一次性消费。 |
 | `/oauth2/token` | POST | 是 | client_id+client_secret / 授权码 / refresh_token / PKCE | OAuth 令牌交换与刷新：支持 authorization_code 和 refresh_token 两种 grant_type，机密客户端需校验 secret。 |
-| `/oauth2/token/from-refresh` | POST | 是 | refresh_token | 用已有 refresh_token 直签指定有效期的 access_token，权限可收敛（只减不增），不消费不轮转刷新令牌，需填名称。 |
 | `/oauth2/revoke` | POST | 是 | client_id+client_secret | 吊销令牌（RFC 7009）：自动识别 access_token/refresh_token 并立即失效，幂等，不泄露令牌是否有效。 |
 
 ## 四、OAuth access_token 鉴权接口（`Authorization: Bearer {access_token}`）
@@ -199,13 +195,6 @@
 | `/oauth2/ef-pool-records/accounts` | GET | 是 | OAuth access_token + `ef-data.read` scope | 查询当前令牌用户导入过寻访记录的终末地账户列表，按导入时间倒序。 |
 | `/oauth2/ef-pool-records/record` | GET | 是 | OAuth access_token + `ef-data.read` scope | 按 `roleId` 读取干员与武器寻访记录，须已绑定当前令牌用户；响应 Cache-Control 为 private, no-cache。 |
 
-### 自定义令牌（仅限已开通直连认证的客户端）
-
-| API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
-|---|---|---|---|---|
-| `/oauth2/custom-tokens` | GET | 是 | OAuth access_token + 直连认证开关（direct_auth_enabled=1） | 查询本应用为该用户签发的自定义令牌列表（含过期记录），只能看自己应用名下记录。 |
-| `/oauth2/custom-tokens/revoke` | POST | 是 | OAuth access_token + 直连认证开关（direct_auth_enabled=1） | 吊销本应用签发的一条自定义令牌，归属按 uid+clientId 双重限定，幂等。 |
-
 ### 个人访问令牌（应用视角，仅限已开通直连认证的客户端）
 
 | API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
@@ -228,7 +217,7 @@
 | API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
 |---|---|---|---|---|
 | `/oauth2/internal/migrate-token` | POST | 是 | Ed25519 验签 + 时间窗 + nonce 防重放（ts/nonce/kid/sig） | 迁移兑换：BackEndV3 服务端凭旧自签 token 对应的 uid 换取一对全新 UC 令牌（access+refresh）。 |
-| `/internal/pat-migration/run` | POST | 否 | 无鉴权；**不设开关、随应用启动注册**，必须限定内网访问 | 触发旧自定义令牌向 `tlc_pat` 的全量迁移（旧令牌保留原样明文写入）。**搬迁不判有效性**：`oauth_custom_token` 中所有未过期行都会写入，已被撤销（Redis 明细已删、签发记录仍在）的令牌会重新变成可用 PAT，该取舍已确认接受。每批 500 行批量 `INSERT IGNORE` 后，按 uid 摘除 `uc:uid:oauth:{uid}` 索引成员并批量 `DEL` 旧 key。幂等，返回 `total`/`migrated`/`skipped`（恒 0）/`failed`/`elapsedMs`，满足 `migrated + failed == total`。一次性运维端点：前置条件是新链路已能校验 PAT、旧表已备份、迁移期间停写；**跑完立即删除该 Controller 并重新发布**。服务层方法已加锁串行，重复触发会排队执行，已入库明文被唯一键忽略，不会翻倍。 |
+| `/internal/pat-migration/run` | GET | 否 | 无鉴权；**不设开关、随应用启动注册**，必须限定内网访问 | 触发旧自定义令牌向 `tlc_pat` 的全量迁移（旧令牌保留原样明文写入）。**搬迁不判有效性**：`oauth_custom_token` 中所有未过期行都会写入，已被撤销（Redis 明细已删、签发记录仍在）的令牌会重新变成可用 PAT，该取舍已确认接受。每批 500 行批量 `INSERT IGNORE` 后，按 uid 摘除 `uc:uid:oauth:{uid}` 索引成员并批量 `DEL` 旧 key。幂等，返回 `total`/`migrated`/`skipped`（恒 0）/`failed`/`elapsedMs`，满足 `migrated + failed == total`。一次性运维端点：前置条件是新链路已能校验 PAT、旧表已备份、迁移期间停写；**跑完立即删除该 Controller 并重新发布**。服务层方法已加锁串行，重复触发会排队执行，已入库明文被唯一键忽略，不会翻倍。 |
 
 ## 七、PAT 鉴权接口（`Authorization: Bearer {PAT}` 或 `UC-Token`）
 

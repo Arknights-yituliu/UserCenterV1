@@ -59,7 +59,7 @@
 | `expire_time` | DATETIME | 到期时间 |
 | `payload` | TEXT NULL | `PatPayload` 序列化后的 JSON 文本，不参与鉴权 |
 | `last_used_at` | DATETIME NULL | 预留列，**当前没有写入点** |
-| `create_time` / `update_time` | DATETIME | 审计字段 |
+| `create_time` | DATETIME | 创建（签发）时间；本表无 UPDATE 路径，故不设 `update_time` |
 
 索引与约束：
 
@@ -86,10 +86,11 @@
 | --- | --- | --- |
 | `game_uid` | String（别名 `gameUid`） | **唯一被服务端解读的字段**：决定读哪个游戏账号 |
 | `game_name` | String（别名 `gameName`） | 纯展示，不参与鉴权与取数 |
+| `source` | String | 签发方自填的来源标识（`web`/`mini_app`/`script` 等），不校验、不参与鉴权，仅透传 |
 
 规则：
 
-- 所有字段可空：不传、传 `{}`、只填一个都合法；全空等价于 `NULL`。
+- 所有字段可空：不传、传 `{}`、只填其中任意几个都合法；全空等价于 `NULL`。
 - 未知键静默忽略（`ignoreUnknown=true`），因此**加字段不需要迁移存量数据**；代价是列表不再回显任意 KV。
 - 序列化后 ≤ 4KB。
 - 取 `game_uid` 走 `PatPayloadUtil.requireGameUid`：trim 后必须非空，**绝不放行空串**（空串会让业务层回落到默认账号，等于越权）。
@@ -236,7 +237,7 @@ entity/vo/pat/PatIssueVO, PatVO     签发响应 / 列表项（都含明文）
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/internal/pat-migration/run` | 触发旧令牌迁移；无参数、无鉴权，跑完即删 |
+| GET | `/internal/pat-migration/run` | 触发旧令牌迁移；无参数、无鉴权，浏览器直接访问即可，跑完即删 |
 
 ## 7. 生命周期语义
 
@@ -364,15 +365,15 @@ END
 | 文档 | 回答什么问题 | 读者 |
 | --- | --- | --- |
 | 本文 `PAT整体架构.md` | 全局长什么样、各部分怎么咬合、还差什么 | 所有人，先读这篇 |
-| `docs/oauth/PAT改造方案-最终版.md` | 为什么这么设计、数据模型与迁移的原始论证 | 架构/评审 |
-| `docs/pat/PAT消费端接口设计.md` | `/pat/**` 为什么独立、拦截器与取数口径 | 后端 |
+| `docs/archive/PAT改造方案-最终版.md` | 为什么这么设计、数据模型与迁移的原始论证 | 架构/评审 |
+| `docs/archive/PAT消费端接口设计.md` | `/pat/**` 为什么独立、拦截器与取数口径 | 后端 |
 | `docs/pat/PAT接口文档.md` | 每个接口怎么调、字段与错误码 | 调用方 |
-| `docs/pat/PAT落地核对报告.md` | 落地与设计的差异、审查发现、变更记录 | 维护者 |
+| `docs/archive/PAT落地核对报告.md` | 落地与设计的差异、审查发现、变更记录 | 维护者 |
 | `docs/API.md` | 全站接口登记与认证域约定 | 所有人 |
 
 ## 12. 未完成工作
 
-> 口径：截至 2026-11-18。分四类——**上线阻塞**、**阶段二功能**、**测试缺口**、**明确不做**。
+> 口径：截至 2026-11-19。分四类——**上线阻塞**、**阶段二功能**、**测试缺口**、**明确不做**。
 > 已完成的文档/注释欠账（原核对报告第 6 节）不再列入。
 
 ### 12.1 上线阻塞（不闭合不应上线）
@@ -389,14 +390,14 @@ END
 
 | # | 事项 | 现状 | 影响 | 建议 |
 | --- | --- | --- | --- | --- |
-| 1 | 旧 6 端点未 `410 Gone` | `UserController` 3 个 + `OAuthController` 3 个端点仍原样返回业务结果 | 旧链路继续可写新令牌，迁移永远追不上 | 前端切换完成后统一改 `410`，观察旧端点日志归零 |
-| 2 | 前端未切换 | 用户侧/应用侧的「自定义令牌」页面仍调旧端点 | 新签发的 PAT 与旧令牌分散在两套界面 | 切到 `/user/pat/**`、`/oauth2/pat/**`；列表可直接复制明文，交互不用大改 |
-| 3 | 旧表未导出删除 | `oauth_custom_token` 明文常驻 | 库里长期保留一份可用的明文副本，且与 `tlc_pat` 双份共存 | 全量导出归档（加密）后再删表/清列 |
+| ~~1~~ | ~~旧 6 端点未 `410 Gone`~~ | **已下线（2026-11-19）**：`UserController` 3 个 + `OAuthController` 3 个端点连同专用服务方法、DTO/VO、拦截器路径一并删除，请求直接 404（不做 410 过渡） | — | 前端若仍调用会 404，须先切到 `/user/pat/**`、`/oauth2/pat/**` |
+| 2 | 前端未切换 | 用户侧/应用侧的「自定义令牌」页面仍调旧端点，而旧端点已删除 | 页面直接报错，新签发的 PAT 与旧令牌分散在两套界面 | 切到 `/user/pat/**`、`/oauth2/pat/**`；列表可直接复制明文，交互不用大改 |
+| 3 | 旧表未导出删除 | `oauth_custom_token` 明文常驻；写入方端点已于 2026-11-19 下线，表已冻结（只由迁移端点只读遍历） | 库里长期保留一份可用的明文副本，且与 `tlc_pat` 双份共存 | 全量导出归档（加密）后再删表/清列 |
 | 4 | `last_used_at` 未回写 | 列存在，无写入点；列表恒为 `null` | 用户看不到「这把令牌最近用过吗」，异常令牌难发现 | 在 `resolve` 命中后按「距上次更新 > 5 分钟」节流更新，另起一批 |
 | 5 | 撤销应用授权不清 `tlc_pat` | `revokeClientAuthorization` 只清 OAuth 令牌，未接线 | 用户撤销某应用授权后，该应用名下旧长期令牌仍可用 | 加一句按 `uid + client_id` 删行；注意别误删个人自助 PAT（其 `client_id` 固定 `this_land_cloud`） |
 | 6 | 家族索引未处理 | 迁移只 `SREM uc:uid:oauth:{uid}`，没有 `SADD` 到 PAT 侧，也没处理 `uc:oauth:family:*` | 迁移来的旧令牌在刷新重放时不参与整族吊销 | 迁移里补两行；或明确接受该缺口并写进运维手册 |
 | 7 | 过期判定用应用本机时间 | `resolve` 用 `LocalDateTime.now()`，方案写的是 DB `NOW()` | 多实例时钟漂移时，同一令牌可能一个节点放行、一个拒绝 | 评估改用 DB 时间，或强制 NTP + 可接受漂移 |
-| 8 | 归一化时机不一致 | `RequestUtil` 已 trim，`resolve` 不再 trim；`revokeByClient` 又 trim 一次 | 当前无害，属一致性债 | 统一在入口 trim，服务层只管精确匹配 |
+| ~~8~~ | ~~归一化时机不一致~~ | **已闭合（2026-11-19）**：`OAuthPatController#revoke` 在入口 trim 请求体 token，`revokeByClient` 与 `resolve` 只做精确匹配，两个方法的 javadoc 均声明「入参已归一化」 | — | — |
 
 ### 12.3 测试缺口（当前实际状态）
 
@@ -405,7 +406,7 @@ END
 | `revokeByClient` 无直接单测 | 只覆盖了签发侧准入；「client_id 不符删不掉」「`direct_auth_enabled=0` 删不掉」「明文不存在幂等」都没测 | 补 3 例 service 单测 |
 | `listByClient` 未测准入 | 没有 `direct_auth_enabled=0 → 90014` 的用例 | 补 1 例 |
 | `UserPatController` 无端到端测试 | 4 个端点只有服务层单测 | 补 MVC 测试（尤其 `revoke-all` 的越权边界） |
-| 消费端响应与 OAuth 版一致性 | 没有自动断言，只靠人工比对 | 用同一份 mock 数据跑两个控制器，逐字段比对 |
+| ~~消费端响应与 OAuth 版一致性~~ | **已失效（2026-11-19）**：OAuth 侧 `custom-tokens` 响应（`OAuthCustomTokenVO`）随端点下线一并删除，已无比对对象；`/oauth2/pat/**` 与 `/user/pat/**` 共用 `PatVO`，本身同源 | — |
 | ~~`PatMigrationServiceImpl` 无单测~~ | **已闭合**：`PatMigrationServiceImplTest` 覆盖 4 例——全量搬迁不读令牌明细（`opsForValue` 从未调用）、明文/前缀/`create_time` 原样搬迁、插入失败时 Redis 一条不动、无待处理行时不发写命令 | — |
 | 过期行返回 `null` 无断言 | `.gt(expireTime, now)` 加在 wrapper 上，单测 mock 掉 `selectOne` 后验证不到 | 用集成测试或捕获 wrapper 条件断言 |
 | ~~`/oauth2/pat/**` 无 token → `90009`~~ | **已闭合**：`OAuthPatMvcTest` 覆盖 `/list`、`/revoke` 无 token | — |
@@ -430,3 +431,16 @@ END
 | PAT 调用 `/oauth2/**` | 需要改认证分派顺序，且会给每次 OAuth 调用增加一次 miss 成本；当前无需求 |
 | 软删 / 墓碑 | 没有缓存回写，删行即生效，不需要墓碑 |
 | 摘要存储 | 与「列表可回看、旧令牌无感迁移」的诉求直接冲突，是全链路明文的取舍本身 |
+
+## 13. 变更记录
+
+### 2026-11-19 旧直签链路收尾
+
+| 变更 | 内容 | 影响面 |
+| --- | --- | --- |
+| 旧 6 端点下线 | 删除 `GET/POST /user/oauth/custom-tokens`、`POST /user/oauth/custom-tokens/revoke`、`POST /oauth2/token/from-refresh`、`GET /oauth2/custom-tokens`、`POST /oauth2/custom-tokens/revoke`；连带删除 6 个服务方法、5 个专用私有方法、2 个常量（`USER_SELF_CLIENT_ID`、`MAX_DIRECT_ISSUE_TTL_SECONDS`）、`OAuthCustomTokenVO` 与两个 revoke 请求 DTO、`WebConfig` 中 `/oauth2/custom-tokens/**` 拦截路径、`OAuthTokenServiceImpl` 对 `OAuthCustomTokenMapper` 的依赖 | 请求直接 404，非 410 过渡；长期凭证统一走 `/user/pat`、`/oauth2/pat` |
+| 旧表降级为只读 | `oauth_custom_token`、`OAuthCustomToken`、`OAuthCustomTokenMapper.countAlive/selectAliveAfterId` 保留，仅供 `PatMigrationServiceImpl` 只读遍历；不再有写入方 | 表冻结，导出归档后可随迁移端点一并删除 |
+| token 归一化收口 | `OAuthPatController#revoke` 在入口 trim 请求体 token；`revokeByClient`、`resolve` 只做精确匹配并在 javadoc 声明入参已归一化 | 修掉「三层各管一段」的一致性债，`"   "` 不再出现「请求成功但删 0 行」 |
+| 迁移端点改 GET | `PatMigrationController#run` 由 `POST` 改为 `GET /internal/pat-migration/run`，便于运维直接在浏览器触发 | 暴露面更依赖内网限定，需防止 GET 探测误触发；仍属一次性端点，跑完即删 |
+
+> 本文只记录接口与契约层变更；建表脚本形态调整不在本记录范围。
