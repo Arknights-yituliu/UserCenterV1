@@ -253,6 +253,10 @@ public class AuthServiceImpl implements AuthService {
     /**
      * 通过邮箱验证码重置密码（校验验证码后更新密码并踢出全部会话）
      *
+     * <p>安全边界：邮箱验证码是「账号找回」级别的凭证，改密后必须让会话立即失效。
+     * 但 <strong>不动 PAT</strong>——长期令牌是用户显式管理、可自助撤销的资产，这里不做联动；
+     * 与 {@code updatePassword}（需旧密码）的差异也仅在于是否踢会话。</p>
+     *
      * @param request 重设参数（账号 + 验证码 + 新密码）
      */
     @Override

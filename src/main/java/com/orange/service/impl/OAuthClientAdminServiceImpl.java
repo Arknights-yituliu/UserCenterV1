@@ -283,6 +283,9 @@ public class OAuthClientAdminServiceImpl implements OAuthClientAdminService {
     /**
      * 删除客户端：级联吊销其名下全部 access/refresh 令牌后物理删除记录，不可恢复
      *
+     * <p>只清 OAuth 令牌，<strong>不清 {@code tlc_pat}</strong>——PAT 是独立凭证类，
+     * 不随应用生命周期联动（遗留记录见方案第 7 节缺口）。</p>
+     *
      * @param uid      开发者用户 uid
      * @param clientId 客户端 ID
      */
