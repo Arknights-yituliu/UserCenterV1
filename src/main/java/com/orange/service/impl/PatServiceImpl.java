@@ -2,13 +2,14 @@ package com.orange.service.impl;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.util.LogUtil;
 import com.orange.common.util.PatUtil;
+import com.orange.entity.dto.pat.PatIssueByRefreshRequest;
 import com.orange.entity.dto.pat.PatIssueRequest;
+import com.orange.entity.dto.pat.PatPayload;
 import com.orange.entity.po.TlcPat;
 import com.orange.entity.vo.pat.PatIssueVO;
 import com.orange.entity.vo.pat.PatVO;
@@ -25,12 +26,12 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 个人访问令牌服务实现
  *
- * <p>管理面：签发 / 列表 / 撤销 / 全撤销 + 应用视角列表与吊销；消费面：
+ * <p>管理面：用户自助签发 / 应用侧凭 refresh_token 签发 / 列表 / 撤销 / 全撤销 +
+ * 应用视角列表与吊销；消费面：
  * {@link #resolve(String)} 供 {@code /pat/**} 拦截器解析凭证。两条链路都不写 Redis、
  * 不改 OAuth 认证分派——存量 access_token 与 {@code uc:oauth:*} 键零影响。</p>
  *
@@ -42,9 +43,6 @@ import java.util.Map;
  */
 @Service
 public class PatServiceImpl implements PatService {
-
-    /** 来源：用户自助签发 */
-    private static final String SOURCE_SESSION = "session";
 
     /** 有效期上限：与直签 access_token 同口径（10 年零 1 个月），避免「无限期」与 plusSeconds 溢出 */
     private static final long MAX_TTL_SECONDS = (365L * 10 + 31) * 24 * 60 * 60;
@@ -90,9 +88,40 @@ public class PatServiceImpl implements PatService {
         long expiresIn = validateExpiresIn(request == null ? null : request.getExpiresIn());
         resolveClientId(request == null ? null : request.getClientId());
         String scope = oauthTokenService.resolveSelfIssuedScope(request == null ? null : request.getScope());
-        String payload = normalizePayload(request == null ? null : request.getPayload());
-        PatIssueVO vo = insertToken(userId, name, expiresIn, scope, payload);
+        PatIssueVO vo = insertToken(userId, name, expiresIn, scope,
+                request == null ? null : request.getPayload());
         LogUtil.debug(PatServiceImpl.class, "[PAT] 签发: uid={}, name={}, expiresIn={}s", userId, name, expiresIn);
+        return vo;
+    }
+
+    /**
+     * 应用侧凭 refresh_token 签发一枚 PAT：校验凭证与准入后按凭证归属落库
+     *
+     * <p>refresh_token 只作凭证，不消费、不轮转；uid/client_id 全部取自凭证记录，杜绝跨应用冒签。
+     * 准入与 {@code /oauth2/pat/list}、{@code /oauth2/pat/revoke} 对齐（{@code direct_auth_enabled=1}），
+     * 权限上限为「凭证范围 ∩ 可自助范围」。日志只记元数据，绝不落令牌明文。</p>
+     *
+     * @param request 签发参数（含 refresh_token）
+     * @return 含明文令牌的签发结果
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public PatIssueVO issueByRefreshToken(PatIssueByRefreshRequest request) {
+        if (request == null) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "请求参数不能为空");
+        }
+        OAuthTokenService.RefreshTokenPrincipal principal =
+                oauthTokenService.resolveRefreshToken(request.getRefreshToken());
+        oauthTokenService.requireDirectAuthEnabledClient(principal.getClientId());
+        String name = validateName(request.getName());
+        long expiresIn = validateExpiresIn(request.getExpiresIn());
+        String scope = oauthTokenService.resolveSelfIssuedScopeWithin(
+                principal.getScope(), request.getScope());
+        PatIssueVO vo = insertToken(principal.getUid(), principal.getClientId(),
+                name, expiresIn, scope, request.getPayload());
+        LogUtil.debug(PatServiceImpl.class,
+                "[PAT] 应用侧签发: uid={}, clientId={}, name={}, expiresIn={}s",
+                principal.getUid(), principal.getClientId(), name, expiresIn);
         return vo;
     }
 
@@ -191,7 +220,7 @@ public class PatServiceImpl implements PatService {
      * 校验 PAT 明文并解析出令牌主体（消费端 {@code /pat/**} 使用）
      *
      * <p>两代令牌都按明文精确查库：带 {@code tlc_pat_} 前缀的新令牌与不带前缀的 64 位 hex
-     * 旧令牌（迁移行，{@code source=legacy}），后者没有 payload 约定，主体里 {@code prefixed=false}。
+     * 旧令牌（由 {@code oauth_custom_token} 迁移而来），后者没有 payload 约定，主体里 {@code prefixed=false}。
      * 其余格式直接返回 null，不产生数据库查询；命中明文且未过期才返回主体，过期与不存在不作区分。
      * 库列用 {@code utf8mb4_bin}，大小写不会被折叠。</p>
      *
@@ -211,32 +240,49 @@ public class PatServiceImpl implements PatService {
             return null;
         }
         return new PatPrincipal(row.getUid(), row.getClientId(), row.getScope(),
-                parsePayloadMap(row.getPayload()), prefixed);
+                parsePayloadOrEmpty(row.getPayload()), prefixed);
+    }
+
+    /**
+     * 用户自助签发入口：client_id 固定为个人令牌标识，其余落库逻辑与应用侧签发共用
+     *
+     * @param uid       用户 uid
+     * @param name      名称（已校验）
+     * @param expiresIn 有效期（秒，已校验）
+     * @param scope     权限范围（已收敛）
+     * @param payload   自定义 payload 对象（可空，允许全空或部分为空）
+     * @return 含明文令牌的签发结果
+     */
+    private PatIssueVO insertToken(Long uid, String name, long expiresIn, String scope,
+                                   PatPayload payload) {
+        return insertToken(uid, PERSONAL_CLIENT_ID, name, expiresIn, scope, payload);
     }
 
     /**
      * 落库一枚新令牌并组装签发响应（明文原样入库，后续列表也可回看）
      *
      * @param uid       用户 uid
+     * @param clientId  归属应用（用户自助签发为 this_land_cloud，应用侧签发为 refresh_token 所属应用）
      * @param name      名称（已校验）
      * @param expiresIn 有效期（秒，已校验）
      * @param scope     权限范围（已收敛）
-     * @param payload   payload JSON 原文（可空）
+     * @param payload   自定义 payload 对象（可空，允许全空或部分为空）；落库时序列化为 JSON 文本
      * @return 含明文令牌的签发结果
      */
-    private PatIssueVO insertToken(Long uid, String name, long expiresIn, String scope, String payload) {
+    private PatIssueVO insertToken(Long uid, String clientId, String name, long expiresIn,
+                                   String scope, PatPayload payload) {
         String token = PatUtil.generate();
+        String payloadJson = normalizePayload(payload);
         TlcPat pat = new TlcPat();
         pat.setUid(uid);
-        pat.setClientId(PERSONAL_CLIENT_ID);
+        pat.setClientId(clientId);
         pat.setName(name);
         pat.setToken(token);
         pat.setTokenPrefix(PatUtil.displayPrefix(token));
         pat.setScope(scope);
         pat.setExpiresIn(expiresIn);
         pat.setExpireTime(LocalDateTime.now().plusSeconds(expiresIn));
-        pat.setSource(SOURCE_SESSION);
-        pat.setPayload(payload);
+        pat.setPayload(payloadJson);
         tlcPatMapper.insert(pat);
 
         PatIssueVO vo = new PatIssueVO();
@@ -248,7 +294,7 @@ public class PatServiceImpl implements PatService {
         vo.setScope(pat.getScope());
         vo.setExpiresIn(pat.getExpiresIn());
         vo.setExpireTime(pat.getExpireTime());
-        vo.setPayload(parsePayload(pat.getPayload()));
+        vo.setPayload(payloadJson == null ? null : payload);
         vo.setCreatedAt(pat.getCreateTime());
         return vo;
     }
@@ -275,7 +321,6 @@ public class PatServiceImpl implements PatService {
             vo.setScope(row.getScope());
             vo.setExpiresIn(row.getExpiresIn());
             vo.setExpireTime(row.getExpireTime());
-            vo.setSource(row.getSource());
             vo.setPayload(parsePayload(row.getPayload()));
             vo.setLastUsedAt(row.getLastUsedAt());
             vo.setCreatedAt(row.getCreateTime());
@@ -288,19 +333,17 @@ public class PatServiceImpl implements PatService {
     }
 
     /**
-     * 校验并归一化 payload：必须是 JSON object，序列化后不超过 4KB，空对象等价于无 payload
+     * 把自定义 payload 实体序列化为待落库的 JSON 文本
      *
-     * @param payload 原始入参（Jackson 反序列化后的任意对象）
-     * @return 待落库的 JSON 原文；无 payload 时返回 null
+     * <p>实体类型已由 DTO 保证，无需再校验「是不是 JSON object」；全空对象（所有字段为 null）
+     * 等价于不传 payload，落库为 {@code NULL}，与改造前 {@code {}} 的口径一致。
+     * 序列化上限仍保留，避免单个字段写超长文本撑爆 {@code TEXT} 列。</p>
+     *
+     * @param payload 自定义 payload 对象（可空）
+     * @return 待落库的 JSON 原文；无有效字段时返回 null
      */
-    private String normalizePayload(Object payload) {
-        if (payload == null) {
-            return null;
-        }
-        if (!(payload instanceof Map<?, ?> map)) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "payload 必须是 JSON 对象");
-        }
-        if (map.isEmpty()) {
+    private String normalizePayload(PatPayload payload) {
+        if (payload == null || payload.isEmpty()) {
             return null;
         }
         try {
@@ -315,17 +358,22 @@ public class PatServiceImpl implements PatService {
     }
 
     /**
-     * 把库里的 payload 原文解析为对象（解析失败按无 payload 处理，不影响列表可用性）
+     * 把库里的 JSON 文本转为自定义 payload 实体（解析失败按无 payload 处理）
+     *
+     * <p>{@link PatPayload} 带 {@code @JsonIgnoreProperties(ignoreUnknown = true)}：历史行里
+     * 的任意自定义键、或更新版本写入的新键都会被静默忽略，本类已定义但 JSON 里缺失的字段
+     * 保持 {@code null}。因此读到旧数据不会因字段对不上而报错，也不影响列表可用性。</p>
      *
      * @param json payload JSON 原文
-     * @return 解析后的对象；空或解析失败返回 null
+     * @return 解析后的实体；空、全空或解析失败返回 null
      */
-    private Object parsePayload(String json) {
+    private PatPayload parsePayload(String json) {
         if (!StringUtils.hasText(json)) {
             return null;
         }
         try {
-            return objectMapper.readValue(json, Object.class);
+            PatPayload payload = objectMapper.readValue(json, PatPayload.class);
+            return payload == null || payload.isEmpty() ? null : payload;
         } catch (JsonProcessingException e) {
             LogUtil.warn(PatServiceImpl.class, "[PAT] payload 解析失败，按空处理: {}", json, e);
             return null;
@@ -333,25 +381,18 @@ public class PatServiceImpl implements PatService {
     }
 
     /**
-     * 把库里的 payload 原文解析为 KV 对象（消费端使用）
+     * 把库里的 JSON 文本转为自定义 payload 实体（消费端使用，恒不返回 null）
      *
-     * <p>空值与解析失败都返回空 Map：payload 是调用方自定义内容，解析不了按「未配置」处理，
+     * <p>空值与解析失败都返回空实体：payload 是调用方自定义内容，解析不了按「未配置」处理，
+     * 由 {@link com.orange.common.util.PatPayloadUtil} 在取账号时报 10002，
      * 不应让整个请求以系统错误收场。</p>
      *
      * @param json payload JSON 原文
-     * @return 解析后的 KV 对象；空或解析失败时返回空 Map
+     * @return 解析后的实体；空或解析失败时返回全空实体
      */
-    private Map<String, Object> parsePayloadMap(String json) {
-        if (!StringUtils.hasText(json)) {
-            return Collections.emptyMap();
-        }
-        try {
-            return objectMapper.readValue(json, new TypeReference<Map<String, Object>>() {
-            });
-        } catch (JsonProcessingException e) {
-            LogUtil.warn(PatServiceImpl.class, "[PAT] payload 解析失败，按空处理: {}", json, e);
-            return Collections.emptyMap();
-        }
+    private PatPayload parsePayloadOrEmpty(String json) {
+        PatPayload payload = parsePayload(json);
+        return payload == null ? new PatPayload() : payload;
     }
 
     /**

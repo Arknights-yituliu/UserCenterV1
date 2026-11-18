@@ -1,10 +1,13 @@
 package com.orange.service.impl;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.util.PatUtil;
+import com.orange.entity.dto.pat.PatIssueByRefreshRequest;
 import com.orange.entity.dto.pat.PatIssueRequest;
+import com.orange.entity.dto.pat.PatPayload;
 import com.orange.entity.po.TlcPat;
 import com.orange.entity.vo.pat.PatIssueVO;
 import com.orange.entity.vo.pat.PatVO;
@@ -19,13 +22,12 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -76,7 +78,6 @@ class PatServiceImplTest {
         TlcPat saved = captureInserted();
         assertThat(saved.getToken()).isEqualTo(vo.getToken());
         assertThat(saved.getTokenPrefix()).isEqualTo(vo.getTokenPrefix());
-        assertThat(saved.getSource()).isEqualTo("session");
         assertThat(saved.getPayload()).isNull();
         assertThat(saved.getExpireTime()).isAfter(LocalDateTime.now().plusSeconds(3500));
     }
@@ -131,24 +132,10 @@ class PatServiceImplTest {
     }
 
     @Test
-    void issueRejectsPayloadThatIsNotObject() {
-        when(oauthTokenService.resolveSelfIssuedScope(null)).thenReturn(SCOPE);
-        PatIssueRequest request = request("ci", 3600L, null);
-        request.setPayload(List.of(1, 2));
-
-        assertThatThrownBy(() -> service.issue(UID, request))
-                .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("payload 必须是 JSON 对象");
-        verify(tlcPatMapper, never()).insert(any(TlcPat.class));
-    }
-
-    @Test
     void issueRejectsPayloadLargerThan4Kb() {
         when(oauthTokenService.resolveSelfIssuedScope(null)).thenReturn(SCOPE);
         PatIssueRequest request = request("ci", 3600L, null);
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("blob", "x".repeat(5000));
-        request.setPayload(payload);
+        request.setPayload(payload("x".repeat(5000)));
 
         assertThatThrownBy(() -> service.issue(UID, request))
                 .isInstanceOf(BusinessException.class)
@@ -160,7 +147,7 @@ class PatServiceImplTest {
     void issueStoresEmptyPayloadAsNull() {
         when(oauthTokenService.resolveSelfIssuedScope(null)).thenReturn(SCOPE);
         PatIssueRequest request = request("ci", 3600L, null);
-        request.setPayload(Map.of());
+        request.setPayload(new PatPayload());
 
         service.issue(UID, request);
 
@@ -168,14 +155,16 @@ class PatServiceImplTest {
     }
 
     @Test
-    void issueStoresPayloadVerbatim() {
+    void issueStoresPayloadAsJsonTextAndReturnsEntity() {
         when(oauthTokenService.resolveSelfIssuedScope(null)).thenReturn(SCOPE);
         PatIssueRequest request = request("ci", 3600L, null);
-        request.setPayload(Map.of("a", 1, "b", Map.of("c", true)));
+        request.setPayload(payload("123456789"));
 
-        service.issue(UID, request);
+        PatIssueVO vo = service.issue(UID, request);
 
-        assertThat(captureInserted().getPayload()).contains("\"a\":1").contains("\"c\":true");
+        assertThat(captureInserted().getPayload()).contains("\"game_uid\":\"123456789\"");
+        assertThat(vo.getPayload()).isInstanceOf(PatPayload.class);
+        assertThat(vo.getPayload().getGameUid()).isEqualTo("123456789");
     }
 
     @Test
@@ -199,17 +188,45 @@ class PatServiceImplTest {
     @Test
     void listParsesPayloadAndComputesRemainingSeconds() {
         TlcPat row = oldToken();
-        row.setPayload("{\"a\":1}");
+        row.setPayload("{\"game_uid\":\"123456789\"}");
         row.setExpireTime(LocalDateTime.now().plusSeconds(120));
         when(tlcPatMapper.selectList(any())).thenReturn(List.of(row));
 
         List<PatVO> list = service.list(UID);
 
         assertThat(list).hasSize(1);
-        assertThat(list.get(0).getPayload()).isEqualTo(Map.of("a", 1));
+        assertThat(list.get(0).getPayload().getGameUid()).isEqualTo("123456789");
         assertThat(list.get(0).getExpiresInSeconds()).isBetween(100L, 120L);
         assertThat(list.get(0).getTokenPrefix()).isEqualTo(row.getTokenPrefix());
         assertThat(list.get(0).getToken()).isEqualTo(row.getToken());
+    }
+
+    @Test
+    void listIgnoresUnknownPayloadFieldsAndLeavesMissingFieldsNull() throws Exception {
+        TlcPat row = oldToken();
+        // 历史行里的任意 KV 与未来版本新增的键都不得让列表解析失败
+        row.setPayload("{\"game_uid\":123456789,\"game_name\":\"明日方舟\","
+                + "\"keep\":\"me\",\"future_field\":{\"a\":1}}");
+        when(tlcPatMapper.selectList(any())).thenReturn(List.of(row));
+
+        PatPayload payload = service.list(UID).get(0).getPayload();
+
+        assertThat(payload).isNotNull();
+        assertThat(payload.getGameUid()).isEqualTo("123456789");
+        assertThat(payload.getGameName()).isEqualTo("明日方舟");
+        JsonNode json = objectMapper.readTree(objectMapper.writeValueAsString(payload));
+        assertThat(json.size()).isEqualTo(2);
+        assertThat(json.get("game_uid").asText()).isEqualTo("123456789");
+        assertThat(json.get("game_name").asText()).isEqualTo("明日方舟");
+    }
+
+    @Test
+    void listTreatsAllUnknownPayloadAsAbsent() {
+        TlcPat row = oldToken();
+        row.setPayload("{\"keep\":\"me\"}");
+        when(tlcPatMapper.selectList(any())).thenReturn(List.of(row));
+
+        assertThat(service.list(UID).get(0).getPayload()).isNull();
     }
 
     @Test
@@ -224,6 +241,109 @@ class PatServiceImplTest {
         verify(oauthTokenService).requireDirectAuthEnabledClient("this_land_cloud");
     }
 
+
+    @Test
+    void issueByRefreshTokenUsesCredentialIdentityAndScope() {
+        when(oauthTokenService.resolveRefreshToken("refresh-raw"))
+                .thenReturn(refreshPrincipal("app-alpha", "user.read,config.read"));
+        when(oauthTokenService.resolveSelfIssuedScopeWithin("user.read,config.read", null)).thenReturn(SCOPE);
+        when(tlcPatMapper.insert(any(TlcPat.class))).thenAnswer(invocation -> {
+            TlcPat pat = invocation.getArgument(0);
+            pat.setId(31L);
+            pat.setCreateTime(LocalDateTime.now());
+            return 1;
+        });
+
+        PatIssueByRefreshRequest request = refreshRequest("refresh-raw", "ci-token", 3600L, null);
+        request.setPayload(payload("123456789"));
+        PatIssueVO vo = service.issueByRefreshToken(request);
+
+        assertThat(vo.getClientId()).isEqualTo("app-alpha");
+        assertThat(vo.getScope()).isEqualTo(SCOPE);
+        assertThat(vo.getToken()).hasSize(72).startsWith("tlc_pat_");
+        assertThat(vo.getPayload()).isInstanceOf(PatPayload.class);
+        assertThat(vo.getPayload().getGameUid()).isEqualTo("123456789");
+        TlcPat saved = captureInserted();
+        assertThat(saved.getUid()).isEqualTo(UID);
+        assertThat(saved.getClientId()).isEqualTo("app-alpha");
+        assertThat(saved.getToken()).isEqualTo(vo.getToken());
+        assertThat(saved.getPayload()).contains("game_uid");
+        verify(oauthTokenService).requireDirectAuthEnabledClient("app-alpha");
+    }
+
+    @Test
+    void issueByRefreshTokenRejectsInvalidRefreshToken() {
+        when(oauthTokenService.resolveRefreshToken("bad"))
+                .thenThrow(new BusinessException(ResultCode.OAUTH_TOKEN_INVALID));
+
+        assertThatThrownBy(() -> service.issueByRefreshToken(refreshRequest("bad", "ci", 3600L, null)))
+                .isInstanceOf(BusinessException.class);
+        verify(tlcPatMapper, never()).insert(any());
+    }
+
+    @Test
+    void issueByRefreshTokenRequiresDirectAuthEnabledClient() {
+        when(oauthTokenService.resolveRefreshToken("refresh-raw"))
+                .thenReturn(refreshPrincipal("app-alpha", SCOPE));
+        doThrow(new BusinessException(ResultCode.OAUTH_DIRECT_AUTH_NOT_ALLOWED))
+                .when(oauthTokenService).requireDirectAuthEnabledClient("app-alpha");
+
+        assertThatThrownBy(() -> service.issueByRefreshToken(
+                refreshRequest("refresh-raw", "ci", 3600L, null)))
+                .isInstanceOf(BusinessException.class);
+        verify(tlcPatMapper, never()).insert(any());
+    }
+
+    @Test
+    void issueByRefreshTokenRejectsScopeEscalation() {
+        when(oauthTokenService.resolveRefreshToken("refresh-raw"))
+                .thenReturn(refreshPrincipal("app-alpha", "user.read"));
+        when(oauthTokenService.resolveSelfIssuedScopeWithin("user.read", "all"))
+                .thenThrow(new BusinessException(ResultCode.OAUTH_SCOPE_INVALID));
+
+        assertThatThrownBy(() -> service.issueByRefreshToken(
+                refreshRequest("refresh-raw", "ci", 3600L, "all")))
+                .isInstanceOf(BusinessException.class);
+        verify(tlcPatMapper, never()).insert(any());
+    }
+
+    @Test
+    void issueByRefreshTokenValidatesIssueParams() {
+        when(oauthTokenService.resolveRefreshToken("refresh-raw"))
+                .thenReturn(refreshPrincipal("app-alpha", SCOPE));
+
+        assertThatThrownBy(() -> service.issueByRefreshToken(
+                refreshRequest("refresh-raw", "  ", 3600L, null)))
+                .isInstanceOf(BusinessException.class);
+        verify(tlcPatMapper, never()).insert(any());
+    }
+
+    @Test
+    void issueByRefreshTokenRejectsNullRequest() {
+        assertThatThrownBy(() -> service.issueByRefreshToken(null))
+                .isInstanceOf(BusinessException.class);
+        verify(tlcPatMapper, never()).insert(any());
+    }
+
+    private OAuthTokenService.RefreshTokenPrincipal refreshPrincipal(String clientId, String scope) {
+        return new OAuthTokenService.RefreshTokenPrincipal(UID, clientId, scope, "family-1");
+    }
+
+    private PatPayload payload(String gameUid) {
+        PatPayload payload = new PatPayload();
+        payload.setGameUid(gameUid);
+        return payload;
+    }
+
+    private PatIssueByRefreshRequest refreshRequest(String refreshToken, String name,
+                                                     Long expiresIn, String scope) {
+        PatIssueByRefreshRequest request = new PatIssueByRefreshRequest();
+        request.setRefreshToken(refreshToken);
+        request.setName(name);
+        request.setExpiresIn(expiresIn);
+        request.setScope(scope);
+        return request;
+    }
 
     private PatIssueRequest request(String name, Long expiresIn, String scope) {
         PatIssueRequest request = new PatIssueRequest();
@@ -250,7 +370,6 @@ class PatServiceImplTest {
         old.setScope(SCOPE);
         old.setExpiresIn(86400L);
         old.setExpireTime(LocalDateTime.now().plusSeconds(86400));
-        old.setSource("session");
         old.setPayload("{\"keep\":\"me\"}");
         return old;
     }
@@ -271,7 +390,7 @@ class PatServiceImplTest {
     @Test
     void resolveReturnsPrincipalWithParsedPayload() {
         TlcPat row = oldToken();
-        row.setPayload("{\"ak_uid\":\"123456789\"}");
+        row.setPayload("{\"game_uid\":\"123456789\"}");
         when(tlcPatMapper.selectOne(any())).thenReturn(row);
 
         PatPrincipal principal = service.resolve(PatUtil.generate());
@@ -279,21 +398,33 @@ class PatServiceImplTest {
         assertThat(principal.getUid()).isEqualTo(UID);
         assertThat(principal.getClientId()).isEqualTo("this_land_cloud");
         assertThat(principal.getScope()).isEqualTo(SCOPE);
-        assertThat(principal.getPayload()).containsEntry("ak_uid", "123456789");
+        assertThat(principal.getPayload().getGameUid()).isEqualTo("123456789");
         assertThat(principal.isPrefixed()).isTrue();
+    }
+
+    @Test
+    void resolveIgnoresUnknownPayloadFields() {
+        TlcPat row = oldToken();
+        row.setPayload("{\"game_uid\":\"123456789\",\"legacy_blob\":{\"x\":1},\"future_flag\":true}");
+        when(tlcPatMapper.selectOne(any())).thenReturn(row);
+
+        PatPrincipal principal = service.resolve(PatUtil.generate());
+
+        assertThat(principal.getPayload().getGameUid()).isEqualTo("123456789");
+        assertThat(principal.getPayload().isEmpty()).isFalse();
     }
 
     @Test
     void resolveAcceptsLegacyTokenWithoutPrefix() {
         TlcPat row = oldToken();
-        row.setSource("legacy");
         row.setPayload(null);
         when(tlcPatMapper.selectOne(any())).thenReturn(row);
 
         PatPrincipal principal = service.resolve("0123456789abcdef".repeat(4));
 
         assertThat(principal.isPrefixed()).isFalse();
-        assertThat(principal.getPayload()).isEmpty();
+        assertThat(principal.getPayload()).isNotNull();
+        assertThat(principal.getPayload().isEmpty()).isTrue();
     }
 
     @Test
@@ -302,7 +433,7 @@ class PatServiceImplTest {
         row.setPayload("not-a-json");
         when(tlcPatMapper.selectOne(any())).thenReturn(row);
 
-        assertThat(service.resolve(PatUtil.generate()).getPayload()).isEmpty();
+        assertThat(service.resolve(PatUtil.generate()).getPayload().isEmpty()).isTrue();
     }
 
     @Test

@@ -1,12 +1,12 @@
 package com.orange.service;
 
-import java.util.Map;
+import com.orange.entity.dto.pat.PatPayload;
 
 /**
  * PAT 令牌主体：消费端 {@code /pat/**} 的解析结果
  *
  * <p>承载一枚令牌在请求期需要的全部属性：身份（uid / clientId / scope）、凭证形态
- * （{@link #isPrefixed()}）与调用方自定义 KV（{@link #getPayload()}）。</p>
+ * （{@link #isPrefixed()}）与自定义 payload（{@link #getPayload()}）。</p>
  *
  * <p>后续新增的令牌级字段都加在这里，不再往 {@link com.orange.common.context.UserContext}
  * 里堆——后者只保留三个认证面共有的身份字段。这样字段增长时改动集中在
@@ -28,8 +28,8 @@ public class PatPrincipal {
     /** 签发时的权限快照（英文逗号分隔） */
     private final String scope;
 
-    /** 调用方自定义 KV，解析失败或未配置时为空 Map（不为 null） */
-    private final Map<String, Object> payload;
+    /** 自定义 payload，解析失败或未配置时为空对象（不为 null） */
+    private final PatPayload payload;
 
     /** 明文是否带 {@code tlc_pat_} 前缀：false 表示迁移进来的旧令牌 */
     private final boolean prefixed;
@@ -40,10 +40,10 @@ public class PatPrincipal {
      * @param uid      所属用户
      * @param clientId 客户端标识
      * @param scope    权限快照
-     * @param payload  自定义 KV，未配置时传空 Map
+     * @param payload  自定义 payload，未配置时传空对象
      * @param prefixed 明文是否带 {@code tlc_pat_} 前缀
      */
-    public PatPrincipal(Long uid, String clientId, String scope, Map<String, Object> payload,
+    public PatPrincipal(Long uid, String clientId, String scope, PatPayload payload,
                         boolean prefixed) {
         this.uid = uid;
         this.clientId = clientId;
@@ -64,7 +64,7 @@ public class PatPrincipal {
         return scope;
     }
 
-    public Map<String, Object> getPayload() {
+    public PatPayload getPayload() {
         return payload;
     }
 

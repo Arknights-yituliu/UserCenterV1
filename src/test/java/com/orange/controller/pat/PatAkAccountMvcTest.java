@@ -4,6 +4,7 @@ import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.exception.GlobalExceptionHandler;
 import com.orange.common.util.PatUtil;
+import com.orange.entity.dto.pat.PatPayload;
 import com.orange.entity.vo.akoperator.OperatorListVO;
 import com.orange.interceptor.PatAuthInterceptor;
 import com.orange.service.AkAccountService;
@@ -23,7 +24,6 @@ import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import java.util.List;
-import java.util.Map;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -94,7 +94,7 @@ class PatAkAccountMvcTest {
 
     @Test
     void validPatReadsAccountFromPayload() throws Exception {
-        when(patService.resolve(PAT)).thenReturn(principal(SCOPE, Map.of("ak_uid", "123456789")));
+        when(patService.resolve(PAT)).thenReturn(principal(SCOPE, payload("123456789")));
         when(akAccountService.listOperators(UID, "123456789", "skland"))
                 .thenReturn(new OperatorListVO("123456789", List.of()));
 
@@ -108,19 +108,19 @@ class PatAkAccountMvcTest {
     }
 
     @Test
-    void payloadWithoutAkUidIsRejectedWith10002() throws Exception {
-        when(patService.resolve(PAT)).thenReturn(principal(SCOPE, Map.of("other", "x")));
+    void payloadWithoutGameUidIsRejectedWith10002() throws Exception {
+        when(patService.resolve(PAT)).thenReturn(principal(SCOPE, new PatPayload()));
 
         mockMvc.perform(get("/pat/ak-accounts/operators")
                         .header("Authorization", "Bearer " + PAT))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(ResultCode.PARAM_VALID_ERROR.getCode()))
-                .andExpect(jsonPath("$.msg").value("PAT 未配置 ak_uid"));
+                .andExpect(jsonPath("$.msg").value("PAT 未配置 game_uid"));
     }
 
     @Test
-    void blankAkUidIsRejectedInsteadOfFallingBackToDefaultSource() throws Exception {
-        when(patService.resolve(PAT)).thenReturn(principal(SCOPE, Map.of("ak_uid", "   ")));
+    void blankGameUidIsRejectedInsteadOfFallingBackToDefaultSource() throws Exception {
+        when(patService.resolve(PAT)).thenReturn(principal(SCOPE, payload("   ")));
 
         mockMvc.perform(get("/pat/ak-accounts/operators")
                         .header("Authorization", "Bearer " + PAT))
@@ -132,7 +132,7 @@ class PatAkAccountMvcTest {
 
     @Test
     void queryParamsAreIgnoredAndAccountStillComesFromPat() throws Exception {
-        when(patService.resolve(PAT)).thenReturn(principal(SCOPE, Map.of("ak_uid", "123456789")));
+        when(patService.resolve(PAT)).thenReturn(principal(SCOPE, payload("123456789")));
         when(akAccountService.listOperators(UID, "123456789", "skland"))
                 .thenReturn(new OperatorListVO("123456789", List.of()));
 
@@ -151,7 +151,7 @@ class PatAkAccountMvcTest {
         // 与 OAuth 版不传 akUid 的表现一致
         String legacy = "0123456789abcdef".repeat(4);
         when(patService.resolve(legacy)).thenReturn(
-                new PatPrincipal(UID, "this_land_cloud", SCOPE, Map.of(), false));
+                new PatPrincipal(UID, "this_land_cloud", SCOPE, new PatPayload(), false));
         when(akAccountService.listOperators(UID, null, null))
                 .thenReturn(new OperatorListVO("123456789", List.of()));
 
@@ -168,7 +168,7 @@ class PatAkAccountMvcTest {
         // 表单上旧令牌本不该有 payload；即使库里有残留，也不参与选账号
         String legacy = "0123456789abcdef".repeat(4);
         when(patService.resolve(legacy)).thenReturn(
-                new PatPrincipal(UID, "this_land_cloud", SCOPE, Map.of("ak_uid", "999"), false));
+                new PatPrincipal(UID, "this_land_cloud", SCOPE, payload("999"), false));
         when(akAccountService.listOperators(UID, null, null))
                 .thenReturn(new OperatorListVO("123456789", List.of()));
 
@@ -180,7 +180,7 @@ class PatAkAccountMvcTest {
 
     @Test
     void missingScopeIsRejectedWith80008() throws Exception {
-        when(patService.resolve(PAT)).thenReturn(principal("config.read", Map.of("ak_uid", "123456789")));
+        when(patService.resolve(PAT)).thenReturn(principal("config.read", payload("123456789")));
 
         mockMvc.perform(get("/pat/ak-accounts/operators")
                         .header("Authorization", "Bearer " + PAT))
@@ -190,7 +190,7 @@ class PatAkAccountMvcTest {
 
     @Test
     void accountNotOwnedIsRejectedWith80008() throws Exception {
-        when(patService.resolve(PAT)).thenReturn(principal(SCOPE, Map.of("ak_uid", "999")));
+        when(patService.resolve(PAT)).thenReturn(principal(SCOPE, payload("999")));
         when(akAccountService.listOperators(UID, "999", "skland"))
                 .thenThrow(new BusinessException(ResultCode.FORBIDDEN));
 
@@ -200,8 +200,14 @@ class PatAkAccountMvcTest {
                 .andExpect(jsonPath("$.code").value(ResultCode.FORBIDDEN.getCode()));
     }
 
-    private PatPrincipal principal(String scope, Map<String, Object> payload) {
+    private PatPrincipal principal(String scope, PatPayload payload) {
         return new PatPrincipal(UID, "this_land_cloud", scope, payload, true);
+    }
+
+    private PatPayload payload(String gameUid) {
+        PatPayload payload = new PatPayload();
+        payload.setGameUid(gameUid);
+        return payload;
     }
 
     @Configuration

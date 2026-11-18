@@ -10,11 +10,10 @@ import jakarta.validation.constraints.Size;
 /**
  * 签发个人访问令牌（PAT）的请求参数
  *
- * <p>{@code name} 与 {@code expires_in} 必填；{@code scope} 只能收敛不能提权；
- * {@code payload} 是调用方自定义 KV 对象，服务端只校验「是 object 且序列化后 ≤ 4KB」，
- * 默认不解读键含义、不据其分支；<strong>唯一例外是消费端约定的 {@code ak_uid}</strong>——
- * 带 {@code tlc_pat_} 前缀的新令牌在读取干员数据时必须提供它（缺失或非法返回 10002），
- * 详见《PAT消费端接口设计.md》§3.2。</p>
+ * <p>{@code payload} 是结构固定的 {@link PatPayload}，服务端只校验「序列化后 ≤ 4KB」，
+ * 不解读键含义、不据其分支；所有字段均可为空（可传 {@code {}} 或只填部分）。<strong>唯一
+ * 例外是消费端约定的 {@code game_uid}</strong>——带 {@code tlc_pat_} 前缀的新令牌在读取
+ * 干员数据时必须提供它（缺失或空白返回 10002），详见《PAT消费端接口设计.md》§3.2。</p>
  *
  * @author UserCenter
  */
@@ -42,8 +41,8 @@ public class PatIssueRequest {
     @JsonAlias("clientId")
     private String clientId;
 
-    /** 调用方自定义 KV 对象（JSON object，可空） */
-    private Object payload;
+    /** 自定义 payload 结构（可空，允许全空或部分为空） */
+    private PatPayload payload;
 
     public String getName() {
         return name;
@@ -77,11 +76,11 @@ public class PatIssueRequest {
         this.clientId = clientId;
     }
 
-    public Object getPayload() {
+    public PatPayload getPayload() {
         return payload;
     }
 
-    public void setPayload(Object payload) {
+    public void setPayload(PatPayload payload) {
         this.payload = payload;
     }
 }

@@ -87,8 +87,8 @@ public final class PatUtil {
      * 判断字符串是否符合旧版自定义令牌格式
      *
      * <p>旧令牌由 {@code SignUtil.generateToken()} 生成，是**不带前缀**的 64 位小写 hex，
-     * 与 PAT 前缀规则升级前的存量令牌一致；迁移进 {@code tlc_pat} 的行（{@code source=legacy}）
-     * 明文仍是这个形态，因此消费端必须按前缀区分两代令牌。</p>
+     * 与 PAT 前缀规则升级前的存量令牌一致；从 {@code oauth_custom_token} 迁移进 {@code tlc_pat}
+     * 的行明文仍是这个形态，因此消费端必须按前缀区分两代令牌。</p>
      *
      * @param token 待判断字符串
      * @return true=纯 64 位小写 hex

@@ -182,6 +182,31 @@ public interface OAuthTokenService {
                                                   Long expiresInSeconds, String scope, String name);
 
     /**
+     * 解析一枚仍有效的 OAuth refresh_token，返回其主体（uid / clientId / scope / familyId）。
+     *
+     * <p>与 {@link #issueAccessTokenFromRefreshToken} 使用同一份 Redis 记录与校验口径：
+     * 不消费、不轮转凭证，也不检查轮转墓碑（沿用现有直签行为，凭证删 key 即失效）。
+     * 本方法只负责解析，客户端启用状态与直连认证准入由调用方按需追加校验。</p>
+     *
+     * @param refreshToken 刷新令牌明文
+     * @return 令牌主体
+     */
+    RefreshTokenPrincipal resolveRefreshToken(String refreshToken);
+
+    /**
+     * 在凭证已有范围内计算「可自助签发」的权限范围（供 PAT 等自助凭证复用）。
+     *
+     * <p>上限为系统可自助范围与凭证范围的<strong>交集</strong>：既不允许超出凭证已授予的权限，
+     * 也不允许把元范围 {@code all} 或非自助权限签进 PAT。请求携带 scope 时在该上限内做
+     * 「只减不增」收敛，超出即 90003；不传时取交集全集。</p>
+     *
+     * @param heldScope      凭证已有权限串
+     * @param requestedScope 请求收敛到的权限串（可空表示取交集全集）
+     * @return 最终权限串
+     */
+    String resolveSelfIssuedScopeWithin(String heldScope, String requestedScope);
+
+    /**
      * 查询当前用户签发的全部自定义有效期 access_token（用户自助，含已过期记录）
      *
      * <p>数据来自 oauth_custom_token 表，按签发时间倒序；过期与否由返回的
@@ -426,6 +451,54 @@ public interface OAuthTokenService {
 
         public String getScope() {
             return scope;
+        }
+    }
+
+    /**
+     * 刷新令牌主体信息（uid + 客户端 + 范围 + 令牌家族）
+     */
+    class RefreshTokenPrincipal {
+        /** 用户 uid */
+        private final Long uid;
+
+        /** 签发凭证的客户端 ID */
+        private final String clientId;
+
+        /** 授权范围 */
+        private final String scope;
+
+        /** 令牌家族 ID（可为 null） */
+        private final String familyId;
+
+        /**
+         * 构造刷新令牌主体
+         *
+         * @param uid      用户 uid
+         * @param clientId 客户端 ID
+         * @param scope    授权范围
+         * @param familyId 令牌家族 ID
+         */
+        public RefreshTokenPrincipal(Long uid, String clientId, String scope, String familyId) {
+            this.uid = uid;
+            this.clientId = clientId;
+            this.scope = scope;
+            this.familyId = familyId;
+        }
+
+        public Long getUid() {
+            return uid;
+        }
+
+        public String getClientId() {
+            return clientId;
+        }
+
+        public String getScope() {
+            return scope;
+        }
+
+        public String getFamilyId() {
+            return familyId;
         }
     }
 }

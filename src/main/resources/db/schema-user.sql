@@ -288,15 +288,14 @@ CREATE TABLE `tlc_pat` (
     `scope`        VARCHAR(256) NOT NULL COMMENT '签发时的权限快照（英文逗号分隔）',
     `expires_in`   BIGINT       NOT NULL COMMENT '签发时指定的有效期（秒）',
     `expire_time`  DATETIME     NOT NULL COMMENT '到期时间',
-    `source`       VARCHAR(16)  NOT NULL COMMENT '来源：session=用户自助签发 / legacy=旧自定义令牌迁移',
-    `payload`      TEXT             NULL COMMENT '调用方自定义 KV 对象（JSON object），不参与鉴权',
+    `payload`      TEXT             NULL COMMENT '自定义 payload 结构的 JSON 文本（PatPayload），不参与鉴权',
     `last_used_at` DATETIME         NULL COMMENT '最近一次使用时间（阶段二启用）',
     `create_time`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `update_time`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_tlc_pat_token` (`token`) COMMENT '按明文唯一定位，兜底防重复入库',
     KEY `idx_tlc_pat_uid` (`uid`, `create_time`) COMMENT '按用户列出其令牌并按签发时间倒序',
-    KEY `idx_tlc_pat_client` (`client_id`) COMMENT '按应用维度过滤：应用视角列表与迁移来源统计'
+    KEY `idx_tlc_pat_client` (`client_id`) COMMENT '按应用维度过滤：应用视角列表与按应用统计'
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '个人访问令牌';
 

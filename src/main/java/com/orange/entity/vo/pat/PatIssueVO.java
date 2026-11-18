@@ -1,6 +1,7 @@
 package com.orange.entity.vo.pat;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.orange.entity.dto.pat.PatPayload;
 
 import java.time.LocalDateTime;
 
@@ -38,9 +39,9 @@ public class PatIssueVO {
     /** 到期时间 */
     private LocalDateTime expireTime;
 
-    /** 调用方自定义 KV 对象（原样返回；无则为 null 并省略） */
+    /** 自定义 payload 结构（无则为 null 并省略） */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    private Object payload;
+    private PatPayload payload;
 
     /** 签发时间 */
     private LocalDateTime createdAt;
@@ -109,11 +110,11 @@ public class PatIssueVO {
         this.expireTime = expireTime;
     }
 
-    public Object getPayload() {
+    public PatPayload getPayload() {
         return payload;
     }
 
-    public void setPayload(Object payload) {
+    public void setPayload(PatPayload payload) {
         this.payload = payload;
     }
 

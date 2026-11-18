@@ -18,7 +18,8 @@ import java.time.LocalDateTime;
  * 新签发的 72 字符令牌与迁移进来的 64 位 hex 旧令牌都原样入库，列表接口也回传明文。
  * 因此本表是敏感数据源，需配套库表权限、备份加密与日志脱敏。{@code clientId} 固定为个人
  * 令牌标识 {@code this_land_cloud}（它在 user_config 等表中同时是分区键）。{@code payload}
- * 是调用方自定义 KV 对象，服务端默认不解读键含义、唯一例外是消费端约定的 {@code ak_uid}。</p>
+ * 存的是自定义结构 {@code PatPayload} 序列化后的 JSON 文本，服务端默认不解读内容、唯一
+ * 例外是消费端约定的 {@code game_uid}；反序列化时忽略未定义字段，缺失字段为 null。</p>
  *
  * @author UserCenter
  */
@@ -53,10 +54,7 @@ public class TlcPat {
     /** 到期时间 */
     private LocalDateTime expireTime;
 
-    /** 来源：session=用户自助签发 / legacy=旧自定义令牌迁移 */
-    private String source;
-
-    /** 调用方自定义 KV 对象（JSON object 原文），不参与鉴权 */
+    /** 自定义 payload 结构的 JSON 文本（PatPayload 序列化结果），不参与鉴权 */
     private String payload;
 
     /** 最近一次使用时间（阶段二启用） */
@@ -140,14 +138,6 @@ public class TlcPat {
 
     public void setExpireTime(LocalDateTime expireTime) {
         this.expireTime = expireTime;
-    }
-
-    public String getSource() {
-        return source;
-    }
-
-    public void setSource(String source) {
-        this.source = source;
     }
 
     public String getPayload() {

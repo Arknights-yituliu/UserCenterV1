@@ -1,5 +1,6 @@
 package com.orange.service;
 
+import com.orange.entity.dto.pat.PatIssueByRefreshRequest;
 import com.orange.entity.dto.pat.PatIssueRequest;
 import com.orange.entity.vo.pat.PatIssueVO;
 import com.orange.entity.vo.pat.PatVO;
@@ -9,12 +10,15 @@ import java.util.List;
 /**
  * 个人访问令牌（PAT）服务
  *
- * <p>PAT 有两种使用方式，互不影响：管理面（签发 / 列表 / 撤销）把 PAT 当作
- * 「被管理的对象」，由会话或 OAuth access_token 的持有者调用；消费面（{@code /pat/**}）
- * 把 PAT 当作请求凭证，由 {@link #resolve(String)} 解析。{@code /oauth2/**} 链路始终不认 PAT。</p>
+ * <p>PAT 有两种使用方式，互不影响：管理面（用户自助签发 / 应用侧凭 refresh_token 签发 /
+ * 列表 / 撤销）把 PAT 当作
+ * 「被管理的对象」，由会话、OAuth access_token 或（仅应用侧签发）refresh_token 的持有者调用；
+ * 消费面（{@code /pat/**}）把 PAT 当作请求凭证，由 {@link #resolve(String)} 解析。
+ * {@code /oauth2/**} 链路始终不认 PAT。</p>
  *
- * <p>语义基线：撤销 = 删行；{@code scope} 是签发时快照、只能收敛；{@code payload} 默认不解读，
- * 唯一例外是消费端约定的 {@code ak_uid}；{@code last_used_at} 消费端暂不回写；
+ * <p>语义基线：撤销 = 删行；{@code scope} 是签发时快照、只能收敛；{@code payload} 是
+ * 自定义实体 {@code PatPayload}（DB 存 JSON 文本，读取时转对象、忽略未定义字段），默认不解读，
+ * 唯一例外是消费端约定的 {@code game_uid}；{@code last_used_at} 消费端暂不回写；
  * <strong>全链路明文</strong>——不做摘要，库、Redis 预留键与列表接口都用令牌明文本身，
  * 这是明确的业务取舍，配套要求是日志/异常不落明文与存储侧最小权限。</p>
  *
@@ -29,14 +33,30 @@ public interface PatService {
      * 签发一枚 PAT
      *
      * <p>{@code name}、{@code expires_in} 必填且有效期有上限；{@code scope} 只能在系统可自助
-     * 范围内收敛（元范围 {@code all} 不可自助签发）；{@code payload} 必须是 JSON object 且
-     * 序列化后 ≤ 4KB。明文原样入库，后续列表接口仍可回看。</p>
+     * 范围内收敛（元范围 {@code all} 不可自助签发）；{@code payload} 是结构固定的实体，
+     * 所有字段均可为空，序列化为 JSON 文本后 ≤ 4KB。明文原样入库，后续列表接口仍可回看。</p>
      *
      * @param uid     登录用户 uid
      * @param request 签发参数
      * @return 含明文令牌的签发结果
      */
     PatIssueVO issue(Long uid, PatIssueRequest request);
+
+    /**
+     * 应用侧凭 OAuth refresh_token 签发一枚 PAT
+     *
+     * <p>与 {@link #issue} 的参数校验、明文落库、响应结构一致，差别只在认证方式与归属：
+     * 凭证由请求体携带（协议级校验，不经过 access_token 拦截器），uid 与 client_id 全部取自
+     * refresh_token 记录，不接受调用方指定；签发侧与应用视角列表/吊销一样要求客户端已开通
+     * 直连认证能力（{@code direct_auth_enabled=1}）。</p>
+     *
+     * <p>权限上限为「refresh_token 已授予范围 ∩ 系统可自助范围」，请求 scope 只能在此范围内
+     * 收敛，防止凭低权限刷新令牌签出高权限 PAT。不消费、不轮转 refresh_token。</p>
+     *
+     * @param request 签发参数（含 refresh_token）
+     * @return 含明文令牌的签发结果
+     */
+    PatIssueVO issueByRefreshToken(PatIssueByRefreshRequest request);
 
     /**
      * 列出当前用户的全部 PAT（含展示前缀与令牌明文）

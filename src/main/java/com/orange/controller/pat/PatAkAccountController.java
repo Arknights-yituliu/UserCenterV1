@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <p>凭证由 {@link com.orange.interceptor.PatAuthInterceptor} 解析，本类只负责取数口径：
  * 目标账号不来自请求参数，而按令牌是否有 {@code tlc_pat_} 前缀分流——新令牌取 payload 的
- * {@code ak_uid} 并由业务层核对绑定关系；无前缀的旧令牌没有 payload 约定，按「默认来源 →
+ * {@code game_uid} 并由业务层核对绑定关系；无前缀的旧令牌没有 payload 约定，按「默认来源 →
  * 最近变更」取数，与 OAuth 版不传 {@code akUid} 一致。</p>
  *
  * <p>响应体与 {@code /oauth2/ak-accounts/operators} 完全一致，共用
@@ -52,7 +52,7 @@ public class PatAkAccountController {
     /**
      * 读取干员数据：账号来源按令牌是否有 {@code tlc_pat_} 前缀分流
      *
-     * <p>带前缀的新令牌：账号取自 payload {@code ak_uid}，缺失或非法报 10002；显式传
+     * <p>带前缀的新令牌：账号取自 payload {@code game_uid}，缺失或空白报 10002；显式传
      * {@code source=skland} 可绕过「akUid 等于本人 uid 时按手动版读取」的撞号兼容分支，
      * 保证每次都核对绑定关系。</p>
      *
@@ -72,7 +72,7 @@ public class PatAkAccountController {
         String source = null;
         PatPrincipal principal = PatContext.require();
         if (principal.isPrefixed()) {
-            targetAkUid = PatPayloadUtil.requireAkUid(principal.getPayload());
+            targetAkUid = PatPayloadUtil.requireGameUid(principal.getPayload());
             // 传 skland 而非 null：业务层据此跳过手动版撞号分支，强制核对 ak_account_binding
             source = AkAccountVO.SOURCE_SKLAND;
         }

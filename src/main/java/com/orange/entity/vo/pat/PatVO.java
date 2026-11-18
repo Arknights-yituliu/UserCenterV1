@@ -1,5 +1,7 @@
 package com.orange.entity.vo.pat;
 
+import com.orange.entity.dto.pat.PatPayload;
+
 import java.time.LocalDateTime;
 
 /**
@@ -37,11 +39,8 @@ public class PatVO {
     /** 到期时间 */
     private LocalDateTime expireTime;
 
-    /** 来源：session / legacy */
-    private String source;
-
-    /** 调用方自定义 KV 对象（原样返回） */
-    private Object payload;
+    /** 自定义 payload 结构（DB 文本反序列化后的对象；未知键被忽略，缺失字段为 null） */
+    private PatPayload payload;
 
     /** 最近一次使用时间（阶段一恒为 null） */
     private LocalDateTime lastUsedAt;
@@ -116,19 +115,11 @@ public class PatVO {
         this.expireTime = expireTime;
     }
 
-    public String getSource() {
-        return source;
-    }
-
-    public void setSource(String source) {
-        this.source = source;
-    }
-
-    public Object getPayload() {
+    public PatPayload getPayload() {
         return payload;
     }
 
-    public void setPayload(Object payload) {
+    public void setPayload(PatPayload payload) {
         this.payload = payload;
     }
 
