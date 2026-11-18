@@ -13,7 +13,7 @@ package com.orange.entity.dto.oauth;
  * @param nonce           一次性随机串
  * @param sig             Ed25519 签名（Base64）
  * @param origin          来源标识（可选，仅审计）
- * @param legacyTokenHash 旧 token 的 sha256 十六进制（可选，仅审计，不参与鉴权）
+ * @param legacyTokenHash 旧 token 的 sha256 十六进制（可选，仅随成功日志输出，不参与鉴权）
  * @param requestIp       请求来源 IP
  * @param httpsRequest    请求是否经 HTTPS 到达（含反向代理的 X-Forwarded-Proto 判定）
  *

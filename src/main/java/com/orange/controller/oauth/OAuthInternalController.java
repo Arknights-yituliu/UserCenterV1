@@ -47,7 +47,7 @@ public class OAuthInternalController {
      * @param kid             公钥标识（对应 UC 侧 kid → 公钥映射表）
      * @param sig             Ed25519 签名（Base64）
      * @param origin          来源标识（可选，仅审计）
-     * @param legacyTokenHash 旧 token 的 sha256（可选，仅审计）
+     * @param legacyTokenHash 旧 token 的 sha256（可选，仅随成功日志输出供排查）
      * @param request         HTTP 请求（取来源 IP 与协议）
      * @return 令牌响应（access_token + refresh_token + scope）
      */

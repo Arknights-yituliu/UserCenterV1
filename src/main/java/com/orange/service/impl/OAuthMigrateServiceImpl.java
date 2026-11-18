@@ -1,6 +1,5 @@
 package com.orange.service.impl;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.util.LogUtil;
@@ -8,12 +7,10 @@ import com.orange.common.util.RedisKeyUtil;
 import com.orange.common.util.RedisRateLimiter;
 import com.orange.common.util.SignUtil;
 import com.orange.entity.dto.oauth.MigrateTokenRequest;
-import com.orange.entity.po.AuditLog;
 import com.orange.entity.po.OAuthClient;
 import com.orange.entity.po.UserInfo;
 import com.orange.entity.vo.oauth.MigrateTokenVO;
 import com.orange.entity.vo.oauth.OAuthTokenVO;
-import com.orange.mapper.AuditLogMapper;
 import com.orange.mapper.OAuthClientMapper;
 import com.orange.mapper.UserInfoMapper;
 import com.orange.service.OAuthMigrateService;
@@ -24,7 +21,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -37,7 +33,7 @@ import java.util.concurrent.TimeUnit;
  *   <li>开关校验先于认证校验：未开启时直接返回，不泄露任何配置细节</li>
  *   <li>用户状态校验在签发之前：否则该端点会成为绕过封禁的后门</li>
  *   <li>nonce 一次性占用 + 时间窗，防止请求重放</li>
- *   <li>签名原文、令牌明文一律不入日志与审计</li>
+ *   <li>签名原文、令牌明文一律不入日志与响应；旧令牌摘要作为排查线索随成功日志输出</li>
  * </ul>
  *
  * @author UserCenter
@@ -54,18 +50,10 @@ public class OAuthMigrateServiceImpl implements OAuthMigrateService {
     /** 限流统计窗口（秒） */
     private static final long RATE_WINDOW_SECONDS = 60L;
 
-    /** 审计动作标识 */
-    private static final String AUDIT_ACTION = "oauth.migrate.issue";
-
-    /** 审计操作者类型（audit_log.operator_type 仅支持 admin/user） */
-    private static final String AUDIT_OPERATOR_TYPE = "user";
-
     private final StringRedisTemplate stringRedisTemplate;
     private final OAuthClientMapper oauthClientMapper;
     private final UserInfoMapper userInfoMapper;
     private final OAuthTokenService oauthTokenService;
-    private final AuditLogMapper auditLogMapper;
-    private final ObjectMapper objectMapper;
 
     /** 总开关：默认关闭，上线时显式打开，迁移结束后立即关闭 */
     @Value("${migrate.enabled:false}")
@@ -107,21 +95,15 @@ public class OAuthMigrateServiceImpl implements OAuthMigrateService {
      * @param oauthClientMapper   OAuth 客户端 Mapper
      * @param userInfoMapper      用户表 Mapper（校验用户状态）
      * @param oauthTokenService   令牌签发服务（迁移签发入口）
-     * @param auditLogMapper      操作审计 Mapper
-     * @param objectMapper        JSON 序列化器（审计详情）
      */
     public OAuthMigrateServiceImpl(StringRedisTemplate stringRedisTemplate,
                                    OAuthClientMapper oauthClientMapper,
                                    UserInfoMapper userInfoMapper,
-                                   OAuthTokenService oauthTokenService,
-                                   AuditLogMapper auditLogMapper,
-                                   ObjectMapper objectMapper) {
+                                   OAuthTokenService oauthTokenService) {
         this.stringRedisTemplate = stringRedisTemplate;
         this.oauthClientMapper = oauthClientMapper;
         this.userInfoMapper = userInfoMapper;
         this.oauthTokenService = oauthTokenService;
-        this.auditLogMapper = auditLogMapper;
-        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -198,12 +180,12 @@ public class OAuthMigrateServiceImpl implements OAuthMigrateService {
         // 10. 签发：原子替换上一轮迁移凭证并写入新令牌对（见 OAuthTokenService#issueMigratedToken）
         OAuthTokenVO token = oauthTokenService.issueMigratedToken(request.clientId(), uid);
 
-        // 11. 审计与日志：只记可审计字段，签名原文与令牌明文一律不入日志
-        recordAudit(request, uid);
+        // 11. 日志：只记可排查字段（哈希可入日志，签名原文与令牌明文一律不入）
         long costMillis = (System.nanoTime() - startNanos) / 1_000_000L;
         LogUtil.info(OAuthMigrateServiceImpl.class,
-                "[OAuth] 迁移兑换成功: clientId={}, uid={}, ip={}, kid={}, origin={}, costMs={}",
-                request.clientId(), uid, request.requestIp(), request.kid(), request.origin(), costMillis);
+                "[OAuth] 迁移兑换成功: clientId={}, uid={}, ip={}, kid={}, origin={}, legacyTokenHash={}, costMs={}",
+                request.clientId(), uid, request.requestIp(), request.kid(), request.origin(),
+                request.legacyTokenHash(), costMillis);
 
         return buildResponse(uid, token);
     }
@@ -309,34 +291,6 @@ public class OAuthMigrateServiceImpl implements OAuthMigrateService {
         }
     }
 
-    /**
-     * 记录一次迁移兑换审计（audit_log）
-     *
-     * <p>只落库 uid / client_id / origin / 旧 token 摘要 / IP / kid；签名原文与令牌明文
-     * 一律不落库。审计写入失败只告警，不影响已完成的签发。</p>
-     *
-     * @param request 请求参数
-     * @param uid     用户 uid
-     */
-    private void recordAudit(MigrateTokenRequest request, Long uid) {
-        try {
-            AuditLog auditLog = new AuditLog();
-            auditLog.setOperatorType(AUDIT_OPERATOR_TYPE);
-            auditLog.setOperatorId(uid);
-            auditLog.setAction(AUDIT_ACTION);
-            auditLog.setTarget(request.clientId());
-            Map<String, Object> detail = new LinkedHashMap<>();
-            detail.put("origin", request.origin());
-            detail.put("legacyTokenHash", request.legacyTokenHash());
-            detail.put("ip", request.requestIp());
-            detail.put("kid", request.kid());
-            auditLog.setDetail(objectMapper.writeValueAsString(detail));
-            auditLogMapper.insert(auditLog);
-        } catch (Exception e) {
-            LogUtil.warn(OAuthMigrateServiceImpl.class,
-                    "[OAuth] 迁移兑换审计落库失败: uid={}, clientId={}", uid, request.clientId(), e);
-        }
-    }
 
     /**
      * 组装迁移兑换响应（最小响应面：只回令牌与 scope，不回带用户资料）
