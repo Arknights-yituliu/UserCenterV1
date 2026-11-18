@@ -3,8 +3,9 @@ package com.orange.entity.vo.pat;
 /**
  * 旧自定义令牌迁移的执行结果
  *
- * <p>口径：{@code total} 为迁移开始时旧表中未过期的行数，{@code migrated + skipped + failed == total}。
- * 重复调用幂等——已处理过的行在 Redis 里已无明细，会落进 {@code skipped}，不会翻倍。</p>
+ * <p>口径：{@code total} 为迁移开始时旧表中未过期的行数，{@code migrated + failed == total}。
+ * 全量搬迁不逐条判空，因此 {@code skipped} 恒为 0，保留该字段仅为不破坏既有响应结构。
+ * 重复调用幂等——已写入的明文被唯一键忽略，不会翻倍。</p>
  *
  * @author UserCenter
  */
@@ -16,7 +17,7 @@ public class PatMigrationResultVO {
     /** 成功迁移数 */
     private long migrated;
 
-    /** 跳过数（旧 key 已不存在：已吊销或已迁移过） */
+    /** 跳过数（全量搬迁下恒为 0，保留字段仅为兼容既有响应结构） */
     private long skipped;
 
     /** 失败数（单行异常，不阻断后续） */

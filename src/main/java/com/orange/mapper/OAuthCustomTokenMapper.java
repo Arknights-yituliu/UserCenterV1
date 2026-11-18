@@ -107,7 +107,7 @@ public interface OAuthCustomTokenMapper extends BaseMapper<OAuthCustomToken> {
      * @return 该批令牌记录（含明文，仅迁移进程内使用）
      */
     @Select("SELECT id, uid, client_id AS clientId, name, token, scope, "
-            + "expires_in AS expiresIn, expire_time AS expireTime "
+            + "expires_in AS expiresIn, expire_time AS expireTime, create_time AS createTime "
             + "FROM oauth_custom_token "
             + "WHERE expire_time > NOW() AND id > #{cursor} "
             + "ORDER BY id ASC LIMIT #{limit}")
