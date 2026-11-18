@@ -6,10 +6,10 @@
 > - **OAuth access_token**：OAuth 授权签发的访问令牌，请求头携带 `Authorization: Bearer {access_token}`（或 `UC-Token`），由 `OAuthAuthInterceptor` 校验，部分接口额外要求 scope 或直连认证开关。
 > - **PAT（个人访问令牌）**：独立于上述两种凭证的第三类凭证，请求头携带 `Authorization: Bearer {PAT}` 或 `UC-Token: {PAT}`，由 `PatAuthInterceptor` 按**令牌明文**查 `tlc_pat` 校验 `/pat/**`。两代令牌都认：带 `tlc_pat_` 前缀的 72 字符新令牌，以及迁移进来的无前缀 64 位 hex 旧令牌。`/oauth2/**` 链路不认 PAT，PAT 也不能当 access_token 用。
 > - **协议级认证**：OAuth 协议端点自带认证（client_id + client_secret、授权码、refresh_token、PKCE、一次性票据等），在服务层校验，不走拦截器。
-> - **签名认证**：Ed25519 验签 + 时间窗 + nonce 防重放（仅 `/oauth2/internal/migrate-token`；PAT 迁移端点无鉴权，靠开关与内网隔离）。
+> - **签名认证**：Ed25519 验签 + 时间窗 + nonce 防重放（仅 `/oauth2/internal/migrate-token`；PAT 迁移端点无鉴权，靠内网隔离）。
 > - **访问密钥**：请求参数 `key` 携带明文密钥，服务端只保存其 SHA-256 摘要并做常量时间比对，与后台控制台的校验方式一致；缺失或不匹配返回 `80008 无权限操作`。
 >
-> **URL 一级前缀即认证域**：`/user/**` 会话、`/oauth2/**` access_token、`/pat/**` PAT、`/open/**` 完全公开、`/internal/**` 不对外。PAT 的管理面（签发/列表/撤销）在 `/user/pat/**` 与 `/oauth2/pat/**`，用的是会话或 access_token；只有消费面 `/pat/**` 才把 PAT 当请求凭证。详见 `docs/pat/PAT接口文档.md`。
+> **URL 一级前缀即认证域**：`/user/**` 会话、`/oauth2/**` access_token、`/pat/**` PAT、`/open/**` 完全公开、`/internal/**` 不对外。PAT 的管理面（签发/列表/撤销）在 `/user/pat/**` 与 `/oauth2/pat/**`，用的是会话或 access_token；**唯一例外**是 `POST /oauth2/pat`，它凭请求体的 refresh_token 做协议级认证，已从 access_token 拦截器排除。只有消费面 `/pat/**` 才把 PAT 当请求凭证。详见 `docs/pat/PAT接口文档.md`。
 
 ## 一、公开接口（无需鉴权）
 
@@ -111,12 +111,14 @@
 
 | API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
 |---|---|---|---|---|
-| `/user/pat` | POST | 是 | 用户会话 | 签发一枚 PAT：`name`、`expires_in` 必填（有效期上限 10 年零 1 个月），`scope` 只能在可自助范围内收敛（不接受 `all`），`payload` 可选，`client_id` 只能留空或填保留标识 `this_land_cloud`（传其它值返回 `10001`）。返回令牌明文；`payload.ak_uid` 决定新令牌在消费端读取哪个游戏账号，签发后不可修改。 |
-| `/user/pat/list` | GET | 是 | 用户会话 | 查看我的 PAT 列表（含已过期记录），按签发时间倒序；返回完整 `token` 明文、`tokenPrefix`、`scope`、有效期、`source`（session/legacy）、`payload` 与剩余秒数。响应含凭证，须走 TLS 且不得写入访问日志/前端埋点。 |
+| `/user/pat` | POST | 是 | 用户会话 | 签发一枚 PAT：`name`、`expires_in` 必填（有效期上限 10 年零 1 个月），`scope` 只能在可自助范围内收敛（不接受 `all`），`payload` 可选，`client_id` 只能留空或填保留标识 `this_land_cloud`（传其它值返回 `10001`）。返回令牌明文；`payload.game_uid` 决定新令牌在消费端读取哪个游戏账号，签发后不可修改。 |
+| `/user/pat/list` | GET | 是 | 用户会话 | 查看我的 PAT 列表（含已过期记录），按签发时间倒序；返回完整 `token` 明文、`tokenPrefix`、`scope`、有效期、`payload` 与剩余秒数。响应含凭证，须走 TLS 且不得写入访问日志/前端埋点。 |
 | `/user/pat/revoke` | POST | 是 | 用户会话 | 按 `id` 撤销一条 PAT（物理删行），幂等；传他人 id 返回成功但不删任何行。 |
 | `/user/pat/revoke-all` | POST | 是 | 用户会话 | 作废本人名下全部 PAT。改密、删除应用等账号侧安全事件**不联动** PAT，需用户自助调用。 |
 
 > 换令牌走「撤销 + 重新签发」，没有轮换接口；需要继承名称/有效期/payload 时由前端用列表项预填签发表单。
+
+> **payload 是固定结构实体 `PatPayload`**，DB 仍存 JSON 文本、读取时才反序列化成对象。**所有字段均可为空**（可传 `{}`、只填部分，或完全不传），未知键静默忽略、缺失字段为 `null`，序列化后 ≤ 4KB。当前字段：`game_uid`（string，消费端据此定位游戏账号；接受 `gameUid` 别名）与 `game_name`（string，游戏名称，可空、不参与鉴权；接受 `gameName` 别名）。列表与签发响应只回传已定义字段，不再原样返回任意 KV；新增字段无需迁移存量数据。
 
 ### OAuth 客户端自助管理（`/user/oauth/client/**`）
 
@@ -208,6 +210,7 @@
 
 | API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
 |---|---|---|---|---|
+| `/oauth2/pat` | POST | 是（refresh_token） | **无 access_token**；请求体 `refresh_token` 协议级校验 + 直连认证开关（direct_auth_enabled=1） | 凭 refresh_token 签发一枚 PAT，参数与响应和 `/user/pat` 一致（`name`、`expires_in` 必填，`scope`、`payload` 可选）。`client_id` 取凭证所属应用、不接受调用方指定，因此签出的令牌可被 `/oauth2/pat/list` 列出与 `/oauth2/pat/revoke` 吊销。`scope` 上限为「凭证范围 ∩ 可自助范围」，只减不增；refresh_token 不消费、不轮转。凭证无效 `90009`，未开通直连 `90014`，越权 scope `90003`。 |
 | `/oauth2/pat/list` | GET | 是 | OAuth access_token + 直连认证开关（direct_auth_enabled=1） | 查询本应用为该用户签发的 PAT 列表（含完整令牌明文），强制按 uid + clientId 隔离，读不到其它应用名下记录；未开通直连认证返回 `90014`。 |
 | `/oauth2/pat/revoke` | POST | 是 | OAuth access_token + 直连认证开关（direct_auth_enabled=1） | 按 PAT 明文吊销本应用签发的一条令牌，归属按 uid + clientId + token 三条件精确匹配，幂等；调用方拿不到用户侧列表 id，故以明文提交。 |
 
@@ -225,7 +228,7 @@
 | API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
 |---|---|---|---|---|
 | `/oauth2/internal/migrate-token` | POST | 是 | Ed25519 验签 + 时间窗 + nonce 防重放（ts/nonce/kid/sig） | 迁移兑换：BackEndV3 服务端凭旧自签 token 对应的 uid 换取一对全新 UC 令牌（access+refresh）。 |
-| `/internal/pat-migration/run` | POST | 否（**默认不装配**） | 无；仅显式配置 `pat.migration.enabled=true` 时才注册，必须限定内网访问 | 触发旧自定义令牌向 `tlc_pat` 的全量迁移（旧令牌保留原样明文写入），幂等，返回 `total`/`migrated`/`skipped`/`failed`/`elapsedMs`。一次性运维端点：前置条件是新链路已能校验 PAT、旧表已备份、迁移期间停写；跑完立即关闭开关并重新发布。 |
+| `/internal/pat-migration/run` | POST | 否 | 无鉴权；**不设开关、随应用启动注册**，必须限定内网访问 | 触发旧自定义令牌向 `tlc_pat` 的全量迁移（旧令牌保留原样明文写入）。**搬迁不判有效性**：`oauth_custom_token` 中所有未过期行都会写入，已被撤销（Redis 明细已删、签发记录仍在）的令牌会重新变成可用 PAT，该取舍已确认接受。每批 500 行批量 `INSERT IGNORE` 后，按 uid 摘除 `uc:uid:oauth:{uid}` 索引成员并批量 `DEL` 旧 key。幂等，返回 `total`/`migrated`/`skipped`（恒 0）/`failed`/`elapsedMs`，满足 `migrated + failed == total`。一次性运维端点：前置条件是新链路已能校验 PAT、旧表已备份、迁移期间停写；**跑完立即删除该 Controller 并重新发布**。服务层方法已加锁串行，重复触发会排队执行，已入库明文被唯一键忽略，不会翻倍。 |
 
 ## 七、PAT 鉴权接口（`Authorization: Bearer {PAT}` 或 `UC-Token`）
 
@@ -233,6 +236,6 @@
 
 | API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
 |---|---|---|---|---|
-| `/pat/ak-accounts/operators` | GET | 是 | PAT + `ak-data.read` scope（`gama-data.read` 或 `all` 可覆盖） | 读取 PAT 对应用户的游戏账号干员全量数据，**目标账号不接受请求参数**：带 `tlc_pat_` 前缀的新令牌取 `payload.ak_uid` 并强制核对绑定关系；无前缀的迁移旧令牌没有 payload，按「用户默认来源 → 最近变更」取数。接口不声明任何查询参数，多传的参数由框架忽略、不参与取数。响应 `Cache-Control: private, no-cache`，结构与 `/oauth2/ak-accounts/operators` 完全一致（共用同一取数服务）。 |
+| `/pat/ak-accounts/operators` | GET | 是 | PAT + `ak-data.read` scope（`gama-data.read` 或 `all` 可覆盖） | 读取 PAT 对应用户的游戏账号干员全量数据，**目标账号不接受请求参数**：带 `tlc_pat_` 前缀的新令牌取 `payload.game_uid` 并强制核对绑定关系；无前缀的迁移旧令牌没有 payload，按「用户默认来源 → 最近变更」取数。接口不声明任何查询参数，多传的参数由框架忽略、不参与取数。响应 `Cache-Control: private, no-cache`，结构与 `/oauth2/ak-accounts/operators` 完全一致（共用同一取数服务）。 |
 
 > 迁移完成后旧令牌的 `uc:oauth:access:{token}` 已被删除，只能走本组接口；**消费端与阶段二迁移必须同批上线**，否则会出现旧令牌两边都不认的失效窗口。

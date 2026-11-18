@@ -1,6 +1,6 @@
 # PAT 消费端接口设计
 
-本文是《PAT 改造方案-最终版》第 5.1 节「消费端接口」的落地设计：PAT 持有者用它读取干员数据。**目标账号的选法按令牌前缀分两代**：带 `tlc_pat_` 前缀的新令牌读 payload 里的 `ak_uid`；不带前缀的旧令牌没有 payload 约定，按「用户默认来源 → 最近变更」取数，与 OAuth 版不传 `akUid` 一致。
+本文是《PAT 改造方案-最终版》第 5.1 节「消费端接口」的落地设计：PAT 持有者用它读取干员数据。**目标账号的选法按令牌前缀分两代**：带 `tlc_pat_` 前缀的新令牌读 payload 里的 `game_uid`；不带前缀的旧令牌没有 payload 约定，按「用户默认来源 → 最近变更」取数，与 OAuth 版不传 `akUid` 一致。
 
 签发 / 列表 / 撤销见《PAT 改造方案-最终版》第 3 节，本文不重复。
 
@@ -10,7 +10,7 @@
 > 不再计算 SHA-256；两代令牌的格式分流判据不变。这是明确的业务取舍，代价是库、备份、
 > Redis（若启用缓存）与列表响应都成为敏感数据源，须配套库表最小权限、备份加密、TLS、
 > 日志/异常/监控不落明文。同批删除了 PAT 轮换接口：明文可回看后「撤销 + 重新签发」等价，
-> 且轮换 legacy 行会生成带前缀的新令牌、触发 `payload.ak_uid` 强制校验（legacy 无 payload，
+> 且轮换 legacy 行会生成带前缀的新令牌、触发 `payload.game_uid` 强制校验（legacy 无 payload，
 > 新令牌直接 10002）。以下各节已按此口径修订。
 >
 > **后续调整（2026-11-18）：消费端接口改为不接收任何请求参数。** 控制器方法不再声明
@@ -25,7 +25,7 @@
 | 控制器 | `com.orange.controller.pat.PatAkAccountController` |
 | 拦截器 | `com.orange.interceptor.PatAuthInterceptor`，注册 `"/pat/**"` |
 | 凭证 | `Authorization: Bearer <pat>`，新旧两代格式都接受 |
-| 账号来源 | 新令牌（`tlc_pat_` 前缀）→ `payload.ak_uid`；旧令牌（64 位 hex，无前缀）→ 默认来源/最近变更 |
+| 账号来源 | 新令牌（`tlc_pat_` 前缀）→ `payload.game_uid`；旧令牌（64 位 hex，无前缀）→ 默认来源/最近变更 |
 | 归属校验 | 新令牌走 `ak_account_binding`；旧令牌经默认来源链路，数据同样只来自该用户自己的条目 |
 | 所需 scope | `ak-data.read`（`gama-data.read`、`all` 可覆盖） |
 | 响应 | 与 `/oauth2/ak-accounts/operators` 逐字段一致 + `Cache-Control: private, no-cache` |
@@ -46,26 +46,29 @@
 
 ### 3.1 两代令牌分流
 
-`tlc_pat` 里同时存在两种来源的行，靠明文是否带前缀区分：
+`tlc_pat` 里同时存在两种来源的行，靠明文是否带前缀区分（表里不设来源列）：
 
-| 令牌 | 形态 | `source` | payload | 选账号规则 |
+| 令牌 | 形态 | 来源 | payload | 选账号规则 |
 | --- | --- | --- | --- | --- |
-| 新令牌 | `tlc_pat_` + 64 位小写 hex（72 字符） | `session` | 签发时写入 | 读 `payload.ak_uid`，必须存在，否则 `10002` |
-| 旧令牌 | 64 位小写 hex（无前缀） | `legacy` | 迁移时固定为 `null` | 不指定账号，走 `listDefaultOperators` |
+| 新令牌 | `tlc_pat_` + 64 位小写 hex（72 字符） | `POST /user/pat` 自助签发或 `POST /oauth2/pat` 应用侧签发 | 签发时写入 `PatPayload`（存 TEXT，读取时转对象） | 读 `payload.game_uid`，必须存在，否则 `10002` |
+| 旧令牌 | 64 位小写 hex（无前缀） | `oauth_custom_token` 迁移 | 迁移时固定为 `null` | 不指定账号，走 `listDefaultOperators` |
 
-分流判据是**明文格式**而不是库里的 `source`：`PatUtil.isPat(raw)` 判新令牌，`PatUtil.isLegacyToken(raw)` 判旧令牌，两者都不匹配直接 `80001` 且不查库。结果通过 `PatPrincipal#isPrefixed()` 传到控制器，控制器据此决定是否读 payload。
+> payload 是固定结构实体，字段可全空/部分空，未知键静默忽略、缺失字段为 `null`；详见《PAT接口文档.md》§5.1。
+
+分流判据是**明文格式**：`PatUtil.isPat(raw)` 判新令牌，`PatUtil.isLegacyToken(raw)` 判旧令牌，两者都不匹配直接 `80001` 且不查库。结果通过 `PatPrincipal#isPrefixed()` 传到控制器，控制器据此决定是否读 payload。按应用维度统计迁移行时同理用 `LEFT(token, 8) <> 'tlc_pat_'`，不再依赖独立的来源列。
 
 这样处理的原因：旧令牌迁移前由 `SignUtil.generateToken()` 生成（`POST /user/oauth/custom-tokens`、`POST /oauth2/token/from-refresh` 走的就是这条），本来就是无前缀的 64 位 hex；迁移只换了存储位置，没有换明文。要求它们补 payload 是不现实的——它们已经发出去好几年了。全链路明文取舍下，旧令牌明文原样写入 `tlc_pat.token`，消费端按同一串明文即可查到，无需任何换算。
 
-### 3.2 新令牌：ak_uid 放在 payload，是方案的一处例外
+### 3.2 新令牌：game_uid 放在 payload，是方案的一处例外
 
-方案 §2.1 定义 payload 为「调用方自定义 KV，服务端不解读键含义、不做键名白名单、不据其分支」。本接口打破该约定：`payload.ak_uid` 是**唯一被服务端解读的键**，并直接决定读取哪个账号。
+方案 §2.1 定义 payload 为「固定结构的 `PatPayload` 实体、服务端默认不解读内容」。本接口打破该约定：`payload.game_uid` 是**唯一被服务端解读的字段**，并直接决定读取哪个账号。
 
-三点注意：
+四点注意：
 
 - 方案文档 §2.1 需补一句例外说明，否则后续有人按「payload 不解读」优化字段时会直接打断本接口。
-- `ak_uid` 必须在**签发时**确定：`POST /user/pat` 的 `payload` 里写入，之后没有修改接口，改了只能撤销后重新签发（轮换接口已删除）。
-- 长期看，如果 `/pat/**` 还要支持终末地等第二类资源，payload 会变成「每个消费端各占一个键」的事实配置表。到那一步应改为独立列（`tlc_pat.ak_uid`），而不是继续往 payload 里加键。
+- `game_uid` 必须在**签发时**确定：签发接口的 `payload` 里写入，之后没有修改接口，改了只能撤销后重新签发（轮换接口已删除）。`game_name` 目前只是扩展字段，不参与鉴权与取数。
+- payload 在 DB 里是 TEXT，读取时才反序列化成 `PatPayload`（未知键忽略、缺失字段为 null）。因此 `PatPayloadUtil.requireGameUid(PatPayload)` 直接读实体字段，不再按字符串 key 取 Map。两个字段都声明为 `String`：JSON 里的整型数字由 Jackson 转成十进制字符串，布尔/浮点标量同样会被强转成字符串，对象/数组在绑定阶段直接报错；取值层只负责 trim 与「绝不返回空串」，账号归属由业务层绑定校验兜底。
+- 长期看，如果 `/pat/**` 还要支持终末地等第二类资源，直接给 `PatPayload` 加字段即可（历史行缺字段自动为 null）；若字段多到需要按来源分列，再考虑独立列（`tlc_pat.game_uid`）。
 
 ### 3.3 解析链路
 
@@ -76,7 +79,7 @@ Authorization: Bearer <token>
   → 不计算摘要（全链路明文，业务取舍）
   → SELECT * FROM tlc_pat WHERE token = ? AND expire_time > NOW()
   → 身份三元组写入 UserContext（uid / clientId / scope）
-  → 整个 PatPrincipal 写入 PatContext（payload、prefixed、以及以后的扩展字段）
+  → 整个 PatPrincipal 写入 PatContext（PatPayload 对象、prefixed、以及以后的扩展字段）
 ```
 
 默认**不加缓存**。`RedisKeyUtil` 里的 `tlc:pat:{token}` 是方案 §2.2 的按需缓存，目前没有任何写入点；payload 本来就在 `tlc_pat` 行里，一次查询即可拿到，不需要为拿 payload 额外读 Redis。启用缓存反而要处理撤销后的失效。
@@ -85,15 +88,16 @@ Authorization: Bearer <token>
 
 ### 3.4 payload 取值口径（仅新令牌）
 
-`PatPayloadUtil.requireAkUid` 是唯一的取值入口，只在 `patPrefixed=true` 时调用：
+`PatPayloadUtil.requireGameUid` 是唯一的取值入口，只在 `patPrefixed=true` 时调用：
 
 | 情况 | 结果 |
 | --- | --- |
-| payload 为 null 或无 `ak_uid` 键 | `10002` PAT 未配置 ak_uid |
+| payload 为 null、全空实体或 `game_uid` 字段为 null | `10002` PAT 未配置 game_uid |
 | 值为字符串 | 去首尾空白后使用 |
-| 值为整数（Integer/Long/Short/BigInteger） | 转十进制字符串，兼容 `{"ak_uid": 123456789}` |
-| 值为空白字符串 | `10002` PAT 的 ak_uid 不能为空 |
-| 值为布尔、浮点、对象、数组 | `10002` PAT 的 ak_uid 必须为字符串或整数 |
+| 值为空白字符串 | `10002` PAT 的 game_uid 不能为空 |
+| JSON 里写成整数 | Jackson 强转成十进制字符串，兼容 `{"game_uid": 123456789}` |
+| JSON 里写成布尔或浮点 | Jackson 强转成 `"true"` / `"1.5"`，取值层不再拒绝，最终由绑定校验挡下（`80008`） |
+| JSON 里写成对象或数组 | 请求体绑定阶段报错（`10001`）；库里若存了这类坏文本按「无 payload」处理（`10002`） |
 
 **绝不放行空值**：业务层把「akUid 为空」解释为「读用户设置的默认来源」，空串一旦传下去，请求会静默读到另一个账号——旧令牌走这条回落是有意的，新令牌因为没有配置而走同一条回落则是越权，所以取值层就把它堵死。
 
@@ -121,10 +125,10 @@ SELECT COUNT(1) FROM ak_account_binding WHERE ak_uid = ? AND owner_uid = ?
 | --- | --- |
 | 未带令牌 / 两代格式都不匹配 / 无效 / 已过期 | `80001` |
 | PAT scope 不含 `ak-data.read` | `80008` |
-| 新令牌的 payload 未配置 `ak_uid` 或取值非法 | `10002` |
+| 新令牌的 payload 未配置 `game_uid` 或值为空白 | `10002` |
 | 请求带了 `akUid` 等查询参数 | 参数被忽略（接口不声明参数），仍按 PAT 取数 |
-| 新令牌的 `ak_uid` 不属于当前用户 | `80008` |
-| `ak_uid` 格式非法（非 32 位可见 ASCII） | `10002` |
+| 新令牌的 `game_uid` 不属于当前用户 | `80008` |
+| `game_uid` 格式非法（非 32 位可见 ASCII） | `10002` |
 | 旧令牌的用户没有任何可用数据来源 | `10002`（与 OAuth 不传 `akUid` 一致） |
 
 ## 4. 接口契约
@@ -140,7 +144,7 @@ Authorization: Bearer <pat>
 
 | 令牌 | 读取的账号 |
 | --- | --- |
-| `tlc_pat_...`（新） | `payload.ak_uid` 指定的账号 |
+| `tlc_pat_...`（新） | `payload.game_uid` 指定的账号 |
 | 纯 64 位 hex（旧） | 该用户默认来源；未设置或已失效取最近变更的条目 |
 
 成功响应（`200`，`Cache-Control: private, no-cache`）：
@@ -193,12 +197,13 @@ Authorization: Bearer <pat>
 | 文件 | 职责 |
 | --- | --- |
 | `common/util/PatUtil` | `generate` / `isPat` / `isLegacyToken` / `displayPrefix`，两代令牌生成与格式判定（不再提供 `hash`） |
-| `common/util/PatPayloadUtil` | 从 payload 取 `ak_uid`，取值口径与 10002 报错 |
+| `entity/dto/pat/PatPayload` | payload 自定义实体：固定字段、`@JsonIgnoreProperties(ignoreUnknown = true)`、全字段可空；DB 存 TEXT，读取时转此对象 |
+| `common/util/PatPayloadUtil` | 从 `PatPayload` 取 `game_uid`，取值口径与 10002 报错 |
 | `interceptor/PatAuthInterceptor` | 解析 PAT，写 `UserContext`（身份）与 `PatContext`（令牌属性），请求结束两者都清理 |
 | `interceptor/WebConfig` | 注册 `"/pat/**"` |
 | `controller/pat/PatAkAccountController` | 取 scope、从 `PatContext` 取 `prefixed` 决定选账号规则 |
 | `service/PatService#resolve` | 按明文查库，返回 `PatPrincipal` |
-| `service/PatPrincipal` | 令牌属性载体：uid / clientId / scope / payload / prefixed |
+| `service/PatPrincipal` | 令牌属性载体：uid / clientId / scope / `PatPayload` / prefixed |
 | `common/context/PatContext` | PAT 专属请求上下文，存整个 `PatPrincipal` |
 | `common/context/UserContext` | 只保留三个认证面共有的 uid / clientId / scope |
 
@@ -208,17 +213,17 @@ Authorization: Bearer <pat>
 
 ## 6. 验证清单
 
-自动化覆盖：`PatAkAccountMvcTest`（10 例，两代令牌分流、拦截器注册、payload 取值、多余参数不影响取数、scope 与归属失败）、`PatPayloadUtilTest`（5 例）、`PatUtilTest`（6 例，移除摘要一致性用例）、`PatContextTest`（3 例，上下文存取与清理）、`PatServiceImplTest`（19 例，含 5 个 `resolve` 用例、明文原样落库、列表回传明文）。
+自动化覆盖：`PatAkAccountMvcTest`（10 例，两代令牌分流、拦截器注册、payload 取值、多余参数不影响取数、scope 与归属失败）、`PatPayloadUtilTest`（5 例）、`PatPayloadTest`（8 例，未知字段忽略、全空/部分空、数字与驼峰别名）、`PatUtilTest`（6 例，移除摘要一致性用例）、`PatContextTest`（3 例，上下文存取与清理）、`PatServiceImplTest`（27 例，含 `resolve` 用例、序列化为 TEXT、列表反序列化容错、明文原样落库与回传）。
 
 | 场景 | 期望 |
 | --- | --- |
 | 不带凭证访问 | `80001`，`msg` 为「缺少 PAT」 |
 | 带非两代格式的随机串 | `80001`，且不产生数据库查询 |
 | 带已过期 / 已撤销的新令牌 | `80001` |
-| 签发时未写 payload | `10002` PAT 未配置 ak_uid |
-| payload 的 `ak_uid` 为空串或空白 | `10002`，**不得**回落到默认来源 |
-| payload 的 `ak_uid` 为整数 JSON | 正常读取，响应 `akUid` 为十进制字符串 |
-| payload 的 `ak_uid` 是他人账号 | `80008`，与账号不存在无法区分 |
+| 签发时未写 payload | `10002` PAT 未配置 game_uid |
+| payload 的 `game_uid` 为空串或空白 | `10002`，**不得**回落到默认来源 |
+| payload 的 `game_uid` 写成整数 JSON | Jackson 转成十进制字符串后正常读取，响应 `akUid` 为该字符串 |
+| payload 的 `game_uid` 是他人账号 | `80008`，与账号不存在无法区分 |
 | 用户解绑该账号后再用同一新令牌读 | `80008` |
 | 请求带 `?akUid=` | `200`，参数被忽略，仍按 PAT 的 payload 取数 |
 | scope 只有 `ak-data.write` | `80008` |
@@ -236,6 +241,6 @@ Authorization: Bearer <pat>
 - **本接口是方案 §5.1 所说的消费端**，也是 §7「PAT 暂无消费方」的闭合点；接口已落地，PAT 现可正常用于取数。面向调用方的完整契约见 `docs/pat/PAT接口文档.md`。
 - **旧令牌先于迁移可用**：迁移前它们靠 `uc:oauth:access:` 在 `/oauth2/**` 生效；迁移把 Redis key 删掉后，本接口按明文查 `tlc_pat` 仍能识别它们，因此「迁移即失效」的窗口不存在。前提是本接口与迁移同批上线。
 - **阶段二自此具备条件**：5.3 的迁移、5.4 的对账、旧 6 端点的 410 下线可按批次排期。
-- **payload 语义例外需回写方案 §2.1**：`ak_uid` 是唯一被解读的键，其余键仍按「不解读」处理。
+- **payload 语义例外需回写方案 §2.1**：`game_uid` 是唯一被解读的键，其余键仍按「不解读」处理。
 - **`last_used_at` 仍未回写**：校验路径已存在，但每请求一次写库会放大写压力，建议按「距上次使用超过 5 分钟才更新」另起一批做。
 - **不改动的部分**：`OAuthTokenResolver`、`OAuthAuthInterceptor`、`WebConfig` 中既有的 `/oauth2/**` 注册、全部 `/oauth2/**` 资源端点。
