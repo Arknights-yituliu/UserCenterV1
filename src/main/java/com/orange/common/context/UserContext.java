@@ -7,8 +7,13 @@ import com.orange.common.enums.ResultCode;
 /**
  * 当前登录用户上下文（ThreadLocal）
  *
- * <p>由用户认证拦截器 / OAuth 认证拦截器在请求进入时写入，业务层通过 {@link #getUid()} 获取当前用户，
- * 通过 {@link #getClientId()} 获取来源客户端标识，通过 {@link #getScope()} 获取 OAuth 授权范围</p>
+ * <p>由用户认证拦截器 / OAuth 认证拦截器 / PAT 认证拦截器在请求进入时写入，业务层通过
+ * {@link #getUid()} 获取当前用户，通过 {@link #getClientId()} 获取来源客户端标识，
+ * 通过 {@link #getScope()} 获取授权范围。</p>
+ *
+ * <p>本类只放三个认证面共有的身份字段。PAT 独有的令牌属性（payload、令牌前缀、以后的
+ * 扩展字段）由 {@link PatContext} 持有，不要加到这里——每加一个字段就多一个需要清理的
+ * ThreadLocal，漏清一个就是线程复用串号。</p>
  *
  * @author UserCenter
  */
@@ -115,6 +120,8 @@ public final class UserContext {
 
     /**
      * 清理上下文，防止线程复用导致数据串号
+     *
+     * <p>PAT 侧另有 {@link PatContext}，由 {@code PatAuthInterceptor} 在同一处清理。</p>
      */
     public static void clear() {
         UID_HOLDER.remove();

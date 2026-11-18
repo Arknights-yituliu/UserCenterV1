@@ -10,6 +10,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  * <ul>
  *   <li>UserAuthInterceptor：仅校验用户会话（/user/** 用户自助面）</li>
  *   <li>OAuthAuthInterceptor：仅校验 OAuth access_token（/oauth2 下受令牌保护的资源端点）</li>
+ *   <li>PatAuthInterceptor：仅校验个人访问令牌 PAT（/pat/** 消费面）</li>
  * </ul>
  *
  * <p>鉴权链路完全分离，互不纠缠：用户自助面（含配置、OAuth 客户端自助管理、
@@ -26,16 +27,20 @@ public class WebConfig implements WebMvcConfigurer {
 
     private final UserAuthInterceptor userAuthInterceptor;
     private final OAuthAuthInterceptor oauthAuthInterceptor;
+    private final PatAuthInterceptor patAuthInterceptor;
 
     /**
      * 构造器注入拦截器
      *
      * @param userAuthInterceptor  用户认证拦截器
      * @param oauthAuthInterceptor OAuth access_token 认证拦截器
+     * @param patAuthInterceptor   PAT 认证拦截器
      */
-    public WebConfig(UserAuthInterceptor userAuthInterceptor, OAuthAuthInterceptor oauthAuthInterceptor) {
+    public WebConfig(UserAuthInterceptor userAuthInterceptor, OAuthAuthInterceptor oauthAuthInterceptor,
+                     PatAuthInterceptor patAuthInterceptor) {
         this.userAuthInterceptor = userAuthInterceptor;
         this.oauthAuthInterceptor = oauthAuthInterceptor;
+        this.patAuthInterceptor = patAuthInterceptor;
     }
 
     /**
@@ -57,10 +62,17 @@ public class WebConfig implements WebMvcConfigurer {
         //  /oauth2/ef-accounts/** 为 OAuth 终末地玩家数据接口，
         //  /oauth2/ef-pool-records/** 为 OAuth 终末地寻访记录接口，
         //  /oauth2/custom-tokens/** 为自定义令牌的查询与吊销，端点内部另校验客户端是否开通直连认证能力）
+        //  /oauth2/pat/** 为个人访问令牌的应用视角查询与吊销，准入同上（direct_auth_enabled=1）
         registry.addInterceptor(oauthAuthInterceptor)
                 .addPathPatterns("/oauth2/userinfo", "/oauth2/profile/**", "/oauth2/config/**",
                         "/oauth2/schedule/**", "/oauth2/ak-accounts/**",
                         "/oauth2/ef-accounts/**", "/oauth2/ef-pool-records/**",
-                        "/oauth2/custom-tokens", "/oauth2/custom-tokens/**");
+                        "/oauth2/custom-tokens", "/oauth2/custom-tokens/**",
+                        "/oauth2/pat", "/oauth2/pat/**");
+        // PAT 消费面：只认个人访问令牌，按明文查 tlc_pat 后注入上下文
+        // （/pat/** 不在上面两条通配范围内，漏配的表现是「接口能访问但没校验过」，
+        //  验证时必须特意测「不带 PAT」这一场景）
+        registry.addInterceptor(patAuthInterceptor)
+                .addPathPatterns("/pat/**");
     }
 }
