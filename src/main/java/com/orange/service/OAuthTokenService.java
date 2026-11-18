@@ -367,10 +367,33 @@ public interface OAuthTokenService {
     void revokeUserScopes(Long uid, String clientId, List<String> scopes);
 
     /**
+     * 计算「用户自助签发」场景的权限上限，并按请求做只减不增的收敛
+     *
+     * <p>上限取 {@link com.orange.common.enums.OAuthScope#selectable()}（即不含元范围 {@code all}），
+     * 与个人令牌的权限口径一致。供 PAT 签发复用，避免把收敛规则复制到第二处。</p>
+     *
+     * @param requestedScope 期望收敛到的权限范围（英文逗号分隔，可空表示取全部可自助范围）
+     * @return 收敛后的权限串
+     * @throws com.orange.common.exception.BusinessException 存在未知标识或超出可自助范围（90003）
+     */
+    String resolveSelfIssuedScope(String requestedScope);
+
+    /**
+     * 应用侧接口准入校验：客户端必须启用、已审批且已开通直连认证能力
+     *
+     * <p>用于「仅限直连应用」的 OAuth 侧接口（自定义令牌 / PAT 的应用视角列表与吊销）。
+     * 直连能力由管理员逐应用显式开通，天然排除公共客户端与未审批应用。</p>
+     *
+     * @param clientId 客户端 ID
+     * @throws com.orange.common.exception.BusinessException 客户端无效/未审批（90001/90013）
+     *                                                      或未开通直连认证能力（90014）
+     */
+    void requireDirectAuthEnabledClient(String clientId);
+
+    /**
      * 访问令牌主体信息（uid + 客户端 + 范围）
      */
     class OAuthTokenPrincipal {
-
         /** 用户 uid */
         private final Long uid;
 

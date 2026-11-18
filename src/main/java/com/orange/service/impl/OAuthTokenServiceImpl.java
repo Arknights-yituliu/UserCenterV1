@@ -2214,11 +2214,31 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      * @throws BusinessException 客户端无效/未审批（沿用 requireEnabledClient 的错误码）
      *                           或未开通直连认证能力（90014）
      */
-    private void requireDirectAuthEnabledClient(String clientId) {
+    @Override
+    public void requireDirectAuthEnabledClient(String clientId) {
         OAuthClient client = requireEnabledClient(clientId);
         if (client.getDirectAuthEnabled() == null || client.getDirectAuthEnabled() != 1) {
             throw new BusinessException(ResultCode.OAUTH_DIRECT_AUTH_NOT_ALLOWED);
         }
+    }
+
+    /**
+     * 计算「用户自助签发」场景的权限上限，并按请求做只减不增的收敛
+     *
+     * <p>上限为系统可自助范围（{@link OAuthScope#selectable()}，不含元范围 {@code all}），
+     * 与个人令牌口径一致；请求携带 scope 时复用 {@link #narrowScope} 做子集校验，
+     * 超出上限即 90003，不支持的标识同样 90003。</p>
+     *
+     * @param requestedScope 期望收敛到的权限范围（可空表示取全部可自助范围）
+     * @return 收敛后的权限串
+     */
+    @Override
+    public String resolveSelfIssuedScope(String requestedScope) {
+        String heldScope = String.join(",", selectableScopeCodes());
+        if (!StringUtils.hasText(requestedScope)) {
+            return heldScope;
+        }
+        return narrowScope(heldScope, requestedScope);
     }
 
     /**
