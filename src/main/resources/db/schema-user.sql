@@ -4,7 +4,8 @@
 -- 依赖：先执行 schema.sql 完成建库与排序规则对齐。
 -- 本文件可独立重跑：所有建表均为 DROP TABLE IF EXISTS + CREATE。
 -- 排序规则：业务表统一 utf8mb4_general_ci；需要精确比较的哈希摘要列
--- （content_hash、token_hash、family_id）列级显式 utf8mb4_bin。
+-- （content_hash、token_hash、family_id）与 tlc_pat.token 明文列均列级显式 utf8mb4_bin，
+-- 后者是为了让 hex 令牌的大小写不被 general_ci 折叠。
 -- =============================================================
 
 USE `user_center`;
@@ -263,3 +264,39 @@ CREATE TABLE `oauth_custom_token` (
     KEY `idx_oauth_custom_token_uid` (`uid`, `create_time`) COMMENT '按用户查询其签发的自定义令牌并按签发时间倒序'
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '用户自定义有效期的access_token签发记录';
+
+-- -------------------------------------------------------------
+-- 13. 个人访问令牌表（PAT）
+--
+-- 与 oauth_custom_token 的差异：PAT 是独立凭证类，不属于 OAuth access_token 域，
+-- 不能被解析为 access_token，也不写 uc:oauth:* 任何键；消费端由 /pat/** 独立校验。
+-- 【业务取舍】全链路明文：token 列保存令牌明文本身（新令牌 72 字符 / 迁移旧令牌 64 位 hex），
+-- 不计算摘要；列表接口也回传明文，便于用户回看与旧令牌无感迁移。
+-- 代价：本表是敏感数据源，必须限制数据库账号权限、开启备份加密、TLS 传输，
+-- 并保证日志/异常/监控不落令牌明文。client_id 固定为个人令牌标识（this_land_cloud），
+-- 沿用它在 user_config 等表中的分区键语义。
+-- 阶段一不启用 Redis 缓存，校验按 token 明文查一次库即可。
+-- -------------------------------------------------------------
+DROP TABLE IF EXISTS `tlc_pat`;
+CREATE TABLE `tlc_pat` (
+    `id`           BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `uid`          BIGINT       NOT NULL COMMENT '所属用户',
+    `client_id`    VARCHAR(128) NOT NULL COMMENT '个人令牌固定 this_land_cloud',
+    `name`         VARCHAR(50)  NOT NULL COMMENT '用户命名的用途',
+    `token`        VARCHAR(128) COLLATE utf8mb4_bin NOT NULL COMMENT '令牌明文（不做摘要）',
+    `token_prefix` VARCHAR(16)  NOT NULL COMMENT '令牌前 12 位，列表展示',
+    `scope`        VARCHAR(256) NOT NULL COMMENT '签发时的权限快照（英文逗号分隔）',
+    `expires_in`   BIGINT       NOT NULL COMMENT '签发时指定的有效期（秒）',
+    `expire_time`  DATETIME     NOT NULL COMMENT '到期时间',
+    `source`       VARCHAR(16)  NOT NULL COMMENT '来源：session=用户自助签发 / legacy=旧自定义令牌迁移',
+    `payload`      TEXT             NULL COMMENT '调用方自定义 KV 对象（JSON object），不参与鉴权',
+    `last_used_at` DATETIME         NULL COMMENT '最近一次使用时间（阶段二启用）',
+    `create_time`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tlc_pat_token` (`token`) COMMENT '按明文唯一定位，兜底防重复入库',
+    KEY `idx_tlc_pat_uid` (`uid`, `create_time`) COMMENT '按用户列出其令牌并按签发时间倒序',
+    KEY `idx_tlc_pat_client` (`client_id`) COMMENT '按应用维度过滤：应用视角列表与迁移来源统计'
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '个人访问令牌';
+

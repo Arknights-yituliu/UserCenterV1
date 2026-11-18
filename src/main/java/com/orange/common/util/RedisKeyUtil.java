@@ -78,6 +78,18 @@ public final class RedisKeyUtil {
     /** 迁移凭证当前映射 key 前缀：uc:oauth:migrate:current:{clientId}:{uid}（值为上一轮迁移签发的 refresh_token） */
     private static final String PREFIX_OAUTH_MIGRATE_CURRENT = "uc:oauth:migrate:current:";
 
+    /** 个人访问令牌校验缓存 key 前缀：tlc:pat:{token}（阶段二按需启用） */
+    private static final String PREFIX_PAT = "tlc:pat:";
+
+    /** 用户 PAT 索引 key 前缀：tlc:uid:pat:{uid}（Set，成员为令牌明文，阶段二按需启用） */
+    private static final String PREFIX_UID_PAT = "tlc:uid:pat:";
+
+    /** PAT 校验未命中负缓存 key 前缀：tlc:pat:miss:{token}（60s，阶段二按需启用） */
+    private static final String PREFIX_PAT_MISS = "tlc:pat:miss:";
+
+    /** PAT 校验单飞锁 key 前缀：tlc:pat:lock:{token}（5s，阶段二按需启用） */
+    private static final String PREFIX_PAT_LOCK = "tlc:pat:lock:";
+
     private RedisKeyUtil() {
     }
 
@@ -329,5 +341,49 @@ public final class RedisKeyUtil {
      */
     public static String oauthMigrateCurrent(String clientId, Long uid) {
         return PREFIX_OAUTH_MIGRATE_CURRENT + clientId + ":" + uid;
+    }
+
+    /**
+     * 个人访问令牌校验缓存 key（值为 uid/clientId/scope/payload 的 JSON）
+     *
+     * <p>阶段一不写该键：PAT 调用量远低于普通接口，按明文查一次库即可。留出方法是
+     * 为了让阶段二启用缓存时不必再改工具类。key 直接带令牌明文是「全链路明文」取舍的
+     * 一部分，一旦启用，Redis 也需按敏感数据源管理（禁止键扫描结果外泄、禁止落日志）。</p>
+     *
+     * @param token 令牌明文
+     * @return Redis key
+     */
+    public static String pat(String token) {
+        return PREFIX_PAT + token;
+    }
+
+    /**
+     * 用户 PAT 索引 key（Set，成员为令牌明文，供按 uid 批量清理）
+     *
+     * @param uid 用户 uid
+     * @return Redis key
+     */
+    public static String uidPat(Long uid) {
+        return PREFIX_UID_PAT + uid;
+    }
+
+    /**
+     * PAT 校验未命中负缓存 key（60s，避免无效凭证反复打库）
+     *
+     * @param token 令牌明文
+     * @return Redis key
+     */
+    public static String patMiss(String token) {
+        return PREFIX_PAT_MISS + token;
+    }
+
+    /**
+     * PAT 校验单飞锁 key（5s，同一明文并发回源只放一个请求过）
+     *
+     * @param token 令牌明文
+     * @return Redis key
+     */
+    public static String patLock(String token) {
+        return PREFIX_PAT_LOCK + token;
     }
 }
