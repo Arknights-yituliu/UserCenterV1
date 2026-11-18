@@ -973,6 +973,28 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     public OAuthTokenVO issueAccessTokenFromRefreshToken(String refreshToken, String requestedClientId,
                                                          Long expiresInSeconds, String requestedScope, String name) {
         String trimmedName = validateDirectIssueParams(expiresInSeconds, name);
+        RefreshTokenPrincipal principal = resolveRefreshToken(refreshToken);
+        // 请求带了 client_id 时必须与令牌归属一致，防止跨应用换发
+        if (StringUtils.hasText(requestedClientId)
+                && !Objects.equals(requestedClientId.trim(), principal.getClientId())) {
+            throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID, "刷新令牌与客户端不匹配");
+        }
+        OAuthClient client = requireEnabledClient(principal.getClientId());
+        return issueCustomAccessToken(principal.getUid(), client, principal.getScope(),
+                principal.getFamilyId(), expiresInSeconds, requestedScope, trimmedName);
+    }
+
+    /**
+     * 解析一枚仍有效的 refresh_token（与直签 access_token 共用同一份 Redis 记录与校验口径）
+     *
+     * <p>只做解析，不校验客户端启用状态与直连认证准入，也不消费/轮转凭证——这些由各调用方
+     * 按自己的准入规则追加。PAT 签发链路复用本方法，避免复制一套凭证解析逻辑造成口径漂移。</p>
+     *
+     * @param refreshToken 刷新令牌明文
+     * @return 令牌主体
+     */
+    @Override
+    public RefreshTokenPrincipal resolveRefreshToken(String refreshToken) {
         if (!StringUtils.hasText(refreshToken)) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "refresh_token 不能为空");
         }
@@ -982,19 +1004,45 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         }
         Map<String, Object> record = readJsonMapValue(rawRecord);
         Long uid = numberToLong(record.get("uid"));
-        String tokenClientId = stringValue(record.get("clientId"));
-        if (uid == null || !StringUtils.hasText(tokenClientId)) {
+        String clientId = stringValue(record.get("clientId"));
+        if (uid == null || !StringUtils.hasText(clientId)) {
             throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID);
         }
-        // 请求带了 client_id 时必须与令牌归属一致，防止跨应用换发
-        if (StringUtils.hasText(requestedClientId)
-                && !Objects.equals(requestedClientId.trim(), tokenClientId)) {
-            throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID, "刷新令牌与客户端不匹配");
+        return new RefreshTokenPrincipal(uid, clientId,
+                stringValue(record.get("scope")), stringValue(record.get("familyId")));
+    }
+
+    /**
+     * 计算「凭证范围 ∩ 系统可自助范围」，供 PAT 这类自助凭证确定权限上限
+     *
+     * <p>请求带 scope 时先按凭证范围做只减不增收敛（复用 {@link #narrowScope}，含上级范围覆盖
+     * 子范围的判断），再确认结果都在可自助集合内，从而挡住元范围 {@code all} 与 manualOnly 权限。
+     * 不带 scope 时按枚举顺序取交集全集；凭证一个可自助权限都没授予则拒绝签发，避免签出空权限令牌。</p>
+     *
+     * @param heldScope      凭证已有权限串
+     * @param requestedScope 请求收敛到的权限串（可空）
+     * @return 最终权限串
+     */
+    @Override
+    public String resolveSelfIssuedScopeWithin(String heldScope, String requestedScope) {
+        if (StringUtils.hasText(requestedScope)) {
+            String narrowed = narrowScope(heldScope, requestedScope);
+            requireSelectableScopes(splitScopes(narrowed));
+            return narrowed;
         }
-        OAuthClient client = requireEnabledClient(tokenClientId);
-        String scope = stringValue(record.get("scope"));
-        String familyId = stringValue(record.get("familyId"));
-        return issueCustomAccessToken(uid, client, scope, familyId, expiresInSeconds, requestedScope, trimmedName);
+        Set<String> held = splitScopes(heldScope);
+        List<String> granted = new ArrayList<>();
+        for (String code : selectableScopeCodes()) {
+            OAuthScope target = OAuthScope.findByCode(code).orElse(null);
+            if (target != null && held.stream().anyMatch(value -> OAuthScope.covers(value, target))) {
+                granted.add(code);
+            }
+        }
+        if (granted.isEmpty()) {
+            throw new BusinessException(ResultCode.OAUTH_SCOPE_INVALID,
+                    "凭证未授予任何可自助签发的权限");
+        }
+        return String.join(",", granted);
     }
 
     /**
@@ -2214,11 +2262,31 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      * @throws BusinessException 客户端无效/未审批（沿用 requireEnabledClient 的错误码）
      *                           或未开通直连认证能力（90014）
      */
-    private void requireDirectAuthEnabledClient(String clientId) {
+    @Override
+    public void requireDirectAuthEnabledClient(String clientId) {
         OAuthClient client = requireEnabledClient(clientId);
         if (client.getDirectAuthEnabled() == null || client.getDirectAuthEnabled() != 1) {
             throw new BusinessException(ResultCode.OAUTH_DIRECT_AUTH_NOT_ALLOWED);
         }
+    }
+
+    /**
+     * 计算「用户自助签发」场景的权限上限，并按请求做只减不增的收敛
+     *
+     * <p>上限为系统可自助范围（{@link OAuthScope#selectable()}，不含元范围 {@code all}），
+     * 与个人令牌口径一致；请求携带 scope 时复用 {@link #narrowScope} 做子集校验，
+     * 超出上限即 90003，不支持的标识同样 90003。</p>
+     *
+     * @param requestedScope 期望收敛到的权限范围（可空表示取全部可自助范围）
+     * @return 收敛后的权限串
+     */
+    @Override
+    public String resolveSelfIssuedScope(String requestedScope) {
+        String heldScope = String.join(",", selectableScopeCodes());
+        if (!StringUtils.hasText(requestedScope)) {
+            return heldScope;
+        }
+        return narrowScope(heldScope, requestedScope);
     }
 
     /**

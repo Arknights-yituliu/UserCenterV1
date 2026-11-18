@@ -6,6 +6,7 @@ import com.orange.common.util.Result;
 import com.orange.entity.vo.UserConfigConflictVO;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.BindException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -57,6 +58,22 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BusinessException.class)
     public Result<Void> handleBusinessException(BusinessException e) {
         return Result.error(e.getCode(), e.getMessage());
+    }
+
+    /**
+     * 处理请求体解析失败（JSON 格式错误或字段类型不匹配）
+     *
+     * <p>例如 PAT 的 {@code payload} 是强类型实体，请求里传了数组或字符串时 Jackson 会在
+     * 绑定阶段就失败。若不单独接住，会被兜底的 {@code Exception} 处理器当成系统异常，
+     * 既返回错误码 90001，又打 ERROR 堆栈污染日志——实际是调用方参数问题。</p>
+     *
+     * @param e 请求体不可读异常
+     * @return 业务码 10001，且不记录堆栈
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public Result<Void> handleMessageNotReadable(HttpMessageNotReadableException e) {
+        LogUtil.debug(GlobalExceptionHandler.class, "请求体解析失败", e);
+        return Result.error(ResultCode.PARAM_ERROR.getCode(), "请求体格式错误或字段类型非法");
     }
 
     /**
