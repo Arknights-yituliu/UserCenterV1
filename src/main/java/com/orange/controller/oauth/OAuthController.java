@@ -6,11 +6,9 @@ import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.util.LogUtil;
 import com.orange.common.util.Result;
-import com.orange.entity.dto.oauth.CustomTokenRevokeRequest;
 import com.orange.entity.vo.oauth.ConsentInfoVO;
 import com.orange.entity.vo.oauth.LoginTicketVO;
 import com.orange.entity.vo.oauth.OAuthConsentRequest;
-import com.orange.entity.vo.oauth.OAuthCustomTokenVO;
 import com.orange.entity.vo.oauth.OAuthTokenVO;
 import com.orange.entity.vo.oauth.UserInfoVO;
 import com.orange.service.OAuthTokenService;
@@ -228,26 +226,6 @@ public class OAuthController {
     }
 
     /**
-     * 使用已有 refresh_token 直接签发指定有效期的 OAuth access_token。
-     *
-     * <p>权限沿用刷新令牌自身的范围；可选传 scope 做权限收敛（只减不增）。本调用不消费、不轮转刷新令牌。</p>
-     *
-     * <p>name 为必填：签发成功后落一条自定义令牌记录，供用户在「我的自定义令牌」列表查看。</p>
-     */
-    @Operation(summary = "使用 refresh_token 直接签发 access_token")
-    @PostMapping("/token/from-refresh")
-    public Result<OAuthTokenVO> tokenFromRefresh(
-            @RequestParam(value = "refresh_token", required = false) String refreshToken,
-            @RequestParam(value = "client_id", required = false) String clientId,
-            @RequestParam(value = "expires_in", required = false) Long expiresIn,
-            @RequestParam(value = "scope", required = false) String scope,
-            @RequestParam(value = "name", required = false) String name) {
-        OAuthTokenVO vo = oauthTokenService.issueAccessTokenFromRefreshToken(
-                refreshToken, clientId, expiresIn, scope, name);
-        LogUtil.debug(OAuthController.class, "[OAuth] 刷新令牌直签 access_token: expiresIn={}s", vo.getExpiresIn());
-        return Result.success(vo);
-    }
-    /**
      * 吊销令牌（RFC 7009）：客户端携带自己名下的 access_token / refresh_token 调用，
      * 使其立即失效（自动识别令牌类型）。吊销 refresh_token 只使其本身失效，此前派生的
      * access_token 按各自有效期自然过期；令牌不存在或已失效同样返回成功（幂等，不泄露令牌是否有效）
@@ -279,51 +257,6 @@ public class OAuthController {
         UserContext.requireScope(OAuthScope.USER_READ);
         return Result.success(oauthTokenService.getUserInfo(
                 UserContext.requireUid(), UserContext.getClientId(), UserContext.getScope()));
-    }
-
-    /**
-     * 查询本应用为该用户签发的自定义有效期令牌列表（含已过期记录）
-     *
-     * <p>认证由 {@code OAuthAuthInterceptor} 完成，使用标准 access_token
-     * （Authorization: Bearer {access_token} 或 UC-Token）。在令牌解析之外，
-     * 服务层还会校验本应用<strong>必须已开通直连认证能力</strong>（{@code direct_auth_enabled=1}）：
-     * 该能力由管理员逐应用显式开通，公共客户端与未审批应用会被拒绝（90014/90013），
-     * 避免任意第三方应用凭普通 access_token 收割用户的自定义令牌明文。</p>
-     *
-     * <p>uid 与 clientId 均取自 access_token 记录，因此调用方只能看到<strong>自己应用名下</strong>
-     * 的签发记录，不会读到该用户在其它应用的自定义令牌明文。</p>
-     *
-     * @return 本应用下的自定义令牌列表，按签发时间倒序
-     */
-    @Operation(summary = "查询本应用的自定义令牌列表（仅限已开通直连认证的客户端）")
-    @GetMapping("/custom-tokens")
-    public Result<List<OAuthCustomTokenVO>> customTokens() {
-        List<OAuthCustomTokenVO> tokens = oauthTokenService.listUserCustomTokensByClient(
-                UserContext.requireUid(), UserContext.getClientId());
-        LogUtil.debug(OAuthController.class, "[OAuth] 查询本应用自定义令牌: clientId={}, size={}",
-                UserContext.getClientId(), tokens.size());
-        return Result.success(tokens);
-    }
-
-    /**
-     * 吊销（删除并失效）本应用为当前用户签发的一条自定义有效期令牌
-     *
-     * <p>认证由 {@code OAuthAuthInterceptor} 完成，使用标准 access_token；uid 与 clientId
-     * 均取自 access_token 记录。待吊销的 access_token 明文放在请求体中，服务层会先使其在
-     * Redis 中立即失效，再删除签发记录使其从列表中移除；归属按 uid + clientId 双重限定，
-     * 只能吊销本应用为该用户签发的令牌，幂等。准入同查询接口，要求客户端已开通直连认证能力。</p>
-     *
-     * @param request 吊销请求（token 明文）
-     * @return 空结果
-     */
-    @Operation(summary = "吊销本应用签发的一条自定义令牌（仅限已开通直连认证的客户端）")
-    @PostMapping("/custom-tokens/revoke")
-    public Result<Void> revokeCustomToken(@Valid @RequestBody CustomTokenRevokeRequest request) {
-        oauthTokenService.revokeCustomTokenByClient(
-                UserContext.requireUid(), UserContext.getClientId(), request.getToken());
-        LogUtil.debug(OAuthController.class, "[OAuth] 吊销自定义令牌: clientId={}",
-                UserContext.getClientId());
-        return Result.success(null);
     }
 
     /**

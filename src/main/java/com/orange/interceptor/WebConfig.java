@@ -15,7 +15,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  *
  * <p>鉴权链路完全分离，互不纠缠：用户自助面（含配置、OAuth 客户端自助管理、
  * 第三方应用授权管理）只认用户会话并统一收口在 /user/** 下；
- * OAuth 资源接口（含自定义令牌查询 /oauth2/custom-tokens）只认 access_token，
+ * OAuth 资源接口只认 access_token，
  * client_id 均由各自登录上下文提供。
  * /oauth2 下其余端点为 OAuth 协议端点（authorize/consent/token/ticket/revoke），
  * 自带协议级认证，不在此注册；POST /oauth2/pat 同理凭请求体 refresh_token 认证，
@@ -61,15 +61,13 @@ public class WebConfig implements WebMvcConfigurer {
         //  /oauth2/config/** 为 OAuth 令牌版用户配置，
         //  /oauth2/schedule/** 为独立的排班接口，/oauth2/ak-accounts/** 为 OAuth 明日方舟游戏数据接口，
         //  /oauth2/ef-accounts/** 为 OAuth 终末地玩家数据接口，
-        //  /oauth2/ef-pool-records/** 为 OAuth 终末地寻访记录接口，
-        //  /oauth2/custom-tokens/** 为自定义令牌的查询与吊销，端点内部另校验客户端是否开通直连认证能力）
+        //  /oauth2/ef-pool-records/** 为 OAuth 终末地寻访记录接口）
         //  /oauth2/pat/list、/revoke 为个人访问令牌的应用视角查询与吊销，准入同上（direct_auth_enabled=1）；
         //  根路径 POST /oauth2/pat 凭请求体 refresh_token 签发，属协议级端点，单独从本拦截器排除
         registry.addInterceptor(oauthAuthInterceptor)
                 .addPathPatterns("/oauth2/userinfo", "/oauth2/profile/**", "/oauth2/config/**",
                         "/oauth2/schedule/**", "/oauth2/ak-accounts/**",
                         "/oauth2/ef-accounts/**", "/oauth2/ef-pool-records/**",
-                        "/oauth2/custom-tokens", "/oauth2/custom-tokens/**",
                         "/oauth2/pat", "/oauth2/pat/**")
                 .excludePathPatterns("/oauth2/pat");
         // PAT 消费面：只认个人访问令牌，按明文查 tlc_pat 后注入上下文

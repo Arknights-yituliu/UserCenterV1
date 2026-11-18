@@ -12,9 +12,13 @@ import java.time.LocalDateTime;
  * 用户自定义有效期的 access_token 签发记录实体（oauth_custom_token）
  *
  * <p>与 {@link OAuthGrant} 的区别：授权台账记录 refresh_token 且只存摘要；
- * 本表记录 {@code POST /user/oauth/custom-tokens} 或 {@code POST /oauth2/token/from-refresh}
- * 现场签发的短时 access_token，
- * 按需求 token 明文保存，供用户在「我的自定义令牌」页面查看。</p>
+ * 本表记录过去由直签端点现场签发的短时 access_token，按需求 token 明文保存。</p>
+ *
+ * <p><strong>遗留表</strong>：写入方与查询方（{@code /user/oauth/custom-tokens}、
+ * {@code /oauth2/custom-tokens}、{@code /oauth2/token/from-refresh}）已于 2026-11 下线，
+ * 新长期凭证改由 {@code /user/pat}、{@code /oauth2/pat} 的 PAT 承接。本实体现在只被
+ * {@code PatMigrationServiceImpl} 只读遍历（把未过期的旧令牌搬进 tlc_pat），
+ * 不再有新增写入；旧表导出归档后可随迁移端点一并删除。</p>
  *
  * @author UserCenter
  */

@@ -9,13 +9,10 @@ import com.orange.entity.dto.user.ChangeEmailRequest;
 import com.orange.entity.dto.user.ClientAuthorizationRevokeRequest;
 import com.orange.entity.dto.user.UpdatePasswordRequest;
 import com.orange.entity.dto.user.UpdateProfileRequest;
-import com.orange.entity.dto.user.UserCustomTokenRevokeRequest;
 import com.orange.entity.dto.user.UserScopeRequest;
 import com.orange.entity.vo.SessionVO;
 import com.orange.entity.vo.UserInfoVO;
 import com.orange.entity.vo.oauth.OAuthClientGrantGroupVO;
-import com.orange.entity.vo.oauth.OAuthCustomTokenVO;
-import com.orange.entity.vo.oauth.OAuthTokenVO;
 import com.orange.entity.vo.oauth.OAuthUserScopeVO;
 import com.orange.service.OAuthTokenService;
 import com.orange.service.UserService;
@@ -154,71 +151,6 @@ public class UserController {
     @GetMapping("/oauth/grants")
     public Result<List<OAuthClientGrantGroupVO>> listRefreshTokens() {
         return Result.success(oauthTokenService.listUserRefreshTokens(UserContext.requireUid()));
-    }
-
-    /**
-     * 查看我生成的自定义有效期 access_token 列表（含已过期记录）
-     *
-     * <p>对应「直签令牌」接口（POST /user/oauth/custom-tokens、POST /oauth2/token/from-refresh）签发的令牌；返回 token 明文，
-     * 过期与否由 {@code expiresInSeconds}（剩余秒数，≤0 即已过期）体现，不依赖定时任务。</p>
-     *
-     * @return 自定义令牌列表，按签发时间倒序
-     */
-    @Operation(summary = "查看我的自定义有效期令牌列表")
-    @GetMapping("/oauth/custom-tokens")
-    public Result<List<OAuthCustomTokenVO>> listCustomTokens() {
-        return Result.success(oauthTokenService.listUserCustomTokens(UserContext.requireUid()));
-    }
-
-    /**
-     * 使用当前登录会话直接签发指定有效期的自定义 access_token
-     *
-     * <p>面向本系统自有前端：登录态由 UserAuthInterceptor 从请求头会话解析并注入 UserContext，
-     * 因此无需在请求体回传会话令牌。权限基准为用户对目标应用的有效授权（受用户自定义授权范围约束）；
-     * 可选传 scope 做权限收敛，只能指定「凭证已有权限」的子集换取更小权限的短时令牌
-     * （最小权限实践），超出凭证范围会被拒绝，本接口不能用于扩权。</p>
-     *
-     * <p>name 为必填：签发成功后落一条自定义令牌记录，供用户在「我的自定义令牌」列表查看。</p>
-     *
-     * <p>目标应用可选：传其它 {@code client_id} 表示代该已登记应用签发；不传，或传保留标识
-     * {@code this_land_cloud}，则签成「用户个人令牌」（user 侧前端本身不注册 oauth client，
-     * 该标识直接放行、不查客户端表）。</p>
-     *
-     * @param clientId  目标客户端 ID（可选，不传即签为用户个人令牌）
-     * @param expiresIn 期望的 access_token 有效期（秒，必须大于 0）
-     * @param scope     期望收敛到的权限范围（英文逗号分隔，可空表示沿用凭证原范围）
-     * @param name      本次签发的名称（必填，不超过 50 字符）
-     * @return 新签发的 access_token
-     */
-    @Operation(summary = "使用当前登录会话签发自定义有效期令牌")
-    @PostMapping("/oauth/custom-tokens")
-    public Result<OAuthTokenVO> createCustomToken(
-            @RequestParam(value = "client_id", required = false) String clientId,
-            @RequestParam(value = "expires_in", required = false) Long expiresIn,
-            @RequestParam(value = "scope", required = false) String scope,
-            @RequestParam(value = "name", required = false) String name) {
-        OAuthTokenVO vo = oauthTokenService.issueAccessTokenFromSession(
-                UserContext.requireUid(), clientId, expiresIn, scope, name);
-        LogUtil.debug(UserController.class, "[OAuth] 会话直签 access_token: uid={}, expiresIn={}s",
-                UserContext.getUid(), vo.getExpiresIn());
-        return Result.success(vo);
-    }
-
-    /**
-     * 吊销（删除并失效）我的一条自定义有效期令牌
-     *
-     * <p>token 明文放在请求体中。令牌会立即从 Redis 失效，并删除对应签发记录使其从
-     * 「我的自定义令牌」列表中移除。归属只按当前登录用户 uid 限定，可跨应用吊销自己
-     * 名下任意一条令牌；幂等，令牌不存在或不属于自己都视为成功。</p>
-     *
-     * @param request 吊销请求（token 明文）
-     * @return 空结果
-     */
-    @Operation(summary = "吊销我的自定义有效期令牌")
-    @PostMapping("/oauth/custom-tokens/revoke")
-    public Result<Void> revokeCustomToken(@Valid @RequestBody UserCustomTokenRevokeRequest request) {
-        oauthTokenService.revokeUserCustomToken(UserContext.requireUid(), request.getToken());
-        return Result.success(null);
     }
 
     /**

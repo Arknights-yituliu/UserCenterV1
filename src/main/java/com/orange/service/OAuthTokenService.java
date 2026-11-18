@@ -2,7 +2,6 @@ package com.orange.service;
 
 import com.orange.entity.vo.oauth.ConsentInfoVO;
 import com.orange.entity.vo.oauth.LoginTicketVO;
-import com.orange.entity.vo.oauth.OAuthCustomTokenVO;
 import com.orange.entity.vo.oauth.OAuthTokenVO;
 import com.orange.entity.vo.oauth.OAuthUserScopeVO;
 import com.orange.entity.vo.oauth.OAuthClientGrantGroupVO;
@@ -139,52 +138,9 @@ public interface OAuthTokenService {
     OAuthTokenVO issueToken(String grantType, String clientId, String clientSecret,
                             String code, String redirectUri, String codeVerifier, String refreshToken);
     /**
-     * 为当前登录用户（uid 由认证上下文提供）直接签发指定有效期的 OAuth access_token。
-     *
-     * <p>权限基准取用户对目标应用的有效授权（受用户自定义授权范围约束）。
-     * 可选携带 scope 做「只减不增」的权限收敛（最小权限）：请求集合必须落在凭证已有范围之内，
-     * 超出凭证范围会被拒绝，本接口不能用于扩权。</p>
-     *
-     * <p>签发成功后按 name 落一条自定义令牌记录（oauth_custom_token），供用户在
-     * 「我的自定义令牌」列表中查看；因此 name 为必填。</p>
-     *
-     * @param uid              登录用户 uid（来自用户会话认证上下文）
-     * @param clientId         目标客户端 ID（可选）：传其它值表示代该应用签发，须已登记、启用且已审批
-     *                         （否则 90001/90013）；传空或保留标识 {@code this_land_cloud} 表示签成
-     *                         「用户个人令牌」，该标识直接放行、不查 oauth_client，
-     *                         权限上限取系统可自助范围（不含 all）
-     * @param expiresInSeconds access_token 有效期（秒）
-     * @param scope            期望收敛到的权限范围（英文逗号分隔，可空表示沿用凭证原范围）
-     * @param name             本次签发的名称（必填，不超过 50 字符）
-     * @return 新签发的 access_token
-     */
-    OAuthTokenVO issueAccessTokenFromSession(Long uid, String clientId,
-                                             Long expiresInSeconds, String scope, String name);
-
-    /**
-     * 使用已有的 OAuth refresh_token 直接签发指定有效期的 OAuth access_token。
-     *
-     * <p>权限范围直接沿用刷新令牌记录中的 scope（不重新计算用户自定义授权范围），
-     * 可选携带 scope 做「只减不增」的权限收敛（最小权限），超出凭证范围会被拒绝。
-     * 本调用<strong>不消费、不轮转</strong>刷新令牌，原凭证保持有效。</p>
-     *
-     * <p>签发成功后按 name 落一条自定义令牌记录（oauth_custom_token），供用户在自己的
-     * 「自定义令牌」列表中查看；因此 name 为必填。</p>
-     *
-     * @param refreshToken     已存在的 OAuth refresh_token（必填）
-     * @param clientId         可选，传入时必须与刷新令牌归属的客户端一致
-     * @param expiresInSeconds access_token 有效期（秒）
-     * @param scope            期望收敛到的权限范围（英文逗号分隔，可空表示沿用凭证原范围）
-     * @param name             本次签发的名称（必填，不超过 50 字符）
-     * @return 新签发的 access_token
-     */
-    OAuthTokenVO issueAccessTokenFromRefreshToken(String refreshToken, String clientId,
-                                                  Long expiresInSeconds, String scope, String name);
-
-    /**
      * 解析一枚仍有效的 OAuth refresh_token，返回其主体（uid / clientId / scope / familyId）。
      *
-     * <p>与 {@link #issueAccessTokenFromRefreshToken} 使用同一份 Redis 记录与校验口径：
+     * <p>refresh_token 本身仍是 Redis 中的热数据，本方法只负责按明文读取并解析：
      * 不消费、不轮转凭证，也不检查轮转墓碑（沿用现有直签行为，凭证删 key 即失效）。
      * 本方法只负责解析，客户端启用状态与直连认证准入由调用方按需追加校验。</p>
      *
@@ -205,65 +161,6 @@ public interface OAuthTokenService {
      * @return 最终权限串
      */
     String resolveSelfIssuedScopeWithin(String heldScope, String requestedScope);
-
-    /**
-     * 查询当前用户签发的全部自定义有效期 access_token（用户自助，含已过期记录）
-     *
-     * <p>数据来自 oauth_custom_token 表，按签发时间倒序；过期与否由返回的
-     * {@code expiresInSeconds}（剩余秒数，≤0 即已过期）体现，不依赖定时任务清理。</p>
-     *
-     * @param uid 用户 uid
-     * @return 自定义令牌列表（含应用名称、权限范围与剩余有效期）
-     */
-    List<OAuthCustomTokenVO> listUserCustomTokens(Long uid);
-
-    /**
-     * 查询指定用户在指定应用（OAuth 客户端）下签发的自定义有效期 access_token
-     *
-     * <p>供 OAuth 侧查询使用：调用方以该应用的 access_token 访问，只能看到自己 client_id
-     * 名下的记录。入口处会校验该应用是否已开通直连认证能力（{@code direct_auth_enabled=1}），
-     * 未开通抛 {@link com.orange.common.enums.ResultCode#OAUTH_DIRECT_AUTH_NOT_ALLOWED}；
-     * 该能力仅授予管理员显式开通的机密客户端，公共客户端与未审批应用无法调用。</p>
-     *
-     * @param uid      用户 uid（由 access_token 解析得出）
-     * @param clientId 目标应用（OAuth 客户端）ID（由 access_token 解析得出）
-     * @return 该应用下的自定义令牌列表（含已过期记录），按签发时间倒序
-     */
-    List<OAuthCustomTokenVO> listUserCustomTokensByClient(Long uid, String clientId);
-
-    /**
-     * 吊销（删除并失效）本应用为当前用户签发的一条自定义有效期 access_token（OAuth 侧）。
-     *
-     * <p>「吊销令牌」与「删除记录」一步完成：先从 Redis 删除该 access_token 使其立即失效，
-     * 并摘除 uid 反向索引中的残留成员；再删除 oauth_custom_token 表中的签发记录，
-     * 使其从自定义令牌列表中消失。</p>
-     *
-     * <p>归属由 uid（令牌记录的持有用户）+ clientId（调用方应用）双重限定：调用方只能
-     * 吊销本应用为该用户签发的令牌，凭 token 字符串无法跨用户、跨应用越权吊销。准入同
-     * {@link #listUserCustomTokensByClient}，要求客户端已开通直连认证能力。</p>
-     *
-     * <p>幂等：令牌不存在、已过期或记录不存在，都视为吊销成功，不抛异常。</p>
-     *
-     * @param uid      用户 uid（由 access_token 解析得出）
-     * @param clientId 调用方应用（OAuth 客户端）ID（由 access_token 解析得出）
-     * @param token    待吊销的自定义 access_token 明文
-     */
-    void revokeCustomTokenByClient(Long uid, String clientId, String token);
-
-    /**
-     * 吊销（删除并失效）当前用户名下任意一条自定义有效期 access_token（用户自助侧）。
-     *
-     * <p>「吊销令牌」与「删除记录」一步完成，与 {@link #revokeCustomTokenByClient} 行为一致，
-     * 差异仅在归属口径：用户是自己所有令牌的归属者，只按 uid 限定即可跨应用吊销名下任意一条，
-     * 无须指明 client_id，也不要求来源应用开通直连认证能力。典型用于用户在「我的自定义令牌」
-     * 列表里主动作废一条自签令牌。</p>
-     *
-     * <p>幂等：令牌不存在、已过期或记录不存在，都视为吊销成功，不抛异常。</p>
-     *
-     * @param uid   登录用户 uid（来自用户会话认证上下文）
-     * @param token 待吊销的自定义 access_token 明文
-     */
-    void revokeUserCustomToken(Long uid, String token);
 
     /**
      * 直连登录兑换令牌：为已完成客户端认证与直连权限校验的用户无条件签发

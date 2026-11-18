@@ -14,13 +14,11 @@ import com.orange.common.util.RedisKeyUtil;
 import com.orange.common.util.RequestUtil;
 import com.orange.entity.dto.SessionInfo;
 import com.orange.entity.po.OAuthClient;
-import com.orange.entity.po.OAuthCustomToken;
 import com.orange.entity.po.OAuthGrant;
 import com.orange.entity.po.OAuthUserScope;
 import com.orange.entity.po.UserInfo;
 import com.orange.entity.vo.oauth.ConsentInfoVO;
 import com.orange.entity.vo.oauth.LoginTicketVO;
-import com.orange.entity.vo.oauth.OAuthCustomTokenVO;
 import com.orange.entity.vo.oauth.OAuthTokenVO;
 import com.orange.entity.vo.oauth.OAuthClientGrantGroupVO;
 import com.orange.entity.vo.oauth.OAuthGrantItemVO;
@@ -29,7 +27,6 @@ import com.orange.entity.vo.oauth.RefreshGrantVO;
 import com.orange.entity.vo.oauth.ScopeItemVO;
 import com.orange.entity.vo.oauth.UserInfoVO;
 import com.orange.mapper.OAuthClientMapper;
-import com.orange.mapper.OAuthCustomTokenMapper;
 import com.orange.mapper.OAuthGrantMapper;
 import com.orange.mapper.OAuthUserScopeMapper;
 import com.orange.mapper.UserInfoMapper;
@@ -92,23 +89,6 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     /** uid 反向索引中 refresh_token 成员前缀 */
     private static final String OAUTH_REFRESH_MEMBER_PREFIX = "refresh:";
 
-    /**
-     * 「用户个人令牌」使用的保留客户端标识
-     *
-     * <p>user 侧前端不注册 oauth client，但令牌记录必须以 client_id 作为归属与数据隔离维度，
-     * 因此用该保留值承载：它不落 oauth_client 表，也不参与任何按应用的授权流程。
-     * 管理员不得创建同名真实客户端，避免归属歧义。</p>
-     */
-    public static final String USER_SELF_CLIENT_ID = "this_land_cloud";
-
-    /**
-     * 直签令牌有效期上限：10 年零 1 个月
-     *
-     * <p>按 365 天/年、31 天/月折算：{@code (365 × 10 + 31) 天 = 3681 天 = 318038400 秒}。
-     * 直签令牌是跨系统长期凭证，必须有一个硬上限，否则等同于可签发永久凭证。</p>
-     */
-    private static final long MAX_DIRECT_ISSUE_TTL_SECONDS = (365L * 10 + 31) * 24 * 60 * 60;
-
     /** 反向索引惰性清理触发概率分母（每签发 1/100 概率触发一次） */
     private static final int GRANT_INDEX_CLEANUP_PROBABILITY = 100;
 
@@ -121,7 +101,6 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     private final OAuthClientMapper oauthClientMapper;
     private final OAuthGrantMapper oauthGrantMapper;
     private final OAuthUserScopeMapper oauthUserScopeMapper;
-    private final OAuthCustomTokenMapper oauthCustomTokenMapper;
     private final UserInfoMapper userInfoMapper;
     private final StringRedisTemplate stringRedisTemplate;
     private final ObjectMapper objectMapper;
@@ -136,7 +115,6 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      * @param oauthClientMapper    OAuth 客户端 Mapper
      * @param oauthGrantMapper     授权台账 Mapper
      * @param oauthUserScopeMapper 用户自定义授权范围 Mapper
-     * @param oauthCustomTokenMapper 自定义有效期令牌记录 Mapper
      * @param userInfoMapper       用户表 Mapper（userinfo 组装用户资料）
      * @param stringRedisTemplate  Redis 客户端
      * @param objectMapper         JSON 序列化器
@@ -145,14 +123,12 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      */
     public OAuthTokenServiceImpl(OAuthClientMapper oauthClientMapper, OAuthGrantMapper oauthGrantMapper,
                                  OAuthUserScopeMapper oauthUserScopeMapper,
-                                 OAuthCustomTokenMapper oauthCustomTokenMapper,
                                  UserInfoMapper userInfoMapper,
                                  StringRedisTemplate stringRedisTemplate, ObjectMapper objectMapper,
                                  OAuthTokenStore oauthTokenStore, OAuthProperties oauthProperties) {
         this.oauthClientMapper = oauthClientMapper;
         this.oauthGrantMapper = oauthGrantMapper;
         this.oauthUserScopeMapper = oauthUserScopeMapper;
-        this.oauthCustomTokenMapper = oauthCustomTokenMapper;
         this.userInfoMapper = userInfoMapper;
         this.stringRedisTemplate = stringRedisTemplate;
         this.objectMapper = objectMapper;
@@ -906,85 +882,6 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     }
 
     /**
-     * 为当前登录用户（uid 由认证上下文提供）直接签发指定有效期的 access_token。
-     *
-     * <p>权限基准取用户对目标应用的有效授权（受用户自定义授权范围约束），
-     * 可选传 scope 收敛为子集，超出即拒绝（防提权）。</p>
-     *
-     * <p>目标应用：传入其它 {@code clientId} 表示「代某个已登记应用签发」，会校验该应用存在、启用且已审批；
-     * 不传、或传保留标识 {@link #USER_SELF_CLIENT_ID}，则签成「用户个人令牌」——user 侧前端本身不注册
-     * oauth client，该标识直接放行、不查 {@code oauth_client}，权限上限为系统可自助范围（不含 {@code all}）。
-     * 注意与登录来源客户端无关：{@code UC-Client-Id} 只表示从哪个前端登录，不参与令牌归属。</p>
-     *
-     * <p>元范围 {@code all} 不允许自助签发（应用登记了 all 时必须显式用 scope 收窄），
-     * 避免终端用户绕过管理员授权拿到平台级全权限令牌。</p>
-     */
-    @Override
-    public OAuthTokenVO issueAccessTokenFromSession(Long uid, String requestedClientId,
-                                                    Long expiresInSeconds, String requestedScope, String name) {
-        String trimmedName = validateDirectIssueParams(expiresInSeconds, name);
-        if (uid == null) {
-            throw new BusinessException(ResultCode.NOT_LOGIN);
-        }
-        // 保留标识或空缺 → 用户个人令牌，直接放行、不查 oauth_client；
-        // 其它值 → 代该应用签发，查表校验启用+审批。
-        String targetClientId = requestedClientId == null ? null : requestedClientId.trim();
-        boolean personalToken = !StringUtils.hasText(targetClientId)
-                || USER_SELF_CLIENT_ID.equals(targetClientId);
-        OAuthClient client = personalToken ? userSelfClient() : requireEnabledClient(targetClientId);
-        String heldScope = resolveGrantScope(client, null, uid);
-        // 先按请求收敛（只减不增），再对最终范围做策略校验
-        String finalScope = StringUtils.hasText(requestedScope)
-                ? narrowScope(heldScope, requestedScope)
-                : heldScope;
-        // 自助签发不接受元范围 all：all 代表平台级可信应用（管理员手工授予），
-        // 若允许用户自助领取，审计上无法区分「管理员授权」与「用户自签」。
-        // 应用登记了 all 时，用户必须显式用 scope 收窄到具体范围。
-        if (splitScopes(finalScope).contains(OAuthScope.ALL.getCode())) {
-            throw new BusinessException(ResultCode.OAUTH_SCOPE_INVALID,
-                    "不支持自助签发全权限令牌（all），请通过 scope 参数指定具体权限");
-        }
-        return issueCustomAccessToken(uid, client, finalScope, null, expiresInSeconds, null, trimmedName);
-    }
-
-    /**
-     * 构造「用户个人令牌」的承载客户端（内存对象，不查库、不落库）
-     *
-     * <p>登记范围取系统可自助范围 {@link OAuthScope#selectable()}，天然不含元范围
-     * {@code all}，因此个人令牌的权限上限就是"用户可自助授予的全部具体权限"，
-     * 再叠加请求 scope 做只减不增的收敛。</p>
-     *
-     * @return 承载保留客户端标识的临时客户端对象
-     */
-    private OAuthClient userSelfClient() {
-        OAuthClient client = new OAuthClient();
-        client.setId(USER_SELF_CLIENT_ID);
-        client.setScopes(String.join(",", selectableScopeCodes()));
-        return client;
-    }
-
-    /**
-     * 使用已有 refresh_token 直接签发指定有效期的 access_token。
-     *
-     * <p>权限直接沿用刷新令牌记录中的 scope，不重新计算用户自定义授权范围；
-     * 可选传 scope 收敛为子集，超出即拒绝（防提权）。本调用不消费、不轮转刷新令牌。</p>
-     */
-    @Override
-    public OAuthTokenVO issueAccessTokenFromRefreshToken(String refreshToken, String requestedClientId,
-                                                         Long expiresInSeconds, String requestedScope, String name) {
-        String trimmedName = validateDirectIssueParams(expiresInSeconds, name);
-        RefreshTokenPrincipal principal = resolveRefreshToken(refreshToken);
-        // 请求带了 client_id 时必须与令牌归属一致，防止跨应用换发
-        if (StringUtils.hasText(requestedClientId)
-                && !Objects.equals(requestedClientId.trim(), principal.getClientId())) {
-            throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID, "刷新令牌与客户端不匹配");
-        }
-        OAuthClient client = requireEnabledClient(principal.getClientId());
-        return issueCustomAccessToken(principal.getUid(), client, principal.getScope(),
-                principal.getFamilyId(), expiresInSeconds, requestedScope, trimmedName);
-    }
-
-    /**
      * 解析一枚仍有效的 refresh_token（与直签 access_token 共用同一份 Redis 记录与校验口径）
      *
      * <p>只做解析，不校验客户端启用状态与直连认证准入，也不消费/轮转凭证——这些由各调用方
@@ -1043,209 +940,6 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
                     "凭证未授予任何可自助签发的权限");
         }
         return String.join(",", granted);
-    }
-
-    /**
-     * 校验直签接口的公共参数（有效期与名称）
-     *
-     * <p>有效期设上限：直签令牌是跨系统长期凭证，无上限等于可签发事实永久凭证；
-     * 同时避免 {@code LocalDateTime.plusSeconds} 在极端入参下溢出。</p>
-     *
-     * @param expiresInSeconds 期望有效期（秒）
-     * @param name             本次签发的名称
-     * @return 去空白后的名称
-     */
-    private String validateDirectIssueParams(Long expiresInSeconds, String name) {
-        if (expiresInSeconds == null || expiresInSeconds <= 0) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "expires_in 必须为大于 0 的秒数");
-        }
-        if (expiresInSeconds > MAX_DIRECT_ISSUE_TTL_SECONDS) {
-            throw new BusinessException(ResultCode.PARAM_ERROR,
-                    "expires_in 不能超过 " + MAX_DIRECT_ISSUE_TTL_SECONDS + " 秒（10 年零 1 个月）");
-        }
-        String trimmedName = name == null ? null : name.trim();
-        if (!StringUtils.hasText(trimmedName)) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "name 不能为空");
-        }
-        if (trimmedName.length() > 50) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "name 长度不能超过 50");
-        }
-        return trimmedName;
-    }
-
-    /**
-     * 直签接口公共签发核心：按凭证确定的身份与范围落一条短时 access_token
-     *
-     * <p>请求携带 scope 时在凭证已有范围内做「只减不增」收敛；随后写入 Redis、
-     * 登记反向索引、按需挂入令牌家族，并落库自定义令牌记录（失败不阻断签发）。</p>
-     *
-     * @param uid              签发用户 uid
-     * @param client           目标客户端
-     * @param heldScope        凭证已有权限范围
-     * @param familyId         令牌家族 ID（仅 refresh_token 路径可能非空，无则传 null）
-     * @param expiresInSeconds access_token 有效期（秒）
-     * @param requestedScope   期望收敛到的权限范围（可空表示沿用凭证原范围）
-     * @param name             本次签发的名称（已去空白且校验通过）
-     * @return 新签发的 access_token 响应
-     */
-    private OAuthTokenVO issueCustomAccessToken(Long uid, OAuthClient client, String heldScope, String familyId,
-                                                Long expiresInSeconds, String requestedScope, String name) {
-        String scope = heldScope;
-        // 请求收敛时替换为子集：只允许在凭证已有范围内缩小，超出即拒绝（防提权）
-        if (StringUtils.hasText(requestedScope)) {
-            scope = narrowScope(heldScope, requestedScope);
-        }
-
-        String accessToken = OAuthUtil.generateToken();
-        writeJson(RedisKeyUtil.oauthAccess(accessToken), createAccessRecord(client, uid, scope), expiresInSeconds);
-        stringRedisTemplate.opsForSet().add(
-                RedisKeyUtil.uidOauth(uid), OAUTH_ACCESS_MEMBER_PREFIX + accessToken);
-        addFamilyMember(familyId, OAUTH_ACCESS_MEMBER_PREFIX + accessToken, expiresInSeconds);
-        maybeCleanupExpiredGrantMembers(uid);
-        // 落库自定义令牌记录：供用户在「我的自定义令牌」列表回看，失败不阻断签发
-        recordCustomToken(uid, client, accessToken, scope, expiresInSeconds, name);
-        LogUtil.debug(OAuthTokenServiceImpl.class,
-                "[OAuth] 凭证直接签发 access_token: clientId={}, uid={}, expiresIn={}s",
-                client.getId(), uid, expiresInSeconds);
-        return buildTokenResponse(accessToken, null, expiresInSeconds, scope);
-    }
-
-    /**
-     * 记录一条用户自定义有效期 access_token 到 oauth_custom_token 表
-     *
-     * <p>令牌本身仍以 Redis 为权威（TTL 由 Redis 控制）；本表只是查询投影，
-     * 写入失败不阻断签发，只记录告警，避免数据库故障拖垮核心令牌流程。</p>
-     *
-     * @param uid       签发用户 uid
-     * @param client    目标客户端
-     * @param token     access_token 明文
-     * @param scope     本次令牌携带的权限范围
-     * @param ttlSeconds 有效期（秒）
-     * @param name      用户为本次签发起的名称
-     */
-    private void recordCustomToken(Long uid, OAuthClient client, String token, String scope,
-                                   long ttlSeconds, String name) {
-        try {
-            OAuthCustomToken record = new OAuthCustomToken();
-            record.setUid(uid);
-            record.setClientId(client.getId());
-            record.setName(name);
-            record.setToken(token);
-            record.setScope(scope);
-            record.setExpiresIn(ttlSeconds);
-            record.setExpireTime(LocalDateTime.now().plusSeconds(ttlSeconds));
-            oauthCustomTokenMapper.insert(record);
-        } catch (Exception e) {
-            LogUtil.warn(OAuthTokenServiceImpl.class, "[OAuth] 写入自定义令牌记录失败: uid={}, clientId={}",
-                    uid, client.getId(), e);
-        }
-    }
-
-    /**
-     * 查询当前用户签发的全部自定义有效期 access_token（含已过期记录）
-     *
-     * @param uid 用户 uid
-     * @return 自定义令牌列表，按签发时间倒序
-     */
-    @Override
-    public List<OAuthCustomTokenVO> listUserCustomTokens(Long uid) {
-        List<OAuthCustomTokenVO> tokens = oauthCustomTokenMapper.selectByUid(uid);
-        return tokens == null ? Collections.emptyList() : tokens;
-    }
-
-    /**
-     * 查询指定用户在指定应用下签发的自定义有效期 access_token（含已过期记录）
-     *
-     * <p>供 OAuth 侧查询使用，做两层约束：</p>
-     * <ol>
-     *   <li>准入：客户端必须启用、已审批且已开通直连认证能力（{@code direct_auth_enabled=1}）。
-     *       该能力只授予管理员显式开通的机密客户端，公共客户端与未审批应用一律 90014/90013，
-     *       避免任意第三方应用凭普通 access_token 收割用户的自定义令牌明文；</li>
-     *   <li>过滤：强制按 clientId 过滤，调用方只能读取自己名下的签发记录。</li>
-     * </ol>
-     *
-     * @param uid      用户 uid
-     * @param clientId 目标应用（OAuth 客户端）ID
-     * @return 该应用下的自定义令牌列表，按签发时间倒序
-     */
-    @Override
-    public List<OAuthCustomTokenVO> listUserCustomTokensByClient(Long uid, String clientId) {
-        if (uid == null || !StringUtils.hasText(clientId)) {
-            return Collections.emptyList();
-        }
-        requireDirectAuthEnabledClient(clientId);
-        List<OAuthCustomTokenVO> tokens = oauthCustomTokenMapper.selectByUidAndClientId(uid, clientId);
-        return tokens == null ? Collections.emptyList() : tokens;
-    }
-
-    /**
-     * 吊销（删除并失效）本应用为当前用户签发的一条自定义有效期 access_token（OAuth 侧）
-     *
-     * <p>先校验来源应用已开通直连认证能力，再委托 {@link #doRevokeCustomToken} 完成吊销。
-     * 归属限定为 uid + clientId：调用方只能吊销本应用为该用户签发的令牌。</p>
-     *
-     * @param uid      用户 uid（由 access_token 解析）
-     * @param clientId 调用方应用 ID（由 access_token 解析）
-     * @param token    待吊销的 access_token 明文
-     */
-    @Override
-    public void revokeCustomTokenByClient(Long uid, String clientId, String token) {
-        if (uid == null || !StringUtils.hasText(clientId) || !StringUtils.hasText(token)) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "token 不能为空");
-        }
-        requireDirectAuthEnabledClient(clientId);
-        doRevokeCustomToken(uid, clientId, token);
-        LogUtil.debug(OAuthTokenServiceImpl.class,
-                "[OAuth] 吊销自定义令牌: uid={}, clientId={}", uid, clientId);
-    }
-
-    /**
-     * 吊销（删除并失效）当前用户名下任意一条自定义有效期 access_token（用户自助侧）
-     *
-     * <p>用户是自身所有令牌的归属者，不限定来源应用、也不做直连认证能力校验，直接委托
-     * {@link #doRevokeCustomToken}（clientId 传 null 表示不限应用）。</p>
-     *
-     * @param uid   登录用户 uid（来自用户会话认证上下文）
-     * @param token 待吊销的 access_token 明文
-     */
-    @Override
-    public void revokeUserCustomToken(Long uid, String token) {
-        if (uid == null || !StringUtils.hasText(token)) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "token 不能为空");
-        }
-        doRevokeCustomToken(uid, null, token);
-        LogUtil.debug(OAuthTokenServiceImpl.class, "[OAuth] 用户自助吊销自定义令牌: uid={}", uid);
-    }
-
-    /**
-     * 吊销自定义令牌的共用实现：先失效 Redis 令牌，再删除数据库签发记录
-     *
-     * <p>先失效 Redis 中的令牌，再删除数据库签发记录，顺序与 revokeClientAuthorization 一致：
-     * Redis 删除即吊销立即生效，随后清掉台账记录使其从列表消失。归属一律以 uid 限定；
-     * clientId 非空时再叠加应用限定（OAuth 侧防跨应用越权），为空表示不限应用（用户自助侧）。
-     * 任一环节无命中都按幂等成功处理。</p>
-     *
-     * @param uid      令牌归属用户 uid
-     * @param clientId 应用限定；为 null 时表示不限定应用
-     * @param token    待吊销的 access_token 明文
-     */
-    private void doRevokeCustomToken(Long uid, String clientId, String token) {
-        String trimmedToken = token.trim();
-        // 1. 失效 Redis 中的令牌：确认记录归属该用户（及指定应用），否则不触碰
-        Map<String, Object> record = readJsonMap(RedisKeyUtil.oauthAccess(trimmedToken));
-        if (record != null
-                && Objects.equals(uid, numberToLong(record.get("uid")))
-                && (clientId == null || Objects.equals(clientId, record.get("clientId")))) {
-            stringRedisTemplate.delete(RedisKeyUtil.oauthAccess(trimmedToken));
-            stringRedisTemplate.opsForSet().remove(
-                    RedisKeyUtil.uidOauth(uid), OAUTH_ACCESS_MEMBER_PREFIX + trimmedToken);
-        }
-        // 2. 删除签发记录：未命中（不存在/非本人/非指定应用）也幂等成功
-        if (clientId == null) {
-            oauthCustomTokenMapper.deleteByUidAndToken(uid, trimmedToken);
-        } else {
-            oauthCustomTokenMapper.deleteByUidAndClientIdAndToken(uid, clientId, trimmedToken);
-        }
     }
 
     /**
@@ -1780,7 +1474,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     /**
      * 权限收敛：把请求范围限制在凭证已有范围之内（只减不增）。
      *
-     * <p>用于直签接口（{@code /user/oauth/custom-tokens}、{@code /oauth2/token/from-refresh}）的最小权限场景：调用方可指定一个子集换取更小权限的
+     * <p>用于按凭证签发短期令牌时的最小权限场景（PAT 签发、授权确认页裁剪）：调用方可指定一个子集换取更小权限的
      * 短时 access_token，但不能借此扩大权限。凭证范围为元范围 {@code all} 时视为覆盖全部已知权限。
      * 范围存在上下级关系，凭证持有上级范围（如 {@code gama-data.read}）时可收敛为其子范围
      * （如 {@code ak-data.read}），判断见 {@link OAuthScope#covers(String, OAuthScope)}。</p>
