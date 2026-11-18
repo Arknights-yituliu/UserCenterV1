@@ -5,7 +5,7 @@ import com.orange.entity.vo.pat.PatMigrationResultVO;
 import com.orange.service.PatMigrationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -45,10 +45,13 @@ public class PatMigrationController {
     /**
      * 触发一次全量迁移（幂等，重复调用不会翻倍）
      *
+     * <p>用 GET 而非 POST：本端点无请求体、无副作用参数，运维在浏览器地址栏直接访问即可触发，
+     * 不必准备 curl 或表单。副作用（搬数据、删旧 key）由路径语义承担，不靠 HTTP 方法表达。</p>
+     *
      * @return 迁移统计
      */
     @Operation(summary = "触发旧自定义令牌迁移（一次性运维，用完即删）")
-    @PostMapping("/run")
+    @GetMapping("/run")
     public Result<PatMigrationResultVO> run() {
         return Result.success(patMigrationService.run());
     }

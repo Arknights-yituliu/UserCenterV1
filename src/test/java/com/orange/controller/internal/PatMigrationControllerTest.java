@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -28,7 +28,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 决定钉住：容器里没有配置任何属性，Controller 仍必须是可取的 Bean；若有人把开关加回去，用例会
  * 在 {@code getBean} 处失败。</p>
  *
- * <p>第二个用例只验证「无参数 POST → 200 + 统计字段」这一层契约，迁移本身的行为在
+ * <p>第二个用例只验证「无参数 GET → 200 + 统计字段」这一层契约，迁移本身的行为在
  * {@code PatMigrationServiceImpl} 里，与 MVC 无关。</p>
  *
  * @author UserCenter
@@ -71,7 +71,7 @@ class PatMigrationControllerTest {
         vo.setElapsedMs(8421L);
         when(patMigrationService.run()).thenReturn(vo);
 
-        mockMvc.perform(post("/internal/pat-migration/run"))
+        mockMvc.perform(get("/internal/pat-migration/run"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.total").value(20413))
