@@ -175,27 +175,27 @@
 
 | API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
 |---|---|---|---|---|
-| `/oauth2/ak-accounts` | GET | 是 | OAuth access_token + `ak-data.read` scope | 查询当前 OAuth 用户可用的数据来源列表（森空岛账号 + 手动上传，含来源标识）。 |
-| `/oauth2/ak-accounts/operators` | GET | 是 | OAuth access_token + `ak-data.read` scope | 全量读取干员数据：`akUid` 必填，`source` 可选（`manual` / `skland`），不传时按 `akUid` 是否等于当前令牌用户 UID 自动识别手动条目。响应仅允许私人缓存且每次回源校验。 |
-| `/oauth2/ak-accounts/operators/save` | POST | 是 | OAuth access_token + `ak-data.write` scope | 批量保存角色信息、干员数据与物品存量，目标账号取自请求体 playerInfo.akUid。 |
-| `/oauth2/ak-accounts/manual-operators/save` | POST | 是 | OAuth access_token + `ak-data.write` scope | 保存当前令牌用户本人的手动修改版干员数据，有则比较更新，无则新增。 |
+| `/oauth2/ak-accounts` | GET | 是 | OAuth access_token + `arknights-data.read` scope | 查询当前 OAuth 用户可用的数据来源列表（森空岛账号 + 手动上传，含来源标识）。 |
+| `/oauth2/ak-accounts/operators` | GET | 是 | OAuth access_token + `arknights-data.read` scope | 全量读取干员数据：`akUid` 必填，`source` 可选（`manual` / `skland`），不传时按 `akUid` 是否等于当前令牌用户 UID 自动识别手动条目。响应仅允许私人缓存且每次回源校验。 |
+| `/oauth2/ak-accounts/operators/save` | POST | 是 | OAuth access_token + `arknights-data.write` scope | 批量保存角色信息、干员数据与物品存量，目标账号取自请求体 playerInfo.akUid。 |
+| `/oauth2/ak-accounts/manual-operators/save` | POST | 是 | OAuth access_token + `arknights-data.write` scope | 保存当前令牌用户本人的手动修改版干员数据，有则比较更新，无则新增。 |
 
 ### 终末地玩家数据（`/oauth2/ef-accounts/**`）
 
 | API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
 |---|---|---|---|---|
-| `/oauth2/ef-accounts` | GET | 是 | OAuth access_token + `ef-data.read` scope | 查询当前令牌用户已绑定的终末地角色列表（不含玩家数据正文），按最近导入时间倒序。 |
-| `/oauth2/ef-accounts/player-data` | GET | 是 | OAuth access_token + `ef-data.read` scope | 不传参数默认读取已绑定角色中最新导入的玩家数据；也可传 `roleId`、可选 `serverId` 指定角色，须已绑定到令牌用户；无可用默认数据返回 `10002`；响应 Cache-Control 为 private, no-cache。 |
-| `/oauth2/ef-accounts/player-data/save` | POST | 是 | OAuth access_token + `ef-data.write` scope | 保存终末地玩家数据：整份 JSON 文本直接落库，已有则覆盖，首次上传同时建立角色绑定。 |
+| `/oauth2/ef-accounts` | GET | 是 | OAuth access_token + `endfield-data.read` scope | 查询当前令牌用户已绑定的终末地角色列表（不含玩家数据正文），按最近导入时间倒序。 |
+| `/oauth2/ef-accounts/player-data` | GET | 是 | OAuth access_token + `endfield-data.read` scope | 不传参数默认读取已绑定角色中最新导入的玩家数据；也可传 `roleId`、可选 `serverId` 指定角色，须已绑定到令牌用户；无可用默认数据返回 `10002`；响应 Cache-Control 为 private, no-cache。 |
+| `/oauth2/ef-accounts/player-data/save` | POST | 是 | OAuth access_token + `endfield-data.write` scope | 保存终末地玩家数据：整份 JSON 文本直接落库，已有则覆盖，首次上传同时建立角色绑定。 |
 
 ### 终末地寻访记录（`/oauth2/ef-pool-records/**`）
 
 | API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
 |---|---|---|---|---|
-| `/oauth2/ef-pool-records/create-task` | POST | 是 | OAuth access_token + `ef-data.write` scope | 创建寻访记录导入任务，任务归属取令牌用户 uid，返回 taskId 供轮询。 |
-| `/oauth2/ef-pool-records/check-task` | GET | 是 | OAuth access_token + `ef-data.read` scope | 查询任务状态，仅任务创建者可见，完成时返回 uid / roleId / nickName。 |
-| `/oauth2/ef-pool-records/accounts` | GET | 是 | OAuth access_token + `ef-data.read` scope | 查询当前令牌用户导入过寻访记录的终末地账户列表，按导入时间倒序。 |
-| `/oauth2/ef-pool-records/record` | GET | 是 | OAuth access_token + `ef-data.read` scope | 按 `roleId` 读取干员与武器寻访记录，须已绑定当前令牌用户；响应 Cache-Control 为 private, no-cache。 |
+| `/oauth2/ef-pool-records/create-task` | POST | 是 | OAuth access_token + `endfield-data.write` scope | 创建寻访记录导入任务，任务归属取令牌用户 uid，返回 taskId 供轮询。 |
+| `/oauth2/ef-pool-records/check-task` | GET | 是 | OAuth access_token + `endfield-data.read` scope | 查询任务状态，仅任务创建者可见，完成时返回 uid / roleId / nickName。 |
+| `/oauth2/ef-pool-records/accounts` | GET | 是 | OAuth access_token + `endfield-data.read` scope | 查询当前令牌用户导入过寻访记录的终末地账户列表，按导入时间倒序。 |
+| `/oauth2/ef-pool-records/record` | GET | 是 | OAuth access_token + `endfield-data.read` scope | 按 `roleId` 读取干员与武器寻访记录，须已绑定当前令牌用户；响应 Cache-Control 为 private, no-cache。 |
 
 ### 个人访问令牌（应用视角，仅限已开通直连认证的客户端）
 
@@ -227,6 +227,6 @@
 
 | API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
 |---|---|---|---|---|
-| `/pat/ak-accounts/operators` | GET | 是 | PAT + `ak-data.read` scope（`gama-data.read` 或 `all` 可覆盖） | 读取 PAT 对应用户的游戏账号干员全量数据，**目标账号不接受请求参数**：带 `tlc_pat_` 前缀的新令牌取 `payload.game_uid` 并强制核对绑定关系；无前缀的迁移旧令牌没有 payload，按「用户默认来源 → 最近变更」取数。接口不声明任何查询参数，多传的参数由框架忽略、不参与取数。响应 `Cache-Control: private, no-cache`，结构与 `/oauth2/ak-accounts/operators` 完全一致（共用同一取数服务）。 |
+| `/pat/ak-accounts/operators` | GET | 是 | PAT + `arknights-data.read` scope（`gama-data.read` 或 `all` 可覆盖） | 读取 PAT 对应用户的游戏账号干员全量数据，**目标账号不接受请求参数**：带 `tlc_pat_` 前缀的新令牌取 `payload.game_uid` 并强制核对绑定关系；无前缀的迁移旧令牌没有 payload，按「用户默认来源 → 最近变更」取数。接口不声明任何查询参数，多传的参数由框架忽略、不参与取数。响应 `Cache-Control: private, no-cache`，结构与 `/oauth2/ak-accounts/operators` 完全一致（共用同一取数服务）。 |
 
 > 迁移完成后旧令牌的 `uc:oauth:access:{token}` 已被删除，只能走本组接口；**消费端与阶段二迁移必须同批上线**，否则会出现旧令牌两边都不认的失效窗口。

@@ -23,8 +23,8 @@ import java.util.List;
  * OAuth 授权访问的终末地寻访记录接口
  *
  * <p>流程与用户侧一致：创建导入任务（归属取 access_token 中的 uid）→ 轮询任务状态 →
- * 从「导入过的账户」列表中选择角色读取寻访记录。查询类接口需要 {@code ef-data.read}，
- * 创建任务会写入数据，需要 {@code ef-data.write}；上级范围 {@code gama-data.read} /
+ * 从「导入过的账户」列表中选择角色读取寻访记录。查询类接口需要 {@code endfield-data.read}，
+ * 创建任务会写入数据，需要 {@code endfield-data.write}；上级范围 {@code gama-data.read} /
  * {@code gama-data.write} 同样放行。任务归属与角色绑定校验均按令牌用户完成，
  * 请求参数不能指定或覆盖用户身份。</p>
  *

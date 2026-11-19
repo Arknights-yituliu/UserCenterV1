@@ -191,7 +191,7 @@ entity/vo/pat/PatIssueVO, PatVO     签发响应 / 列表项（都含明文）
 
 ### 5.3 scope 判定
 
-- 控制器调用 `UserContext.requireScope(OAuthScope)`；判定逻辑是 `OAuthScope.covers(granted, required)`，支持父子覆盖（`gama-data.read` 覆盖 `ak-data.read`，`all` 覆盖一切）。
+- 控制器调用 `UserContext.requireScope(OAuthScope)`；判定逻辑是 `OAuthScope.covers(granted, required)`，支持父子覆盖（`gama-data.read` 覆盖 `arknights-data.read`，`all` 覆盖一切）。
 - 元范围 `all` **不允许自助签发**，只能由管理员写库授予机密客户端。
 - PAT 的 scope 是**签发时快照**：用户之后调整应用授权，已签发的 PAT 权限不变；要变更权限就撤销重签。
 

@@ -1477,7 +1477,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      * <p>用于按凭证签发短期令牌时的最小权限场景（PAT 签发、授权确认页裁剪）：调用方可指定一个子集换取更小权限的
      * 短时 access_token，但不能借此扩大权限。凭证范围为元范围 {@code all} 时视为覆盖全部已知权限。
      * 范围存在上下级关系，凭证持有上级范围（如 {@code gama-data.read}）时可收敛为其子范围
-     * （如 {@code ak-data.read}），判断见 {@link OAuthScope#covers(String, OAuthScope)}。</p>
+     * （如 {@code arknights-data.read}），判断见 {@link OAuthScope#covers(String, OAuthScope)}。</p>
      *
      * @param heldScope      凭证已有权限串（英文逗号分隔，可能为元范围 all）
      * @param requestedScope 请求收敛到的权限串

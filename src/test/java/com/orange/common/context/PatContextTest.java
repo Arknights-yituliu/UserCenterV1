@@ -20,7 +20,7 @@ class PatContextTest {
 
     @Test
     void requireReturnsStoredPrincipal() {
-        PatPrincipal principal = new PatPrincipal(7001L, "this_land_cloud", "ak-data.read",
+        PatPrincipal principal = new PatPrincipal(7001L, "this_land_cloud", "arknights-data.read",
                 new PatPayload(), true);
         PatContext.set(principal);
 
@@ -36,7 +36,7 @@ class PatContextTest {
 
     @Test
     void clearRemovesPrincipal() {
-        PatContext.set(new PatPrincipal(7001L, "this_land_cloud", "ak-data.read",
+        PatContext.set(new PatPrincipal(7001L, "this_land_cloud", "arknights-data.read",
                 new PatPayload(), true));
 
         PatContext.clear();

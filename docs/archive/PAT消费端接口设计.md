@@ -29,7 +29,7 @@
 | 凭证 | `Authorization: Bearer <pat>`，新旧两代格式都接受 |
 | 账号来源 | 新令牌（`tlc_pat_` 前缀）→ `payload.game_uid`；旧令牌（64 位 hex，无前缀）→ 默认来源/最近变更 |
 | 归属校验 | 新令牌走 `ak_account_binding`；旧令牌经默认来源链路，数据同样只来自该用户自己的条目 |
-| 所需 scope | `ak-data.read`（`gama-data.read`、`all` 可覆盖） |
+| 所需 scope | `arknights-data.read`（`gama-data.read`、`all` 可覆盖） |
 | 响应 | 与 `/oauth2/ak-accounts/operators` 逐字段一致 + `Cache-Control: private, no-cache` |
 
 ## 2. 路径与包
@@ -126,7 +126,7 @@ SELECT COUNT(1) FROM ak_account_binding WHERE ak_uid = ? AND owner_uid = ?
 | 场景 | `code` |
 | --- | --- |
 | 未带令牌 / 两代格式都不匹配 / 无效 / 已过期 | `80001` |
-| PAT scope 不含 `ak-data.read` | `80008` |
+| PAT scope 不含 `arknights-data.read` | `80008` |
 | 新令牌的 payload 未配置 `game_uid` 或值为空白 | `10002` |
 | 请求带了 `akUid` 等查询参数 | 参数被忽略（接口不声明参数），仍按 PAT 取数 |
 | 新令牌的 `game_uid` 不属于当前用户 | `80008` |
@@ -228,7 +228,7 @@ Authorization: Bearer <pat>
 | payload 的 `game_uid` 是他人账号 | `80008`，与账号不存在无法区分 |
 | 用户解绑该账号后再用同一新令牌读 | `80008` |
 | 请求带 `?akUid=` | `200`，参数被忽略，仍按 PAT 的 payload 取数 |
-| scope 只有 `ak-data.write` | `80008` |
+| scope 只有 `arknights-data.write` | `80008` |
 | scope 为 `gama-data.read` | `200` |
 | 带已迁移的旧令牌（无前缀） | `200`，按默认来源/最近变更取账号 |
 | 旧令牌库里残留 payload | 不参与选账号，仍按默认来源 |

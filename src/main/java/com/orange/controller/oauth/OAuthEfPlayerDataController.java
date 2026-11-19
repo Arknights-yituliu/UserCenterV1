@@ -25,8 +25,8 @@ import java.util.List;
 /**
  * OAuth 授权访问的终末地玩家数据接口
  *
- * <p>查询绑定角色与读取玩家数据需要 {@code ef-data.read}，保存玩家数据需要
- * {@code ef-data.write}；上级范围 {@code gama-data.read} / {@code gama-data.write} 同样放行。
+ * <p>查询绑定角色与读取玩家数据需要 {@code endfield-data.read}，保存玩家数据需要
+ * {@code endfield-data.write}；上级范围 {@code gama-data.read} / {@code gama-data.write} 同样放行。
  * 用户身份取自 access_token，请求参数不能指定或覆盖；
  * 角色归属校验与用户侧接口一致，玩家数据按 {@code roleId} + {@code serverId} 由全部绑定用户共享。</p>
  *

@@ -14,7 +14,7 @@ import java.util.stream.Collectors;
  * <p>{@link #ALL} 是元范围（通配符）：它被标记为 {@code manualOnly}，不会出现在注册 /
  * 编辑可选项也不出现在 scope 元数据接口里，只能由管理员直接写库授予，且仅对机密客户端生效。</p>
  *
- * <p>范围之间存在上下级关系：游戏级范围（{@code ak-data.read}、{@code ef-data.read} 等）
+ * <p>范围之间存在上下级关系：游戏级范围（{@code arknights-data.read}、{@code endfield-data.read} 等）
  * 的上级是平台级的 {@code gama-data.read} / {@code gama-data.write}。持有上级范围即视为
  * 持有其全部子范围，因此登记了 {@code gama-data.read} 的存量应用仍可访问全部游戏接口。</p>
  *
@@ -41,19 +41,19 @@ public enum OAuthScope {
     GAMA_DATA_WRITE("gama-data.write", "游戏数据", "写入用户游戏数据", true, false),
 
     /** 读取明日方舟数据，是 {@link #GAMA_DATA_READ} 的子范围。 */
-    AK_DATA_READ("ak-data.read", "明日方舟数据访问", "读取你的明日方舟账号、干员、仓库与抽卡数据",
+    AK_DATA_READ("arknights-data.read", "明日方舟数据访问", "读取你的明日方舟账号、干员、仓库与抽卡数据",
             true, false, GAMA_DATA_READ),
 
     /** 写入明日方舟数据，是 {@link #GAMA_DATA_WRITE} 的子范围。 */
-    AK_DATA_WRITE("ak-data.write", "写入明日方舟数据", "保存或删除你的明日方舟账号、干员与仓库数据",
+    AK_DATA_WRITE("arknights-data.write", "写入明日方舟数据", "保存或删除你的明日方舟账号、干员与仓库数据",
             true, false, GAMA_DATA_WRITE),
 
     /** 读取终末地数据，是 {@link #GAMA_DATA_READ} 的子范围。 */
-    EF_DATA_READ("ef-data.read", "终末地数据访问", "读取你的终末地角色、玩家数据与寻访记录",
+    EF_DATA_READ("endfield-data.read", "终末地数据访问", "读取你的终末地角色、玩家数据与寻访记录",
             true, false, GAMA_DATA_READ),
 
     /** 写入终末地数据，是 {@link #GAMA_DATA_WRITE} 的子范围。 */
-    EF_DATA_WRITE("ef-data.write", "写入终末地数据", "保存你的终末地角色与玩家数据、创建寻访记录导入任务",
+    EF_DATA_WRITE("endfield-data.write", "写入终末地数据", "保存你的终末地角色与玩家数据、创建寻访记录导入任务",
             true, false, GAMA_DATA_WRITE),
 
     /** 全部授权范围（通配符），仅允许管理员手工写库授予。 */
@@ -121,7 +121,7 @@ public enum OAuthScope {
      *
      * <p>覆盖规则：同一标识、元范围 {@link #ALL}，或沿 {@link #parent} 链命中上级范围。
      * 因此持有 {@code gama-data.read} 的令牌可以访问两个游戏的数据，而只持有
-     * {@code ak-data.read} 的令牌不能访问终末地接口。</p>
+     * {@code arknights-data.read} 的令牌不能访问终末地接口。</p>
      *
      * @param grantedCode 令牌实际已授予的 scope 标识（可为 null / 空白）
      * @param required    接口所需的 scope

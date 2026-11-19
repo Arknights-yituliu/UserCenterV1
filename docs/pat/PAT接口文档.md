@@ -18,7 +18,7 @@
 curl -X POST https://<host>/user/pat \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer <会话token>' \
-  -d '{"name":"我的脚本","expires_in":2592000,"scope":"ak-data.read","payload":{"game_uid":"12345678","game_name":"明日方舟"}}'
+  -d '{"name":"我的脚本","expires_in":2592000,"scope":"arknights-data.read","payload":{"game_uid":"12345678","game_name":"明日方舟"}}'
 # 响应 data.token 就是明文令牌，形如 tlc_pat_<64位hex>
 
 # 2. 随时可以回看（服务端保存明文，不怕丢）
@@ -149,7 +149,7 @@ PAT **不做摘要**。`tlc_pat.token` 保存令牌明文本身，Redis 预留�
 {
   "name": "干员数据同步脚本",
   "expires_in": 2592000,
-  "scope": "ak-data.read",
+  "scope": "arknights-data.read",
   "payload": { "game_uid": "12345678", "game_name": "明日方舟", "source": "script" }
 }
 ```
@@ -170,7 +170,7 @@ PAT **不做摘要**。`tlc_pat.token` 保存令牌明文本身，Redis 预留�
 { "code": 200, "msg": "操作成功", "data": {
   "id": 21, "token": "tlc_pat_<64位hex>", "tokenPrefix": "tlc_pat_012",
   "name": "干员数据同步脚本", "clientId": "this_land_cloud",
-  "scope": "ak-data.read", "expiresIn": 2592000,
+  "scope": "arknights-data.read", "expiresIn": 2592000,
   "expireTime": "2026-12-18T15:00:00",
   "payload": {"game_uid": "12345678", "game_name": "明日方舟", "source": "script"},
   "createdAt": "2026-11-18T15:00:00" } }
@@ -235,7 +235,7 @@ PAT **不做摘要**。`tlc_pat.token` 保存令牌明文本身，Redis 预留�
   "refresh_token": "<OAuth refresh_token 明文>",
   "name": "服务端同步任务",
   "expires_in": 31536000,
-  "scope": "ak-data.read",
+  "scope": "arknights-data.read",
   "payload": { "game_uid": "12345678", "game_name": "明日方舟" }
 }
 ```
@@ -264,7 +264,7 @@ PAT **不做摘要**。`tlc_pat.token` 保存令牌明文本身，Redis 预留�
 
 ### 7.1 `GET /pat/ak-accounts/operators`
 
-- 鉴权：PAT 明文 + `ak-data.read` scope；上级 `gama-data.read` 与元范围 `all` 可覆盖。
+- 鉴权：PAT 明文 + `arknights-data.read` scope；上级 `gama-data.read` 与元范围 `all` 可覆盖。
 - 请求参数：**无**。控制器方法不声明任何参数，账号完全由 PAT 决定；多传的 `akUid` 等查询参数由框架忽略，不参与取数，也不会报错。**不要依赖请求参数指定账号**，请以签发时写入的 `payload.game_uid` 为准。
 - 响应：`Result<OperatorListVO>`，与 `GET /oauth2/ak-accounts/operators` **逐字段一致**，共用同一取数服务；`Cache-Control: private, no-cache`（只允许私人缓存且每次回源校验）。
 

@@ -37,7 +37,7 @@ class EfPlayerDataControllerMvcTest {
         mockMvc = MockMvcBuilders.standaloneSetup(
                 new EfPlayerDataController(service), new OAuthEfPlayerDataController(service)).build();
         UserContext.setUid(1001L);
-        UserContext.setScope("ef-data.read");
+        UserContext.setScope("endfield-data.read");
     }
 
     @AfterEach
@@ -74,7 +74,7 @@ class EfPlayerDataControllerMvcTest {
 
     @Test
     void defaultOauthReadStillRequiresEndfieldReadScope() {
-        UserContext.setScope("ak-data.read");
+        UserContext.setScope("arknights-data.read");
 
         assertThatThrownBy(() -> new OAuthEfPlayerDataController(service).getPlayerData(null, null))
                 .isInstanceOf(BusinessException.class)

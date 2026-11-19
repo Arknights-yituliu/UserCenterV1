@@ -28,9 +28,9 @@ class OAuthClientAdminControllerScopeTest {
         assertTrue(scopes.stream().anyMatch(scope -> "gama-data.read".equals(scope.getCode())));
         assertTrue(scopes.stream().anyMatch(scope -> "gama-data.write".equals(scope.getCode())));
         // 游戏级细粒度范围：明日方舟 / 终末地各自读写
-        assertTrue(scopes.stream().anyMatch(scope -> "ak-data.read".equals(scope.getCode())));
-        assertTrue(scopes.stream().anyMatch(scope -> "ak-data.write".equals(scope.getCode())));
-        assertTrue(scopes.stream().anyMatch(scope -> "ef-data.read".equals(scope.getCode())));
-        assertTrue(scopes.stream().anyMatch(scope -> "ef-data.write".equals(scope.getCode())));
+        assertTrue(scopes.stream().anyMatch(scope -> "arknights-data.read".equals(scope.getCode())));
+        assertTrue(scopes.stream().anyMatch(scope -> "arknights-data.write".equals(scope.getCode())));
+        assertTrue(scopes.stream().anyMatch(scope -> "endfield-data.read".equals(scope.getCode())));
+        assertTrue(scopes.stream().anyMatch(scope -> "endfield-data.write".equals(scope.getCode())));
     }
 }

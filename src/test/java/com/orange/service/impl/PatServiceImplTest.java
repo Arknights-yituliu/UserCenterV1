@@ -126,10 +126,10 @@ class PatServiceImplTest {
 
     @Test
     void issuePropagatesScopeEscalation() {
-        when(oauthTokenService.resolveSelfIssuedScope("ef-data.write"))
+        when(oauthTokenService.resolveSelfIssuedScope("endfield-data.write"))
                 .thenThrow(new BusinessException(ResultCode.OAUTH_SCOPE_INVALID, "scope 不能超出凭证已有权限"));
 
-        assertThatThrownBy(() -> service.issue(UID, request("ci", 3600L, "ef-data.write")))
+        assertThatThrownBy(() -> service.issue(UID, request("ci", 3600L, "endfield-data.write")))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(e -> assertThat(((BusinessException) e).getCode())
                         .isEqualTo(ResultCode.OAUTH_SCOPE_INVALID.getCode()));

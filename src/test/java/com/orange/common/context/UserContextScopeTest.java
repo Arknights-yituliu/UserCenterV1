@@ -59,7 +59,7 @@ class UserContextScopeTest {
     @Test
     void requireScopeRejectsOtherGameAndParentWhenChildGranted() {
         // 只持有明日方舟范围时，不能访问终末地，也不能反向获得上级范围
-        UserContext.setScope("ak-data.read");
+        UserContext.setScope("arknights-data.read");
 
         assertDoesNotThrow(() -> UserContext.requireScope(OAuthScope.AK_DATA_READ));
         assertThrows(BusinessException.class, () -> UserContext.requireScope(OAuthScope.EF_DATA_READ));

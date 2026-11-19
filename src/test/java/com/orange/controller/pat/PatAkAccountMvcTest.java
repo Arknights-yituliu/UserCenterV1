@@ -48,7 +48,7 @@ class PatAkAccountMvcTest {
 
     private static final long UID = 7001L;
 
-    private static final String SCOPE = "ak-data.read";
+    private static final String SCOPE = "arknights-data.read";
 
     private static final String PAT = PatUtil.generate();
 
