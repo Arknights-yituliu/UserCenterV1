@@ -222,10 +222,10 @@ entity/vo/pat/PatIssueVO, PatVO     签发响应 / 列表项（都含明文）
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | POST | `/oauth2/pat` | **协议级例外**：凭请求体 refresh_token 签发，`client_id` 取凭证所属应用 |
-| GET | `/oauth2/pat/list` | 本应用为该用户签发的令牌（uid + client_id 双重过滤） |
+| GET | `/oauth2/pat/list` | 当前用户的全部令牌（仅按 uid 过滤，跨应用，含用户自助签发与已过期记录） |
 | POST | `/oauth2/pat/revoke` | 按明文吊销，归属按 uid + client_id + token 三条件 |
 
-三个接口都要求 `direct_auth_enabled=1`（`90014`），且都只对「本应用 + 本用户」生效。
+三个接口都要求 `direct_auth_enabled=1`（未开通返回 `90014`）。列表中的 client_id 仅用于准入校验，可查看当前用户跨应用的全部 PAT；签发归属与吊销范围仍限定「本应用 + 本用户」。
 
 ### 6.3 消费面（PAT）
 
@@ -404,7 +404,7 @@ END
 | 缺口 | 现状 | 建议 |
 | --- | --- | --- |
 | `revokeByClient` 无直接单测 | 只覆盖了签发侧准入；「client_id 不符删不掉」「`direct_auth_enabled=0` 删不掉」「明文不存在幂等」都没测 | 补 3 例 service 单测 |
-| `listByClient` 未测准入 | 没有 `direct_auth_enabled=0 → 90014` 的用例 | 补 1 例 |
+| ~~`listByClient` 未测准入~~ | **已闭合（2026-11-19）**：覆盖非直连应用返回 `90014` 且不查库、缺失用户或应用身份不查库、跨应用列表仅按当前 uid 查询（含明文与已过期记录） | — |
 | `UserPatController` 无端到端测试 | 4 个端点只有服务层单测 | 补 MVC 测试（尤其 `revoke-all` 的越权边界） |
 | ~~消费端响应与 OAuth 版一致性~~ | **已失效（2026-11-19）**：OAuth 侧 `custom-tokens` 响应（`OAuthCustomTokenVO`）随端点下线一并删除，已无比对对象；`/oauth2/pat/**` 与 `/user/pat/**` 共用 `PatVO`，本身同源 | — |
 | ~~`PatMigrationServiceImpl` 无单测~~ | **已闭合**：`PatMigrationServiceImplTest` 覆盖 4 例——全量搬迁不读令牌明细（`opsForValue` 从未调用）、明文/前缀/`create_time` 原样搬迁、插入失败时 Redis 一条不动、无待处理行时不发写命令 | — |

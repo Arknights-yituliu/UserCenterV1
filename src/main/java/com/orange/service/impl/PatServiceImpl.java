@@ -172,7 +172,7 @@ public class PatServiceImpl implements PatService {
     }
 
     /**
-     * 应用视角列出本应用为该用户签发的 PAT
+     * 直连应用查询当前用户的全部 PAT（跨应用）
      *
      * @param uid      用户 uid（由 access_token 解析得出）
      * @param clientId 调用方应用 ID
@@ -184,12 +184,7 @@ public class PatServiceImpl implements PatService {
             return Collections.emptyList();
         }
         oauthTokenService.requireDirectAuthEnabledClient(clientId);
-        List<TlcPat> rows = tlcPatMapper.selectList(Wrappers.<TlcPat>lambdaQuery()
-                .eq(TlcPat::getUid, uid)
-                .eq(TlcPat::getClientId, clientId)
-                .orderByDesc(TlcPat::getCreateTime)
-                .orderByDesc(TlcPat::getId));
-        return toVOList(rows);
+        return list(uid);
     }
 
     /**

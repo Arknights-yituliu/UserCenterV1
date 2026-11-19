@@ -4,8 +4,10 @@ import com.orange.common.context.OAuthTokenResolver;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.GlobalExceptionHandler;
 import com.orange.entity.vo.pat.PatIssueVO;
+import com.orange.entity.vo.pat.PatVO;
 import com.orange.interceptor.OAuthAuthInterceptor;
 import com.orange.service.PatService;
+import com.orange.service.OAuthTokenService.OAuthTokenPrincipal;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,6 +21,8 @@ import org.springframework.web.context.support.AnnotationConfigWebApplicationCon
 import org.springframework.web.servlet.config.annotation.EnableWebMvc;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -121,6 +125,32 @@ class OAuthPatMvcTest {
                 .andExpect(jsonPath("$.code").value(ResultCode.NOT_LOGIN.getCode()));
 
         verify(patService, never()).listByClient(any(), any());
+    }
+
+    @Test
+    void listUsesAccessTokenIdentityAndReturnsTokensFromOtherApplications() throws Exception {
+        when(oauthTokenResolver.resolve("access-raw"))
+                .thenReturn(new OAuthTokenPrincipal(7001L, "app-alpha", "user.read"));
+        PatVO personal = new PatVO();
+        personal.setClientId("this_land_cloud");
+        personal.setToken("personal-token");
+        PatVO otherApp = new PatVO();
+        otherApp.setClientId("app-beta");
+        otherApp.setToken("other-app-token");
+        when(patService.listByClient(7001L, "app-alpha")).thenReturn(List.of(personal, otherApp));
+
+        mockMvc.perform(get("/oauth2/pat/list")
+                        .header("Authorization", "Bearer access-raw")
+                        .param("uid", "9999")
+                        .param("client_id", "app-beta"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[0].clientId").value("this_land_cloud"))
+                .andExpect(jsonPath("$.data[0].token").value("personal-token"))
+                .andExpect(jsonPath("$.data[1].clientId").value("app-beta"));
+
+        verify(patService).listByClient(7001L, "app-alpha");
     }
 
     @Test

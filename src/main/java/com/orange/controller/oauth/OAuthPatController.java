@@ -23,7 +23,8 @@ import java.util.List;
  * 个人访问令牌的应用视角接口（需 access_token）
  *
  * <p>{@code /list} 与 {@code /revoke} 的认证由 {@code OAuthAuthInterceptor} 完成，
- * uid 与 client_id 均取自 access_token 记录，因此调用方只能看到/吊销自己应用名下的记录。
+ * uid 与 client_id 均取自 access_token 记录；列表返回当前用户跨应用的全部 PAT，
+ * 吊销仍限定当前用户在调用应用名下的记录。
  * 服务层还会校验本应用已开通直连认证能力（{@code direct_auth_enabled=1}），
  * 避免普通第三方应用凭 access_token 作废用户令牌。</p>
  *
@@ -69,11 +70,11 @@ public class OAuthPatController {
     }
 
     /**
-     * 查询本应用为该用户签发的 PAT 列表
+     * 查询当前用户的全部 PAT 列表（跨应用）
      *
      * @return 令牌列表（含明文）
      */
-    @Operation(summary = "查询本应用的用户个人访问令牌列表（仅限已开通直连认证的客户端）")
+    @Operation(summary = "查询当前用户的全部个人访问令牌（跨应用，仅限已开通直连认证的客户端）")
     @GetMapping("/list")
     public Result<List<PatVO>> list() {
         List<PatVO> tokens = patService.listByClient(UserContext.requireUid(), UserContext.getClientId());

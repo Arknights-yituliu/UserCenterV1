@@ -1,5 +1,8 @@
 package com.orange.service.impl;
 
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.orange.common.enums.ResultCode;
@@ -14,6 +17,7 @@ import com.orange.entity.vo.pat.PatVO;
 import com.orange.mapper.TlcPatMapper;
 import com.orange.service.OAuthTokenService;
 import com.orange.service.PatPrincipal;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -55,6 +59,7 @@ class PatServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), TlcPat.class);
         service = new PatServiceImpl(tlcPatMapper, oauthTokenService, objectMapper);
     }
 
@@ -230,15 +235,46 @@ class PatServiceImplTest {
     }
 
     @Test
-    void listByClientAlsoReturnsPlaintext() {
-        TlcPat row = oldToken();
-        when(tlcPatMapper.selectList(any())).thenReturn(List.of(row));
+    void listByClientReturnsOwnTokensAcrossApplicationsIncludingExpiredTokens() {
+        TlcPat personal = oldToken();
+        TlcPat otherApp = oldToken();
+        otherApp.setId(22L);
+        otherApp.setClientId("app-beta");
+        otherApp.setToken("other-app-token");
+        otherApp.setExpireTime(LocalDateTime.now().minusSeconds(60));
+        when(tlcPatMapper.selectList(any())).thenAnswer(invocation -> {
+            LambdaQueryWrapper<TlcPat> query = invocation.getArgument(0);
+            assertThat(query.getSqlSegment()).contains("uid =", "ORDER BY create_time DESC,id DESC")
+                    .doesNotContain("client_id", "expire_time");
+            assertThat(query.getParamNameValuePairs().values()).containsExactly(UID);
+            return List.of(personal, otherApp);
+        });
 
-        List<PatVO> list = service.listByClient(UID, "this_land_cloud");
+        List<PatVO> list = service.listByClient(UID, "app-alpha");
 
-        assertThat(list).hasSize(1);
-        assertThat(list.get(0).getToken()).isEqualTo(row.getToken());
-        verify(oauthTokenService).requireDirectAuthEnabledClient("this_land_cloud");
+        assertThat(list).extracting(PatVO::getClientId).containsExactly("this_land_cloud", "app-beta");
+        assertThat(list).extracting(PatVO::getToken).containsExactly(personal.getToken(), otherApp.getToken());
+        assertThat(list.get(1).getExpiresInSeconds()).isNegative();
+        verify(oauthTokenService).requireDirectAuthEnabledClient("app-alpha");
+    }
+
+    @Test
+    void listByClientRejectsNonDirectApplicationBeforeQueryingTokens() {
+        doThrow(new BusinessException(ResultCode.OAUTH_DIRECT_AUTH_NOT_ALLOWED))
+                .when(oauthTokenService).requireDirectAuthEnabledClient("app-alpha");
+
+        assertThatThrownBy(() -> service.listByClient(UID, "app-alpha"))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(e -> assertThat(((BusinessException) e).getCode()).isEqualTo(90014));
+        verify(tlcPatMapper, never()).selectList(any());
+    }
+
+    @Test
+    void listByClientDoesNotQueryTokensWithoutUserOrApplicationIdentity() {
+        assertThat(service.listByClient(null, "app-alpha")).isEmpty();
+        assertThat(service.listByClient(UID, null)).isEmpty();
+        assertThat(service.listByClient(UID, " ")).isEmpty();
+        verify(tlcPatMapper, never()).selectList(any());
     }
 
 

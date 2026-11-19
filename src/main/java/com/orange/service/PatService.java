@@ -87,10 +87,11 @@ public interface PatService {
     void revokeAllByUid(Long uid);
 
     /**
-     * 应用视角列出本应用为该用户签发的 PAT
+     * 直连应用查询当前用户的全部 PAT（跨应用）
      *
      * <p>准入：客户端必须启用、已审批且已开通直连认证能力（{@code direct_auth_enabled=1}），
-     * 未开通抛 90014。强制按 {@code uid + clientId} 过滤，调用方读不到其它应用名下的记录。</p>
+     * 未开通抛 90014。仅按 {@code uid} 过滤，包含用户自助签发及其它应用签发的 PAT；
+     * {@code clientId} 仅用于准入校验，不限制令牌所属应用。</p>
      *
      * @param uid      用户 uid（由 access_token 解析得出）
      * @param clientId 调用方应用 ID（由 access_token 解析得出）

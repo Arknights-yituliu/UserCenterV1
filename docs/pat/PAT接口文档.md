@@ -76,7 +76,7 @@ Authorization: Bearer tlc_pat_0123456789abcdef...
 | `GET /user/oauth/custom-tokens` | 「我的自定义令牌」列表 | `GET /user/pat/list` | 字段基本对齐，新增 `tokenPrefix`、`payload`、`lastUsedAt`、`expiresInSeconds`；迁移来的旧令牌 `payload=null` |
 | `POST /user/oauth/custom-tokens/revoke` | 按明文吊销我的一条令牌 | `POST /user/pat/revoke` | 改为按 `id` 撤销（列表项自带 `id`），不再按明文；另有 `POST /user/pat/revoke-all` 一键全撤销 |
 | `POST /oauth2/token/from-refresh` | 拿 refresh_token 换长有效期 access_token | `POST /oauth2/pat` | 同样「不消费、不轮转」refresh_token，但产出 PAT；不再接受 `client_id`，归属由凭证自身决定；不再产出新的长期 access_token |
-| `GET /oauth2/custom-tokens` | 应用视角的签发记录列表 | `GET /oauth2/pat/list` | 同样强制 `uid + clientId` 隔离，准入仍是 `direct_auth_enabled=1` |
+| `GET /oauth2/custom-tokens` | 应用视角的签发记录列表 | `GET /oauth2/pat/list` | 准入仍是 `direct_auth_enabled=1`；改为按当前用户 `uid` 查询全部 PAT，跨应用返回，不再按 `clientId` 过滤 |
 | `POST /oauth2/custom-tokens/revoke` | 应用视角按明文吊销 | `POST /oauth2/pat/revoke` | 同样按明文 + `uid + clientId` 三条件精确删除，幂等 |
 
 配套变化：
@@ -210,7 +210,7 @@ PAT **不做摘要**。`tlc_pat.token` 保存令牌明文本身，Redis 预留�
 
 `/oauth2/pat/list` 与 `/oauth2/pat/revoke` 走 access_token 鉴权；根路径 `POST /oauth2/pat` 是协议级例外，凭请求体 refresh_token 签发（见 6.1）。
 
-准入条件：客户端启用、已审批且 `direct_auth_enabled=1`，否则返回 `90014`。列表/吊销的 `uid` 与 `clientId` 均取自 access_token，调用方无法伪造；签发的 `uid` 与 `clientId` 取自 refresh_token 记录，同样无法伪造。因此始终只能操作自己应用名下的记录。
+准入条件：客户端启用、已审批且 `direct_auth_enabled=1`；未开通直连认证返回 `90014`。列表/吊销的 `uid` 与 `clientId` 均取自 access_token，调用方无法伪造；签发的 `uid` 与 `clientId` 取自 refresh_token 记录，同样无法伪造。列表返回当前用户跨应用的全部 PAT，`clientId` 仅用于准入校验；签发归属与吊销范围仍限定在当前应用。
 
 ### 6.1 签发 `POST /oauth2/pat`
 
@@ -244,7 +244,9 @@ PAT **不做摘要**。`tlc_pat.token` 保存令牌明文本身，Redis 预留�
 
 ### 6.2 列表 `GET /oauth2/pat/list`
 
-返回结构与 5.2 完全一致（同样含完整 `token` 明文），强制按 `uid + clientId` 过滤。
+返回当前登录用户的全部 PAT，结构与 5.2 完全一致（同样含完整 `token` 明文、含已过期记录，按签发时间倒序）。仅按 access_token 解析出的 `uid` 过滤，包含用户自助签发和其它应用签发的 PAT，不返回其它用户的记录。
+
+调用应用仍须启用、已审批且 `direct_auth_enabled=1`；access_token 中的 `clientId` 仅用于准入校验，不参与列表过滤。不接受调用方通过请求参数指定用户或应用。跨应用可见仅适用于列表；`POST /oauth2/pat/revoke` 仍按 `uid + clientId + token` 限定吊销范围。
 
 ### 6.3 吊销 `POST /oauth2/pat/revoke`
 
@@ -256,7 +258,7 @@ PAT **不做摘要**。`tlc_pat.token` 保存令牌明文本身，Redis 预留�
 | --- | --- | --- |
 | `token` | 是 | 非空、≤ 128 字符 |
 
-应用侧拿不到用户侧的列表 `id`，因此按明文提交；服务端按 `uid + client_id + token` 三条件精确删除（token 在控制器入口 `trim()`，服务层只做精确匹配），**幂等**，删不到也返回成功。
+应用侧吊销接口按明文提交；服务端按 `uid + client_id + token` 三条件精确删除（token 在控制器入口 `trim()`，服务层只做精确匹配），**幂等**，删不到也返回成功。列表虽可跨应用查看，但调用本接口只能吊销当前用户在本应用名下的 PAT。
 
 ## 7. 消费面：用 PAT 读干员数据
 
