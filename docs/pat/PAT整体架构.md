@@ -3,7 +3,7 @@
 > 生成日期：2026-11-18
 > 定位：把散在《PAT改造方案-最终版》《PAT消费端接口设计》《PAT接口文档》《PAT落地核对报告》四份文档里的
 > 决策收敛成一张全貌；细节仍以各专题文档为准，索引见 §11。
-> 口径：与当前代码一致——**全链路明文、无轮换接口、迁移端点随应用启动注册**。
+> 口径：与当前代码一致——**全链路明文、无轮换接口、一次性 PAT 迁移端点已下线**。
 
 ## 1. PAT 是什么，不是什么
 
@@ -26,8 +26,7 @@
 管理面（PAT 是「被管理的对象」）
   浏览器     --会话---------->  /user/pat/**                 UserPatController   ─┐
   直连应用   --access_token-->  /oauth2/pat/{list,revoke,revoke-all} OAuthPatController ─┤
-  第三方后端 --refresh_token->  POST /oauth2/pat              OAuthPatController  ─┼─> PatService ─> tlc_pat (MySQL)
-  运维       --无鉴权-------->  /internal/pat-migration/run   PatMigrationService ─┘
+  第三方后端 --refresh_token->  POST /oauth2/pat              OAuthPatController  ─┘─> PatService ─> tlc_pat (MySQL)
 
 消费面（PAT 是「请求的凭证」）
   调用方     --PAT----------->  /pat/**  PatAuthInterceptor ─> PatService#resolve ─> PatAkAccountController / PatEfPlayerDataController
@@ -63,7 +62,7 @@
 
 索引与约束：
 
-- `uk_tlc_pat_token (token)`：明文唯一，用于「按明文精确定位」与迁移 `INSERT IGNORE` 幂等。**唯一键是 `resolve` 能安全用 `selectOne` 的前提。**
+- `uk_tlc_pat_token (token)`：明文唯一，用于「按明文精确定位」。**唯一键是 `resolve` 能安全用 `selectOne` 的前提。**
 - `idx_tlc_pat_uid (uid, create_time)`：用户侧列表（按签发时间倒序）。
 - `idx_tlc_pat_client (client_id)`：应用视角列表与按应用统计。
 - `token` 列用 `utf8mb4_bin` 不是为了比摘要，而是**不让 `general_ci` 折叠 hex 大小写**。
@@ -103,8 +102,8 @@
 | --- | --- | --- |
 | MySQL `tlc_pat` | 全部令牌记录 | **唯一事实来源** |
 | Redis `tlc:pat:{token}`、`tlc:uid:pat:{uid}`、`tlc:pat:miss:`、`tlc:pat:lock:` | 校验缓存、索引、负缓存、单飞锁 | **只在 `RedisKeyUtil` 里预留，没有任何写入点**；默认不加缓存 |
-| Redis `uc:oauth:access:{token}` | 旧链路令牌明细 | 迁移时逐个 `DEL`；PAT 链路的 `resolve` 不读它 |
-| MySQL `oauth_custom_token` | 旧自定义令牌记录 | 迁移时**只读**，不删行、不改列 |
+| Redis `uc:oauth:access:{token}` | 旧链路令牌明细 | 历史迁移已清理对应旧 key；PAT 链路的 `resolve` 不读它 |
+| MySQL `oauth_custom_token` | 旧自定义令牌记录 | 应用已无实体、Mapper 或访问逻辑；本次未操作已有表 |
 
 ## 4. 代码结构
 
@@ -116,7 +115,6 @@ controller/
   oauth/OAuthPatController          直连应用：签发（refresh_token）/ 列表 / 单条撤销 / 全部撤销（access_token）
   pat/PatAkAccountController        消费面：干员数据（PAT）
   pat/PatEfPlayerDataController     消费面：终末地玩家数据（PAT）
-  internal/PatMigrationController   一次性运维：触发迁移（无鉴权）
 interceptor/
   PatAuthInterceptor                解析 PAT → 写上下文（仅 /pat/**）
   WebConfig                         三条链路的路径注册
@@ -128,9 +126,8 @@ common/util/
   PatPayloadUtil                    payload 取值（requireGameUid）
 service/
   PatService / PatServiceImpl       管理面 + resolve
-  PatMigrationService / Impl        旧令牌 → PAT
   PatPrincipal                      令牌主体（uid/clientId/scope/payload/prefixed）
-mapper/TlcPatMapper                 BaseMapper + 迁移用 insertIgnore
+mapper/TlcPatMapper                 BaseMapper（签发、查询与删除）
 entity/po/TlcPat                    表实体
 entity/dto/pat/PatPayload            payload 实体（请求/响应/消费端共用）
 entity/dto/pat/PatIssue*Request     签入参（会话 / refresh_token 两版）
@@ -241,12 +238,6 @@ entity/vo/pat/PatIssueVO, PatVO     签发响应 / 列表项（都含明文）
 
 终末地接口需要 `endfield-data.read`（`gama-data.read` / `all` 可覆盖），共用 `EfPlayerDataService#getPlayerData`，响应与 OAuth 版相同，缓存头为 `private, no-cache`。新令牌 game_uid 缺失不回退默认角色，server_id 缺省按空串精确定位；未绑定返回 `80008`。新增 payload 字段存入现有 JSON 文本，无需调整表结构。
 
-### 6.4 一次性运维
-
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/internal/pat-migration/run` | 触发旧令牌迁移；无参数、无鉴权，浏览器直接访问即可，跑完即删 |
-
 ## 7. 生命周期语义
 
 | 动作 | 实现 | 语义要点 |
@@ -269,65 +260,13 @@ entity/vo/pat/PatIssueVO, PatVO     签发响应 / 列表项（都含明文）
 
 这是产品口径，不是遗漏：PAT 只由用户自助入口处置，避免「改个密码把用户所有自动化脚本打断」。
 
-## 8. 旧令牌迁移
+## 8. 已迁移旧令牌
 
-### 8.1 目标
+一次性运维接口 `GET /internal/pat-migration/run` 已于 2026-11-19 下线。对应 Controller、服务接口及实现、结果对象、旧表实体/Mapper、迁移专用 `insertIgnoreBatch` 与测试均已删除，应用不再提供搬迁或清理旧 Redis 凭证的入口。
 
-把 `oauth_custom_token` 里**仍然有效**的存量自定义令牌，原样搬进 `tlc_pat`，让它们从「只能打 `/oauth2/**`」平滑过渡到「只能打 `/pat/**`」，调用方不需要换令牌。
+已经存入 `tlc_pat` 的旧令牌仍按原有规则校验和消费：明文不变、`payload = NULL`，继续使用 `/pat/**`。无前缀旧令牌的格式识别、默认账号/角色取数与用户管理能力均保留。
 
-- 旧表**只读**：不删行、不改名、不清列，迁移前后 `CHECKSUM TABLE` 应一致。
-- 明文原样写入，不换形态、不计算摘要。
-- 迁移行 `payload = NULL`、`client_id` 为真实应用 ID。
-
-### 8.2 执行流程
-
-```
-countAlive()                                   -- total：旧表 expire_time > now 的行数
-FOR EACH batch IN oauth_custom_token WHERE expire_time > NOW() AND id > cursor ORDER BY id LIMIT 500
-    批量 INSERT IGNORE tlc_pat(...)            -- 1. 先保证新表可查（整批一条语句）
-    SREM uc:uid:oauth:{uid} access:{token}     -- 2. 按 uid 分组，摘出 OAuth 索引
-    DEL  uc:oauth:access:{token}               -- 3. 变参 DEL，一批一条命令
-    migrated += batch.size()
-END
-```
-
-**不做 `GET` 判空**：旧表中已被撤销（`revokeClientAuthorization` 只删 Redis、不删记录）的行会一并迁成可用 PAT，即所谓「复活」。这是已确认接受的取舍，换取整轮迁移不必逐条往返 Redis。代价的兜底面是：这些令牌会出现在用户的 `/user/pat` 列表里，用户可再次手动撤销。
-
-顺序固定的理由：
-
-- `INSERT` 在前：新表可查之后才拆旧桶，中间失败不会出现「两边都没有」。插入抛异常时整批 Redis 一条都不动，抛给上层计入 `failed`。
-- `SREM` 必做：否则 OAuth 侧按用户批量吊销时仍会删到它，与 PAT 语义冲突。
-- `DEL` 必做：否则按 id 撤销删不掉 Redis 里的旧副本，令牌会「复活」。
-
-### 8.3 幂等与并发
-
-- `INSERT IGNORE` + `uk_tlc_pat_token`：重复执行不会产生重复行，同时也兜住旧表可能存在的重复明文（`oauth_custom_token` 没有 token 唯一键）。
-- 重跑到已处理行时被唯一键忽略，不会翻倍。
-- `run()` 加了 `synchronized`：端点没有开关，浏览器重复提交或脚本重试都可能触发并发；串行后第二次排队执行，统计口径 `migrated + failed == total`（`skipped` 恒 0）不会被并发双跑打乱。
-- 整批异常计入 `failed`，不阻断后续批次；本批 Redis 不清理，重跑即可收敛。
-
-### 8.4 对账
-
-```sql
-SELECT COUNT(*) FROM tlc_pat WHERE LEFT(token, 8) <> 'tlc_pat_';   -- == migrated
-SELECT COUNT(*) FROM oauth_custom_token WHERE expire_time > NOW(); -- == total
-CHECKSUM TABLE oauth_custom_token;                                  -- 迁移前后一致
-```
-
-再抽查 10 条旧明文：调 `/pat/ak-accounts/operators` 应 200；调 `/oauth2/userinfo` 应 `90009`（旧 key 已删，属预期）。
-
-### 8.5 回滚
-
-回滚不靠接口，靠旧表。旧表明文完整保留，先重灌 Redis 再回滚 jar：
-
-```
-FOR EACH row IN oauth_custom_token WHERE expire_time > NOW()
-    SET  uc:oauth:access:{row.token} {...} EX (expire_time - now)
-    SADD uc:uid:oauth:{uid} access:{row.token}
-END
-```
-
-直接回滚 jar 而不重灌，会让已迁移令牌在旧链路上全部失效——它们只存在于 `tlc_pat` 里了。
+本次未操作已有数据库或 Redis 数据。历史迁移方案与执行口径仅供追溯，见 `docs/archive/PAT改造方案-最终版.md` 与 `docs/archive/PAT落地核对报告.md`。
 
 ## 9. 安全模型
 
@@ -388,11 +327,8 @@ END
 
 | # | 事项 | 现状 | 为什么阻塞 | 建议动作 |
 | --- | --- | --- | --- | --- |
-| 1 | 迁移从未真跑过 | 迁移端点已可用（无开关），但只在单测层面验证；`total/migrated/failed` 与对账三项都没在真实数据上跑过 | 迁移会 `DEL` 旧 key，跑错无法靠重跑修复，只能靠旧表重灌 | 测试库先跑：核对 `migrated + failed == total`、`CHECKSUM TABLE` 前后一致、抽查 10 条打 `/pat/**` |
 | 2 | 明文可能落日志/APM | 明文直接作为 SQL 绑定参数；MyBatis SQL 日志、慢查询日志、APM 是否采集参数尚未确认 | 一旦采集，等于把全部令牌写进日志系统，与全链路明文的补偿要求直接冲突 | 上线前确认并关闭参数采集/慢查询明细；必要时对 `tlc_pat` 相关语句单独脱敏 |
 | 3 | 已有库增量 DDL 未落 | `db/schema-user.sql` 是含 `DROP TABLE` 的全量初始化脚本；`token` 列、`uk_tlc_pat_token`、删除 `source` 列都只体现在脚本里 | 直接重跑脚本会清空 `tlc_pat` | 对已有库单独执行增量变更（按项目约定，SQL 不进文档） |
-| 4 | 迁移 Controller 仍在代码里 | 现在随应用启动注册、无鉴权 | 它就是「任何人访问即触发一次全表迁移」的按钮 | 跑完立即删除 `PatMigrationController` 与 `PatMigrationControllerTest` 并重新发布 |
-| 5 | 消费端与迁移必须同批 | 两条链路都已就绪，但发布顺序没有强制机制 | 迁移删掉旧 key 后，若消费端没上，旧令牌两边都不认 | 同一次发布带上 `/pat/**` 与迁移端点；迁移放在发布完成后立即执行 |
 
 ### 12.2 阶段二功能未实现
 
@@ -400,10 +336,10 @@ END
 | --- | --- | --- | --- | --- |
 | ~~1~~ | ~~旧 6 端点未 `410 Gone`~~ | **已下线（2026-11-19）**：`UserController` 3 个 + `OAuthController` 3 个端点连同专用服务方法、DTO/VO、拦截器路径一并删除，请求直接 404（不做 410 过渡） | — | 前端若仍调用会 404，须先切到 `/user/pat/**`、`/oauth2/pat/**` |
 | 2 | 前端未切换 | 用户侧/应用侧的「自定义令牌」页面仍调旧端点，而旧端点已删除 | 页面直接报错，新签发的 PAT 与旧令牌分散在两套界面 | 切到 `/user/pat/**`、`/oauth2/pat/**`；列表可直接复制明文，交互不用大改 |
-| 3 | 旧表未导出删除 | `oauth_custom_token` 明文常驻；写入方端点已于 2026-11-19 下线，表已冻结（只由迁移端点只读遍历） | 库里长期保留一份可用的明文副本，且与 `tlc_pat` 双份共存 | 全量导出归档（加密）后再删表/清列 |
+| 3 | 旧表未导出删除 | `oauth_custom_token` 明文常驻；写入方端点已于 2026-11-19 下线，一次性迁移端点与旧表访问代码也已下线，本次未操作已有表 | 库里长期保留一份可用的明文副本，且与 `tlc_pat` 双份共存 | 全量导出归档（加密）后再删表/清列 |
 | 4 | `last_used_at` 未回写 | 列存在，无写入点；列表恒为 `null` | 用户看不到「这把令牌最近用过吗」，异常令牌难发现 | 在 `resolve` 命中后按「距上次更新 > 5 分钟」节流更新，另起一批 |
 | 5 | 撤销应用授权不清 `tlc_pat` | `revokeClientAuthorization` 只清 OAuth 令牌，未接线 | 用户撤销某应用授权后，该应用名下旧长期令牌仍可用 | 加一句按 `uid + client_id` 删行；注意别误删个人自助 PAT（其 `client_id` 固定 `this_land_cloud`） |
-| 6 | 家族索引未处理 | 迁移只 `SREM uc:uid:oauth:{uid}`，没有 `SADD` 到 PAT 侧，也没处理 `uc:oauth:family:*` | 迁移来的旧令牌在刷新重放时不参与整族吊销 | 迁移里补两行；或明确接受该缺口并写进运维手册 |
+| 6 | 家族索引未处理 | 历史迁移只 `SREM uc:uid:oauth:{uid}`，未改写 PAT 侧或 `uc:oauth:family:*`；迁移逻辑现已下线 | 迁移来的旧令牌在刷新重放时不参与整族吊销 | 记录已有令牌的行为；如需家族吊销联动，单独设计 PAT 生命周期规则 |
 | 7 | 过期判定用应用本机时间 | `resolve` 用 `LocalDateTime.now()`，方案写的是 DB `NOW()` | 多实例时钟漂移时，同一令牌可能一个节点放行、一个拒绝 | 评估改用 DB 时间，或强制 NTP + 可接受漂移 |
 | ~~8~~ | ~~归一化时机不一致~~ | **已闭合（2026-11-19）**：`OAuthPatController#revoke` 在入口 trim 请求体 token，`revokeByClient` 与 `resolve` 只做精确匹配，两个方法的 javadoc 均声明「入参已归一化」 | — | — |
 
@@ -415,7 +351,6 @@ END
 | ~~`listByClient` 未测准入~~ | **已闭合（2026-11-19）**：覆盖非直连应用返回 `90014` 且不查库、缺失用户或应用身份不查库、跨应用列表仅按当前 uid 查询（含明文与已过期记录） | — |
 | `UserPatController` 无端到端测试 | 4 个端点只有服务层单测 | 补 MVC 测试（尤其 `revoke-all` 的越权边界） |
 | ~~消费端响应与 OAuth 版一致性~~ | **已失效（2026-11-19）**：OAuth 侧 `custom-tokens` 响应（`OAuthCustomTokenVO`）随端点下线一并删除，已无比对对象；`/oauth2/pat/**` 与 `/user/pat/**` 共用 `PatVO`，本身同源 | — |
-| ~~`PatMigrationServiceImpl` 无单测~~ | **已闭合**：`PatMigrationServiceImplTest` 覆盖 4 例——全量搬迁不读令牌明细（`opsForValue` 从未调用）、明文/前缀/`create_time` 原样搬迁、插入失败时 Redis 一条不动、无待处理行时不发写命令 | — |
 | 过期行返回 `null` 无断言 | `.gt(expireTime, now)` 加在 wrapper 上，单测 mock 掉 `selectOne` 后验证不到 | 用集成测试或捕获 wrapper 条件断言 |
 | ~~OAuth2 PAT 管理入口鉴权边界~~ | **已闭合（2026-11-19）**：`OAuthPatMvcTest` 复用生产 `WebConfig`，覆盖列表、单条撤销和全部撤销缺少 access_token；`OAuthPatDirectAuthMvcTest` 使用真实 PAT 服务覆盖四个接口拒绝未开通直连、停用、未审批的应用且不访问 PAT 数据 | — |
 
@@ -423,7 +358,6 @@ END
 
 | 缺口 | 后果 | 当前处置 |
 | --- | --- | --- |
-| 并发撤销无栅栏 | 迁移与撤销并发时，少数令牌可能「撤销后又被写回」 | 迁移期间停写；不停写则接受 |
 | 孤儿令牌（Redis 有、旧表无） | 迁不了 | 留在旧桶自然过期，接受 |
 | 明文列表的展示风险 | 列表页可直接复制令牌，成为分发渠道 | 已要求 TLS + 不落日志/埋点；前端侧需自查 |
 | `payload` 标量强转 | `true` / `1.5` 会被强转成字符串，不在取值层拒绝 | 由绑定校验兜底（`80008`），行为已用测试固化 |
@@ -441,6 +375,10 @@ END
 | 摘要存储 | 与「列表可回看、旧令牌无感迁移」的诉求直接冲突，是全链路明文的取舍本身 |
 
 ## 13. 变更记录
+
+### 2026-11-19 一次性 PAT 迁移接口下线
+
+删除 `GET /internal/pat-migration/run` 及其 Controller、迁移服务、结果对象、旧表实体/Mapper、`TlcPatMapper.insertIgnoreBatch` 和专用测试。已迁入 `tlc_pat` 的旧令牌继续通过 `/pat/**` 使用；未操作已有数据库或 Redis 数据。下方收尾记录为同日较早阶段的历史状态。
 
 ### 2026-11-19 旧直签链路收尾
 

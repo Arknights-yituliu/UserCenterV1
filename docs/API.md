@@ -220,7 +220,6 @@
 | API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
 |---|---|---|---|---|
 | `/oauth2/internal/migrate-token` | POST | 是 | Ed25519 验签 + 时间窗 + nonce 防重放（ts/nonce/kid/sig） | 迁移兑换：BackEndV3 服务端凭旧自签 token 对应的 uid 换取一对全新 TCL 令牌（access+refresh）。 |
-| `/internal/pat-migration/run` | GET | 否 | 无鉴权；**不设开关、随应用启动注册**，必须限定内网访问 | 触发旧自定义令牌向 `tlc_pat` 的全量迁移（旧令牌保留原样明文写入）。**搬迁不判有效性**：`oauth_custom_token` 中所有未过期行都会写入，已被撤销（Redis 明细已删、签发记录仍在）的令牌会重新变成可用 PAT，该取舍已确认接受。每批 500 行批量 `INSERT IGNORE` 后，按 uid 摘除 `uc:uid:oauth:{uid}` 索引成员并批量 `DEL` 旧 key。幂等，返回 `total`/`migrated`/`skipped`（恒 0）/`failed`/`elapsedMs`，满足 `migrated + failed == total`。一次性运维端点：前置条件是新链路已能校验 PAT、旧表已备份、迁移期间停写；**跑完立即删除该 Controller 并重新发布**。服务层方法已加锁串行，重复触发会排队执行，已入库明文被唯一键忽略，不会翻倍。 |
 
 ## 七、PAT 鉴权接口（`Authorization: Bearer {PAT}` 或 `TCL-Token`）
 
@@ -232,4 +231,4 @@
 | `/pat/ak-accounts/operators/save` | POST | 是 | PAT + `arknights-data.write` scope（`gama-data.write` 或 `all` 可覆盖） | 上传角色信息与干员数据，请求及响应与 OAuth 上传接口一致。目标账号取自 `playerInfo.akUid`，不受 PAT payload 绑定账号限制，无需预先绑定；用户身份取自 PAT，首次上传自动建立绑定。复用同一保存服务，支持可选物品、皮肤与 playerData，沿用校验、事务和按账号限流。 |
 | `/pat/ef-accounts/player-data` | GET | 是 | PAT + `endfield-data.read` scope（`gama-data.read` 或 `all` 可覆盖） | 读取终末地玩家数据，新令牌按 `payload.game_uid`（roleId）+ `payload.server_id`（省略按空串）精确校验当前用户角色绑定；旧令牌读取当前用户已绑定角色中最近保存的数据。无查询参数，不能覆盖目标角色、服务器或用户。响应与 `/oauth2/ef-accounts/player-data` 一致，含 `Cache-Control: private, no-cache`。 |
 
-> 迁移完成后旧令牌的 `uc:oauth:access:{token}` 已被删除，只能走本组接口；**消费端与阶段二迁移必须同批上线**，否则会出现旧令牌两边都不认的失效窗口。
+> 已迁入 `tlc_pat` 的旧令牌继续走本组接口。一次性 PAT 迁移端点已下线，应用不再提供旧令牌搬迁入口。
