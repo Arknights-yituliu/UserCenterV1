@@ -236,6 +236,7 @@ entity/vo/pat/PatIssueVO, PatVO     签发响应 / 列表项（都含明文）
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/pat/ak-accounts/operators` | 干员全量数据；账号完全由令牌决定，**接口不声明任何查询参数** |
+| POST | `/pat/ak-accounts/operators/save` | 上传角色信息与干员数据；目标账号取自 playerInfo.akUid，不受 payload 账号限制，无需预先绑定；用户身份取自 PAT，复用 OAuth 保存服务及写权限校验 |
 | GET | `/pat/ef-accounts/player-data` | 终末地玩家数据；新令牌按 payload.game_uid + server_id 校验绑定，旧令牌读当前用户最新保存的数据；无查询参数 |
 
 终末地接口需要 `endfield-data.read`（`gama-data.read` / `all` 可覆盖），共用 `EfPlayerDataService#getPlayerData`，响应与 OAuth 版相同，缓存头为 `private, no-cache`。新令牌 game_uid 缺失不回退默认角色，server_id 缺省按空串精确定位；未绑定返回 `80008`。新增 payload 字段存入现有 JSON 文本，无需调整表结构。

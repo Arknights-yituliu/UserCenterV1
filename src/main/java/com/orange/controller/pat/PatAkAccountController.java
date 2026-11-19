@@ -5,28 +5,36 @@ import com.orange.common.context.UserContext;
 import com.orange.common.enums.OAuthScope;
 import com.orange.common.util.PatPayloadUtil;
 import com.orange.common.util.Result;
+import com.orange.entity.dto.akoperator.OperatorSaveRequest;
 import com.orange.entity.vo.akoperator.AkAccountVO;
 import com.orange.entity.vo.akoperator.OperatorListVO;
+import com.orange.entity.vo.akoperator.OperatorSaveResultVO;
 import com.orange.service.AkAccountService;
 import com.orange.service.PatPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
  * PAT 干员数据接口，路径 {@code /pat/**}。
  *
- * <p>凭证由 {@link com.orange.interceptor.PatAuthInterceptor} 解析，本类只负责取数口径：
+ * <p>凭证由 {@link com.orange.interceptor.PatAuthInterceptor} 解析。读取时，
  * 目标账号不来自请求参数，而按令牌是否有 {@code tlc_pat_} 前缀分流——新令牌取 payload 的
  * {@code game_uid} 并由业务层核对绑定关系；无前缀的旧令牌没有 payload 约定，按「默认来源 →
  * 最近变更」取数，与 OAuth 版不传 {@code akUid} 一致。</p>
  *
  * <p>响应体与 {@code /oauth2/ak-accounts/operators} 完全一致，共用
  * {@link AkAccountService#listOperators(Long, String, String)}，不另立一套取数逻辑。</p>
+ *
+ * <p>上传与 OAuth 版共用请求体和保存服务，目标账号取自 {@code playerInfo.akUid}，
+ * 用户身份始终取自 PAT，首次上传由保存服务建立绑定。</p>
  *
  * @author UserCenter
  */
@@ -81,5 +89,21 @@ public class PatAkAccountController {
         return ResponseEntity.ok()
                 .header(HttpHeaders.CACHE_CONTROL, OPERATOR_CACHE_CONTROL)
                 .body(Result.success(data));
+    }
+
+    /**
+     * 批量保存角色信息与干员数据，与 OAuth 上传接口保持相同的请求及保存语义。
+     *
+     * <p>目标账号取自请求体 {@code playerInfo.akUid}，不使用读取接口的 payload 选账号规则。
+     * 新旧 PAT 均须具备写权限，用户身份不可通过请求参数或请求体覆盖。</p>
+     *
+     * @param request 保存参数
+     * @return 新增、更新与未变更数量
+     */
+    @Operation(summary = "批量保存角色信息与干员数据（PAT）")
+    @PostMapping("/operators/save")
+    public Result<OperatorSaveResultVO> saveOperators(@Valid @RequestBody OperatorSaveRequest request) {
+        UserContext.requireScope(OAuthScope.AK_DATA_WRITE);
+        return Result.success(akAccountService.saveOperators(UserContext.requireUid(), request));
     }
 }

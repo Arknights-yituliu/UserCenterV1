@@ -362,6 +362,8 @@ Authorization: Bearer <access_token>
 
 需要 `arknights-data.write`。目标游戏账号取自请求体 `playerInfo.akUid`；请求体和响应结构与 `POST /user/ak-accounts/operators/save` 完全一致。
 
+长期脚本也可调用 `POST /pat/ak-accounts/operators/save`，将鉴权凭证替换为具备 `arknights-data.write` 的 PAT。请求体、响应与保存逻辑相同，目标账号仍取自 `playerInfo.akUid`，不受 PAT 的 payload 账号限制，也不要求预先绑定。详见 [PAT 接口文档第 7.5 节](../pat/PAT接口文档.md#75-post-patak-accountsoperatorssave上传明日方舟干员数据)。
+
 ### 5.1 请求字段
 
 | 字段 | 类型 | 必填 | 说明 |

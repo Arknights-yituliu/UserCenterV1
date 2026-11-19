@@ -274,7 +274,7 @@ PAT **不做摘要**。`tlc_pat.token` 保存令牌明文本身，Redis 预留�
 
 无需请求体，使用 `Authorization: Bearer <access_token>`。与 `POST /user/pat/revoke-all` 一致，仅按认证凭证中的 uid 删除当前用户全部 PAT（跨应用，包含已过期记录），幂等。调用应用须启用、已审批且 `direct_auth_enabled=1`；用户与客户端身份均不接受请求参数覆盖。
 
-## 7. 消费面：用 PAT 读游戏数据
+## 7. 消费面：用 PAT 读写游戏数据
 
 ### 7.1 `GET /pat/ak-accounts/operators`
 
@@ -331,6 +331,48 @@ curl https://<host>/pat/ef-accounts/player-data \
 ```
 
 `game_name` 与 `source` 仍为展示信息，游戏读取权限由 scope 决定。本接口仅读取已保存的玩家数据；角色列表、数据上传与寻访记录接口见 `docs/oauth/OAuth终末地数据接口文档.md`。
+
+### 7.5 `POST /pat/ak-accounts/operators/save`（上传明日方舟干员数据）
+
+```http
+POST /pat/ak-accounts/operators/save
+Content-Type: application/json
+Authorization: Bearer <PAT明文>
+```
+
+- 鉴权：PAT 明文 + `arknights-data.write`；上级 `gama-data.write` 与元范围 `all` 可覆盖。只有读取权限或 `endfield-data.write` 不可上传。
+- 请求体、响应与保存逻辑和 `POST /oauth2/ak-accounts/operators/save` 一致，共用 `OperatorSaveRequest`、`OperatorSaveResultVO` 与 `AkAccountService#saveOperators`；完整字段见 [OAuth 游戏数据接口文档第 5 节](../oauth/OAuth游戏数据接口文档.md#5-保存角色信息与干员数据)。
+- **写入不限 PAT 绑定账号**：目标账号由请求体 `playerInfo.akUid` 指定，不使用也不核对 `payload.game_uid`、`game_name` 或 `source`，PAT 无 payload 也可上传。新旧 PAT 行为一致，均需写权限。
+- 用户身份始终取自 PAT。无需预先绑定目标账号，首次上传由保存服务为当前 PAT 用户建立绑定；请求参数或请求体中的 `uid`、`clientId` 不能覆盖用户身份。
+- `playerInfo` 与非空 `operators` 必填；还可携带 `items`、`skins`、`playerData`，字段校验、账号展示信息保存、事务、并发重试与按账号限流均沿用 OAuth 版本。
+- 干员按提交的 ID 新增或更新，未提交的干员不删除。非空 `items` 整体覆盖物品快照，非空 `skins` 按完整皮肤集合对齐，非空 `playerData` 整段覆盖；这些可选字段省略、为 null 或为空时不更新已有数据。
+
+请求示例（`playerInfo.akUid` 可以与 PAT 的 `payload.game_uid` 不同）：
+
+```json
+{
+  "playerInfo": {
+    "akUid": "123456789",
+    "channelName": "官服",
+    "nickName": "博士"
+  },
+  "operators": [
+    { "id": "char_002_amiya", "owned": 1, "level": 80, "evolvePhase": 2 }
+  ]
+}
+```
+
+成功响应：
+
+```json
+{
+  "code": 200,
+  "msg": "操作成功",
+  "data": { "createdCount": 1, "updatedCount": 0, "unchangedCount": 0 }
+}
+```
+
+缺失、无效或已过期的 PAT 返回 `80001`，权限不足返回 `80008`。Bean Validation 字段校验失败返回 HTTP 400、`10002`；保存服务发现重复 ID 等参数错误返回 `10002`。同一账号 2 秒内重复上传返回 `30006`，限流服务不可用返回 `40003`，保存冲突重试耗尽返回 `40004`，与 OAuth 版共用处理逻辑。
 
 ## 8. 旧令牌迁移与消费
 
