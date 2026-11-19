@@ -89,7 +89,7 @@ migrate:
   per-uid-per-minute: 5
   per-client-per-minute: 3000
   # kid → Ed25519 公钥（Base64 的 X.509 SubjectPublicKeyInfo）映射，格式：k1=base64,k2=base64
-  # UC 侧只存公钥，从环境变量注入，绝不写进仓库；轮换期可同时配置新旧多把公钥
+  # TCL 侧只存公钥，从环境变量注入，绝不写进仓库；轮换期可同时配置新旧多把公钥
   verify-keys: ""
 
 springdoc:

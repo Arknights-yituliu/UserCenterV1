@@ -1,5 +1,7 @@
 # PAT 消费端接口设计
 
+> 名称兼容：示例统一使用 `TCL-Token`、`TCL-Client-Id`、`tcl_ticket`；对应入口仍接受旧名称 `UC-Token`、`UC-Client-Id`、`uc_ticket`。同一项新旧名称同时提供且非空值不一致时返回 `10001`；令牌解析仍优先使用 `Authorization: Bearer`。此说明不新增端点的认证要求，也不改变归档接口的历史状态。
+
 本文是《PAT 改造方案-最终版》第 5.1 节「消费端接口」的落地设计：PAT 持有者用它读取干员数据。**目标账号的选法按令牌前缀分两代**：带 `tlc_pat_` 前缀的新令牌读 payload 里的 `game_uid`；不带前缀的旧令牌没有 payload 约定，按「用户默认来源 → 最近变更」取数，与 OAuth 版不传 `akUid` 一致。
 
 签发 / 列表 / 撤销见《PAT 改造方案-最终版》第 3 节，本文不重复。
@@ -74,7 +76,7 @@
 
 ```
 Authorization: Bearer <token>
-  → RequestUtil.resolveToken            // 复用现有头解析，兼容 UC-Token
+  → RequestUtil.resolveToken            // 复用现有头解析，兼容 TCL-Token
   → PatUtil.isPat / isLegacyToken       // 两代格式之一，否则 80001，不查库
   → 不计算摘要（全链路明文，业务取舍）
   → SELECT * FROM tlc_pat WHERE token = ? AND expire_time > NOW()

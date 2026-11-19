@@ -23,6 +23,8 @@ import com.orange.service.OAuthTokenStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.ArgumentCaptor;
@@ -148,6 +150,39 @@ class OAuthTokenServiceImplTest {
         assertEquals(300L, ticket.getExpiresIn());
         verify(valueOperations).set(eq(RedisKeyUtil.oauthTicket(ticket.getTicket())),
                 anyString(), eq(300L), eq(java.util.concurrent.TimeUnit.SECONDS));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"tcl_ticket", "uc_ticket"})
+    void eitherTicketParameterConsumesNewNamespaceExactlyOnce(String parameter) {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addParameter(parameter, "incoming-ticket");
+        when(valueOperations.setIfAbsent("tcl:oauth:ticket:used:incoming-ticket", "1", 300L,
+                java.util.concurrent.TimeUnit.SECONDS)).thenReturn(true);
+        when(valueOperations.get("tcl:oauth:ticket:incoming-ticket")).thenReturn("{\"uid\":9}");
+
+        LoginTicketVO issued = service.createLoginTicket(request);
+
+        verify(valueOperations, times(1)).setIfAbsent("tcl:oauth:ticket:used:incoming-ticket", "1", 300L,
+                java.util.concurrent.TimeUnit.SECONDS);
+        verify(redisTemplate, times(1)).delete("tcl:oauth:ticket:incoming-ticket");
+        verify(valueOperations).set(eq("tcl:oauth:ticket:" + issued.getTicket()),
+                eq("{\"uid\":9}"), eq(300L), eq(java.util.concurrent.TimeUnit.SECONDS));
+        verify(valueOperations, never()).get("uc:oauth:ticket:incoming-ticket");
+    }
+
+    @Test
+    void missingNewTicketDoesNotFallBackToOldRedisNamespace() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addParameter("tcl_ticket", "old-ticket");
+        when(valueOperations.setIfAbsent("tcl:oauth:ticket:used:old-ticket", "1", 300L,
+                java.util.concurrent.TimeUnit.SECONDS)).thenReturn(true);
+
+        BusinessException error = assertThrows(BusinessException.class, () -> service.createLoginTicket(request));
+
+        assertEquals(ResultCode.NOT_LOGIN.getCode(), error.getCode());
+        verify(valueOperations).get("tcl:oauth:ticket:old-ticket");
+        verify(valueOperations, never()).get("uc:oauth:ticket:old-ticket");
     }
 
     @Test

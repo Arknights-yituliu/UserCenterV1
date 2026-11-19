@@ -5,6 +5,7 @@ import com.orange.common.enums.OAuthScope;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.util.LogUtil;
+import com.orange.common.util.RequestUtil;
 import com.orange.common.util.Result;
 import com.orange.entity.vo.oauth.ConsentInfoVO;
 import com.orange.entity.vo.oauth.LoginTicketVO;
@@ -37,7 +38,7 @@ import java.util.List;
  * </ul>
  *
  * <p>登录态说明：本系统为纯 API 服务，授权请求需携带本系统登录会话
- * （Authorization: Bearer {token} 或 UC-Token），由网站后端在跳转前引导用户完成登录。</p>
+ * （Authorization: Bearer {token} 或 TCL-Token（兼容 UC-Token）），由网站后端在跳转前引导用户完成登录。</p>
  *
  * @author UserCenter
  */
@@ -87,7 +88,7 @@ public class OAuthController {
     }
 
     /**
-     * OAuth 授权码签发（POST 变体）：跨站登录页可用表单 POST 携带 uc_ticket 于请求体，
+     * OAuth 授权码签发（POST 变体）：跨站登录页可用表单 POST 携带 tcl_ticket（兼容 uc_ticket） 于请求体，
      * 避免登录票据出现在 URL/日志中；参数与 GET 完全一致
      */
     @Operation(summary = "OAuth 授权码签发（POST，跨站登录页表单提交）")
@@ -109,7 +110,7 @@ public class OAuthController {
      * 签发跨站登录票据：登录页登录成功后携带本系统会话 token 调用，换取短时一次性凭证，
      * 供跳转 authorize 时携带（替代跨站不可用的会话 Cookie）
      *
-     * @param request HTTP 请求（Authorization: Bearer {token} 或 UC-Token）
+     * @param request HTTP 请求（Authorization: Bearer {token} 或 TCL-Token（兼容 UC-Token））
      * @return 一次性登录票据
      */
     @Operation(summary = "签发跨站登录票据")
@@ -124,7 +125,7 @@ public class OAuthController {
      * 授权确认信息查询：确认页加载时调用，校验登录态与确认单归属后返回客户端与权限信息
      *
      * @param pendingId 授权确认单 ID（authorize 302 携带）
-     * @param request   HTTP 请求（Authorization: Bearer {token} 或 UC-Token）
+     * @param request   HTTP 请求（Authorization: Bearer {token} 或 TCL-Token（兼容 UC-Token））
      * @return 确认页展示信息（客户端名称、申请权限列表、回调地址）
      */
     @Operation(summary = "查询 OAuth 授权确认信息")
@@ -147,7 +148,7 @@ public class OAuthController {
      * 集合元素须为系统可授予的权限，不受该应用登记范围限制。</p>
      *
      * @param body    授权确认请求体（确认单 ID + 是否同意 + 最终权限集合）
-     * @param request HTTP 请求（解析登录会话，Authorization: Bearer {token} 或 UC-Token）
+     * @param request HTTP 请求（解析登录会话，Authorization: Bearer {token} 或 TCL-Token（兼容 UC-Token））
      * @return 302 回跳地址（含 code 或 error），由前端执行跳转
      */
     @Operation(summary = "确认/拒绝 OAuth 授权")
@@ -176,18 +177,18 @@ public class OAuthController {
      * @param state               防 CSRF 随机串（原样回传）
      * @param codeChallenge       PKCE code_challenge（可空）
      * @param codeChallengeMethod PKCE 算法（S256）
-     * @param request             HTTP 请求（解析登录会话/uc_ticket）
+     * @param request             HTTP 请求（解析登录会话/tcl_ticket（兼容 uc_ticket））
      * @param response            HTTP 响应（302 跳转）
      * @throws IOException 跳转失败时抛出
      */
     private void sendAuthorizeRedirect(String responseType, String clientId, String redirectUri, String scope,
                                        String state, String codeChallenge, String codeChallengeMethod,
                                        HttpServletRequest request, HttpServletResponse response) throws IOException {
-        String ucTicket = request.getParameter("uc_ticket");
+        String tclTicket = RequestUtil.resolveLoginTicket(request);
         LogUtil.debug(OAuthController.class, "[OAuth] authorize 请求: clientId={}, redirectUri={}, scope={}, pkce={}({})",
                 clientId, redirectUri, scope,
                 StringUtils.hasText(codeChallenge) ? "yes" : "no", codeChallengeMethod);
-        if (StringUtils.hasText(ucTicket)) {
+        if (StringUtils.hasText(tclTicket)) {
             LogUtil.debug(OAuthController.class, "[OAuth] authorize 携带跨站登录票据");
         }
         String redirectUrl = oauthTokenService.buildAuthorizeRedirectUrl(
@@ -247,7 +248,7 @@ public class OAuthController {
 
     /**
      * 获取当前授权用户信息：access_token 由 OAuthAuthInterceptor 统一校验并注入上下文，
-     * 查库与按 scope 组装由 Service 完成（便于无自有账户体系的接入方直接以 UC 用户作为登录账号）
+     * 查库与按 scope 组装由 Service 完成（便于无自有账户体系的接入方直接以 TCL 用户作为登录账号）
      *
      * @return 用户信息（uid、用户名、昵称、头像）
      */

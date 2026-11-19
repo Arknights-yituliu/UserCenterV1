@@ -689,7 +689,7 @@ public class AuthServiceImpl implements AuthService {
     }
 
     /**
-     * 校验并规范化来源客户端标识（登录 / 注册必填请求头 {@code UC-Client-Id}）
+     * 校验并规范化来源客户端标识（登录 / 注册必填请求头 {@code TCL-Client-Id}（兼容 {@code UC-Client-Id}））
      *
      * <p>该标识决定会话归属的客户端，用户自助面接口（如 {@code /user/config/**}）按它隔离
      * 数据；会话一旦签发就无法再补写，所以只能在登录 / 注册入口强制必填。长度上限与
@@ -701,7 +701,7 @@ public class AuthServiceImpl implements AuthService {
      */
     private String requireClientId(String clientId) {
         if (!StringUtils.hasText(clientId)) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "缺少来源客户端标识（UC-Client-Id）");
+            throw new BusinessException(ResultCode.PARAM_ERROR, "缺少来源客户端标识（TCL-Client-Id，兼容 UC-Client-Id）");
         }
         String normalized = clientId.trim();
         if (normalized.length() > CLIENT_ID_MAX_LENGTH) {

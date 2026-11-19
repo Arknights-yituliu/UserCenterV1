@@ -138,7 +138,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     }
 
     /**
-     * 解析当前登录用户：优先跨站登录票据（uc_ticket），其次请求头携带的本系统会话 token
+     * 解析当前登录用户：优先跨站登录票据（tcl_ticket（兼容 uc_ticket）），其次请求头携带的本系统会话 token
      *
      * <p>静默解析：未登录或会话无效时返回 null（不抛异常），由调用方决定跳登录页或报错。</p>
      *
@@ -147,11 +147,11 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      */
     private Long resolveLoginUid(HttpServletRequest request) {
         // 1. 优先解析跨站登录票据（短时一次性，随 authorize 的 query/form 参数携带）
-        Long uid = resolveUidByTicket(request.getParameter("uc_ticket"));
+        Long uid = resolveUidByTicket(RequestUtil.resolveLoginTicket(request));
         if (uid != null) {
             return uid;
         }
-        // 2. 其次解析请求头携带的本系统会话 token（Authorization: Bearer / UC-Token）
+        // 2. 其次解析请求头携带的本系统会话 token（Authorization: Bearer / TCL-Token（兼容 UC-Token））
         String token = RequestUtil.resolveToken(request);
         if (token == null || token.isBlank()) {
             return null;
@@ -203,7 +203,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     /**
      * 签发跨站登录票据：登录页登录成功后携带本系统会话 token 调用，换取短时一次性凭证
      *
-     * @param request HTTP 请求（Authorization / UC-Token 携带会话 token）
+     * @param request HTTP 请求（Authorization / TCL-Token（兼容 UC-Token） 携带会话 token）
      * @return 一次性登录票据
      */
     @Override
@@ -239,7 +239,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      * @param codeChallenge      PKCE code_challenge（可空，公共客户端必填）
      * @param codeChallengeMethod PKCE 摘要算法，仅支持 S256
      * @param request            HTTP 请求，用于解析登录态与拼装回跳参数
-     * @return 需要 302 跳转的地址：UC 登录页 / 授权确认页 / 客户端回调地址（携带 code）
+     * @return 需要 302 跳转的地址：TCL 登录页 / 授权确认页 / 客户端回调地址（携带 code）
      */
     @Override
     public String buildAuthorizeRedirectUrl(String responseType, String clientId, String redirectUri, String scope,
@@ -261,7 +261,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
             if (!StringUtils.hasText(loginPageUrl)) {
                 throw new BusinessException(ResultCode.NOT_LOGIN, "请在授权前先登录用户中心");
             }
-            // 未登录：302 到 UC 登录页，登录成功后携带 uc_ticket 回跳当前 authorize 地址（走跨站登录票据）
+            // 未登录：302 到 TCL 登录页，登录成功后携带 tcl_ticket（兼容 uc_ticket） 回跳当前 authorize 地址（走跨站登录票据）
             // 回跳地址拼入请求全部参数（GET query 与 POST form 统一处理），避免登录后丢失参数
             // TreeMap 对参数名排序，保证同一请求多次生成的回跳地址完全一致（便于排查与去重）
             Map<String, String[]> params = new TreeMap<>(request.getParameterMap());

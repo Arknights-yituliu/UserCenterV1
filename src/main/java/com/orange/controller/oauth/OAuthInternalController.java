@@ -38,13 +38,13 @@ public class OAuthInternalController {
     }
 
     /**
-     * 迁移兑换：凭旧自签 token 对应的 uid 换取一对全新的 UC 令牌
+     * 迁移兑换：凭旧自签 token 对应的 uid 换取一对全新的 TCL 令牌
      *
      * @param clientId        目标 OAuth 客户端 ID
      * @param uid             用户名下 uid
      * @param ts              请求时间戳（Unix 秒）
      * @param nonce           一次性随机串
-     * @param kid             公钥标识（对应 UC 侧 kid → 公钥映射表）
+     * @param kid             公钥标识（对应 TCL 侧 kid → 公钥映射表）
      * @param sig             Ed25519 签名（Base64）
      * @param origin          来源标识（可选，仅审计）
      * @param legacyTokenHash 旧 token 的 sha256（可选，仅随成功日志输出供排查）

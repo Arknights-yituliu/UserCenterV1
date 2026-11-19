@@ -23,7 +23,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * OAuth 客户端自助管理接口（需 UC 会话 token，/user/** 由 UserAuthInterceptor 统一校验）
+ * OAuth 客户端自助管理接口（需 TCL 会话 token，/user/** 由 UserAuthInterceptor 统一校验）
  *
  * <p>第三方开发者登录后维护自己名下的 OAuth 客户端：注册、查看、更新、密钥轮换、停用、删除，
  * 所有权按 owner_uid 隔离，只能操作自己名下的客户端。

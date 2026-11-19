@@ -11,7 +11,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  *
  * <p>同时返回本系统签发的 OAuth 令牌（access_token + refresh_token），供旧系统调用
  * /oauth2/userinfo 等 OAuth 资源接口。注意这里签发的是 <b>OAuth 令牌</b>，
- * 不是 <b>UC 会话 token</b>：会话 token 仅由 /auth/login 签发且只作用于 /user/**。</p>
+ * 不是 <b>TCL 会话 token</b>：会话 token 仅由 /auth/login 签发且只作用于 /user/**。</p>
  *
  * @author UserCenter
  */

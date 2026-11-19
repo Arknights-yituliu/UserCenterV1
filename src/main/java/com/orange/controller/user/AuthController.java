@@ -29,9 +29,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/auth")
 public class AuthController {
 
-    /** 来源客户端标识请求头（登录 / 注册必填，由服务层校验，缺失返回 10001） */
-    private static final String HEADER_CLIENT_ID = "UC-Client-Id";
-
     private final AuthService authService;
     private final EmailCodeService emailCodeService;
 
@@ -70,14 +67,14 @@ public class AuthController {
     @Operation(summary = "注册")
     @PostMapping("/register")
     public Result<LoginVO> register(@Valid @RequestBody RegisterRequest request, HttpServletRequest httpRequest) {
-        String clientId = httpRequest.getHeader(HEADER_CLIENT_ID);
+        String clientId = RequestUtil.resolveClientId(httpRequest);
         return Result.success(authService.register(request, RequestUtil.getIp(httpRequest), clientId));
     }
 
     /**
-     * 登录（密码 / 邮箱验证码），成功后返回会话 token（由前端自行携带：Authorization / UC-Token）
+     * 登录（密码 / 邮箱验证码），成功后返回会话 token（由前端自行携带：Authorization / TCL-Token（兼容 UC-Token））
      *
-     * <p>必须携带 {@code UC-Client-Id} 请求头：会话按来源客户端隔离用户配置，登录时缺失
+     * <p>必须携带 {@code TCL-Client-Id}（兼容 {@code UC-Client-Id}） 请求头：会话按来源客户端隔离用户配置，登录时缺失
      * 会让后续 {@code /user/config/**} 全部不可用，因此改为必填并在服务层拦截。</p>
      *
      * @param request      登录参数
@@ -87,7 +84,7 @@ public class AuthController {
     @Operation(summary = "登录")
     @PostMapping("/login")
     public Result<LoginVO> login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
-        String clientId = httpRequest.getHeader(HEADER_CLIENT_ID);
+        String clientId = RequestUtil.resolveClientId(httpRequest);
         LoginVO vo = authService.login(request, RequestUtil.getIp(httpRequest),
                 httpRequest.getHeader("User-Agent"), clientId);
         return Result.success(vo);

@@ -1,5 +1,7 @@
 # OAuth2 客户端管理接口文档
 
+> 名称兼容：示例统一使用 `TCL-Token`、`TCL-Client-Id`、`tcl_ticket`；对应入口仍接受旧名称 `UC-Token`、`UC-Client-Id`、`uc_ticket`。同一项新旧名称同时提供且非空值不一致时返回 `10001`；令牌解析仍优先使用 `Authorization: Bearer`。此说明不新增端点的认证要求，也不改变归档接口的历史状态。
+
 ## 1. 文档说明
 
 本文档描述 UserCenter OAuth2 客户端自助管理接口，供客户端管理页面和第三方开发者后台接入使用。
@@ -13,13 +15,13 @@
 所有管理接口都必须携带以下任一请求头：
 
 ```http
-Authorization: Bearer <UC_SESSION_TOKEN>
+Authorization: Bearer <TCL_SESSION_TOKEN>
 ```
 
 或：
 
 ```http
-UC-Token: <UC_SESSION_TOKEN>
+TCL-Token: <TCL_SESSION_TOKEN>
 ```
 
 推荐统一使用 `Authorization: Bearer`。
@@ -123,7 +125,7 @@ UC-Token: <UC_SESSION_TOKEN>
 
 ```http
 GET /user/oauth/client/scopes
-Authorization: Bearer <UC_SESSION_TOKEN>
+Authorization: Bearer <TCL_SESSION_TOKEN>
 ```
 
 响应中的每一项包含 `code`、`name`、`description` 和 `sensitive`。其中 `sensitive=true` 表示该范围可读取或操作敏感用户数据，前端应在客户端配置与用户授权确认时突出展示。
@@ -201,7 +203,7 @@ http://localhost:5173
 
 ```http
 POST /user/oauth/client/register
-Authorization: Bearer <UC_SESSION_TOKEN>
+Authorization: Bearer <TCL_SESSION_TOKEN>
 Content-Type: application/json
 ```
 
@@ -306,7 +308,7 @@ ownerEnabled && adminApproved && directAuthEnabled
 
 ```http
 GET /user/oauth/client/list
-Authorization: Bearer <UC_SESSION_TOKEN>
+Authorization: Bearer <TCL_SESSION_TOKEN>
 ```
 
 响应：
@@ -342,7 +344,7 @@ Authorization: Bearer <UC_SESSION_TOKEN>
 
 ```http
 GET /user/oauth/client/{clientId}
-Authorization: Bearer <UC_SESSION_TOKEN>
+Authorization: Bearer <TCL_SESSION_TOKEN>
 ```
 
 示例：
@@ -359,7 +361,7 @@ GET /user/oauth/client/cl_0123456789abcdef01234567
 
 ```http
 POST /user/oauth/client/{clientId}/update
-Authorization: Bearer <UC_SESSION_TOKEN>
+Authorization: Bearer <TCL_SESSION_TOKEN>
 Content-Type: application/json
 ```
 
@@ -407,7 +409,7 @@ Content-Type: application/json
 
 ```http
 POST /user/oauth/client/{clientId}/rotate-secret
-Authorization: Bearer <UC_SESSION_TOKEN>
+Authorization: Bearer <TCL_SESSION_TOKEN>
 ```
 
 响应：
@@ -442,7 +444,7 @@ Authorization: Bearer <UC_SESSION_TOKEN>
 
 ```http
 POST /user/oauth/client/{clientId}/disable
-Authorization: Bearer <UC_SESSION_TOKEN>
+Authorization: Bearer <TCL_SESSION_TOKEN>
 ```
 
 停用后，新的授权、授权码兑换和 refresh token 刷新将被拒绝。成功响应的 `data` 为 `null`。
@@ -453,7 +455,7 @@ Authorization: Bearer <UC_SESSION_TOKEN>
 
 ```http
 POST /user/oauth/client/{clientId}/enable
-Authorization: Bearer <UC_SESSION_TOKEN>
+Authorization: Bearer <TCL_SESSION_TOKEN>
 ```
 
 成功响应的 `data` 为 `null`。如果客户端仍在等待管理员审批或已被管理员封禁，用户不能自行启用，返回 `90013`。管理员审批只会令 `adminApproved` 变为 `true`；如果所有者曾主动停用客户端，审批后仍需所有者调用本接口启用。
@@ -462,7 +464,7 @@ Authorization: Bearer <UC_SESSION_TOKEN>
 
 ```http
 POST /user/oauth/client/{clientId}/delete
-Authorization: Bearer <UC_SESSION_TOKEN>
+Authorization: Bearer <TCL_SESSION_TOKEN>
 ```
 
 删除行为：
@@ -494,7 +496,7 @@ Authorization: Bearer <UC_SESSION_TOKEN>
 | `10002` | 参数校验失败 | 必填字段为空、长度或 TTL 不符合要求 |
 | `10003` | 非法操作 | 公共客户端尝试轮换密钥 |
 | `40001` | 系统繁忙 | 未处理的服务端异常 |
-| `80001` | 未登录或登录已失效 | 缺少或使用无效 UC 会话 token |
+| `80001` | 未登录或登录已失效 | 缺少或使用无效 TCL 会话 token |
 | `80008` | 无权限操作 | 操作了其他用户的客户端 |
 | `90001` | 客户端不存在或已停用 | clientId 不存在，或 OAuth 流程使用了停用客户端 |
 | `90012` | 客户端数量已达上限 | 当前账号无法继续注册客户端 |

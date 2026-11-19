@@ -1,5 +1,7 @@
 # PAT 独立凭证类改造方案（最终版）
 
+> 名称兼容：示例统一使用 `TCL-Token`、`TCL-Client-Id`、`tcl_ticket`；对应入口仍接受旧名称 `UC-Token`、`UC-Client-Id`、`uc_ticket`。同一项新旧名称同时提供且非空值不一致时返回 `10001`；令牌解析仍优先使用 `Authorization: Bearer`。此说明不新增端点的认证要求，也不改变归档接口的历史状态。
+
 > 把「用户自签的长期令牌」从 OAuth access_token 域里拆出来，成为独立凭证类 PAT：独立表、独立命名空间、独立生命周期。
 >
 > 本文是唯一实施依据。历史版本（v1–v5、整合版）已移入 `docs/oauth/archive/`，仅作论证底稿。
@@ -22,7 +24,7 @@
 
 ## 1. 结论
 
-**PAT 是「被管理的对象」，不是「请求的凭证」。** 申请、查看、撤销 PAT 时，请求头传的仍是原有两种凭证（`uc-token` 会话 / access_token）。PAT 的消费端是独立接口 `/pat/ak-accounts/operators`，已落地（见《PAT消费端接口设计.md》）。
+**PAT 是「被管理的对象」，不是「请求的凭证」。** 申请、查看、撤销 PAT 时，请求头传的仍是原有两种凭证（`TCL-Token` 会话 / access_token）。PAT 的消费端是独立接口 `/pat/ak-accounts/operators`，已落地（见《PAT消费端接口设计.md》）。
 
 因此改造分两阶段，中间没有必须赶的时间点：
 

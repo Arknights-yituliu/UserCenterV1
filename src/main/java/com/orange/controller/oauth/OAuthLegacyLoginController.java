@@ -21,7 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <ul>
  *   <li>POST /oauth2/direct-*：直连登录四接口（发起会话/提交凭证/注册/兑换用户信息并签发令牌），
- *       登录/注册凭证由浏览器直接提交 UC，不经过旧系统后端</li>
+ *       登录/注册凭证由浏览器直接提交 TCL，不经过旧系统后端</li>
  * </ul>
  *
  * @author UserCenter
@@ -64,7 +64,7 @@ public class OAuthLegacyLoginController {
 
     /**
      * 直连登录-提交凭证（前端直接调用）：旧系统保持自家登录页，登录凭证（密码或邮箱验证码）
-     * 由浏览器直接提交到 UC，校验通过后返回一次性登录票据（凭证不经过旧系统后端），
+     * 由浏览器直接提交到 TCL，校验通过后返回一次性登录票据（凭证不经过旧系统后端），
      * 前端将票据交给旧系统后端
      *
      * @param channel     发起会话凭证（旧系统后端签发）
@@ -90,7 +90,7 @@ public class OAuthLegacyLoginController {
 
     /**
      * 直连注册（前端直接调用）：旧系统保持自家注册页，注册信息（含密码/验证码）由浏览器
-     * 直接提交到 UC，创建用户后返回一次性登录票据（注册信息不经过旧系统后端），
+     * 直接提交到 TCL，创建用户后返回一次性登录票据（注册信息不经过旧系统后端），
      * 前端将票据交给旧系统后端，由后端凭票据兑换用户信息（复用 /oauth2/direct-user）
      *
      * <p>兼容说明：旧的 {@code register_type} 参数在统一注册形态后已无意义，服务端不再声明，

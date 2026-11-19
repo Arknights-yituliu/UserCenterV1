@@ -6,7 +6,7 @@ import com.orange.service.OAuthTokenService.OAuthTokenPrincipal;
 /**
  * OAuth 用户信息响应（GET /oauth2/userinfo）
  *
- * <p>接入方多为无自有账户体系的网站，直接以 UC 用户作为登录账号，因此返回用户基础资料
+ * <p>接入方多为无自有账户体系的网站，直接以 TCL 用户作为登录账号，因此返回用户基础资料
  * （uid/用户名/昵称/头像），供接入方展示与关联。</p>
  *
  * @author UserCenter

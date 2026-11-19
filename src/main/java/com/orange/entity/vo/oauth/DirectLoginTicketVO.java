@@ -5,7 +5,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 /**
  * 直连登录票据响应（POST /oauth2/direct-login，前端调用）
  *
- * <p>前端直接向 UC 提交账号密码，校验通过后返回一次性登录票据（ticket），
+ * <p>前端直接向 TCL 提交账号密码，校验通过后返回一次性登录票据（ticket），
  * 前端将 ticket 交给旧系统后端，由后端凭 ticket 兑换用户信息。密码全程不经过旧系统后端。</p>
  *
  * @author UserCenter

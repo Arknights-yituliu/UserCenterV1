@@ -1,5 +1,7 @@
 package com.orange.common.util;
 
+import com.orange.common.enums.ResultCode;
+import com.orange.common.exception.BusinessException;
 import jakarta.servlet.http.HttpServletRequest;
 
 /**
@@ -37,7 +39,7 @@ public final class RequestUtil {
     }
 
     /**
-     * 从请求解析用户 token：优先 Authorization: Bearer xxx，其次 UC-Token
+     * 从请求解析用户 token：优先 Authorization: Bearer xxx，其次 TCL-Token（兼容 UC-Token）
      *
      * @param request 请求
      * @return token，未携带时返回 null
@@ -47,10 +49,32 @@ public final class RequestUtil {
         if (authorization != null && authorization.startsWith(BEARER_PREFIX)) {
             return authorization.substring(BEARER_PREFIX.length()).trim();
         }
-        String ucToken = request.getHeader("UC-Token");
-        if (ucToken != null && !ucToken.isBlank()) {
-            return ucToken.trim();
+        return compatibleValue(request.getHeader("TCL-Token"),
+                request.getHeader("UC-Token"), "TCL-Token / UC-Token");
+    }
+
+    /** 解析来源客户端标识，兼容旧 UC-Client-Id 请求头。 */
+    public static String resolveClientId(HttpServletRequest request) {
+        return compatibleValue(request.getHeader("TCL-Client-Id"),
+                request.getHeader("UC-Client-Id"), "TCL-Client-Id / UC-Client-Id");
+    }
+
+    /** 解析跨站登录票据，兼容旧 uc_ticket 查询/表单参数。 */
+    public static String resolveLoginTicket(HttpServletRequest request) {
+        return compatibleValue(request.getParameter("tcl_ticket"),
+                request.getParameter("uc_ticket"), "tcl_ticket / uc_ticket");
+    }
+
+    private static String compatibleValue(String current, String legacy, String field) {
+        String currentValue = normalizeCompatibleValue(current);
+        String legacyValue = normalizeCompatibleValue(legacy);
+        if (currentValue != null && legacyValue != null && !currentValue.equals(legacyValue)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "新旧参数值不一致（" + field + "）");
         }
-        return null;
+        return currentValue != null ? currentValue : legacyValue;
+    }
+
+    private static String normalizeCompatibleValue(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 }

@@ -1,5 +1,7 @@
 # OAuth 用户资料接口
 
+> 名称兼容：示例统一使用 `TCL-Token`、`TCL-Client-Id`、`tcl_ticket`；对应入口仍接受旧名称 `UC-Token`、`UC-Client-Id`、`uc_ticket`。同一项新旧名称同时提供且非空值不一致时返回 `10001`；令牌解析仍优先使用 `Authorization: Bearer`。此说明不新增端点的认证要求，也不改变归档接口的历史状态。
+
 本文档面向 OAuth 接入方，说明通过 OAuth access_token 读取用户基础资料、修改昵称与头像的接口。用户身份由 access_token 决定，请求参数不能指定或覆盖它。
 
 本文档与用户侧《用户资料接口》为同一份业务的两侧入口，差异见 [第 6 节](#6-与用户侧的差异)。
@@ -15,7 +17,7 @@ Authorization: Bearer <access_token>
 ```
 
 ```http
-UC-Token: <access_token>
+TCL-Token: <access_token>
 ```
 
 服务端从令牌解析出用户 `uid`、OAuth 客户端 `client_id` 与已授权的 `scope` 并注入请求上下文。令牌缺失、无效或已过期时响应 `code=80001`。
@@ -187,16 +189,16 @@ Authorization: Bearer <access_token>
 ```bash
 # 1. 获取用户信息
 curl -H "Authorization: Bearer <access_token>" \
-  "https://<uc-host>/oauth2/userinfo"
+  "https://<tcl-host>/oauth2/userinfo"
 
 # 2. 修改昵称（支持中文）
-curl -X POST "https://<uc-host>/oauth2/profile/nickname" \
+curl -X POST "https://<tcl-host>/oauth2/profile/nickname" \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{"nickname":"新昵称"}'
 
 # 3. 修改头像（空串表示清除）
-curl -X POST "https://<uc-host>/oauth2/profile/avatar" \
+curl -X POST "https://<tcl-host>/oauth2/profile/avatar" \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{"avatar":"https://cdn.example.com/avatar/new.png"}'

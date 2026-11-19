@@ -1,5 +1,7 @@
 # PAT（个人访问令牌）接口文档
 
+> 名称兼容：示例统一使用 `TCL-Token`、`TCL-Client-Id`、`tcl_ticket`；对应入口仍接受旧名称 `UC-Token`、`UC-Client-Id`、`uc_ticket`。同一项新旧名称同时提供且非空值不一致时返回 `10001`；令牌解析仍优先使用 `Authorization: Bearer`。此说明不新增端点的认证要求，也不改变归档接口的历史状态。
+
 > 面向调用方：本系统自有前端、已开通直连认证的应用后端、以及需要用长期凭证读取数据的脚本/服务。
 > 全貌（分层、链路、未完成工作）见 `docs/pat/PAT整体架构.md`；接口总览见 `docs/API.md`；
 > 存储与迁移方案见 `docs/archive/PAT改造方案-最终版.md`；消费端取数设计见 `docs/archive/PAT消费端接口设计.md`；
@@ -55,7 +57,7 @@ curl https://<host>/pat/ak-accounts/operators -H 'Authorization: Bearer <PAT明�
 
 ### 2.3 怎么携带凭证
 
-优先 `Authorization: Bearer <PAT明文>`，也支持 `UC-Token: <PAT明文>`；两者都取时以 `Authorization` 为准，值会自动 `trim()`。
+优先 `Authorization: Bearer <PAT明文>`，也支持 `TCL-Token: <PAT明文>`；两者都取时以 `Authorization` 为准，值会自动 `trim()`。
 
 ```http
 GET /pat/ak-accounts/operators HTTP/1.1

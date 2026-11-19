@@ -38,7 +38,7 @@ public interface OAuthTokenService {
      * 签发跨站登录票据：供登录页（与授权服务器跨站）登录成功后换取短时一次性凭证，
      * 随 authorize 请求携带，替代跨站不可用的会话 Cookie
      *
-     * @param request HTTP 请求（须携带本系统会话 token：Authorization / UC-Token）
+     * @param request HTTP 请求（须携带本系统会话 token：Authorization / TCL-Token（兼容 UC-Token））
      * @return 一次性登录票据
      */
     LoginTicketVO createLoginTicket(HttpServletRequest request);
@@ -182,7 +182,7 @@ public interface OAuthTokenService {
     OAuthTokenVO issueDirectToken(String clientId, Long uid);
 
     /**
-     * 迁移兑换签发：为一个 uid 现场签发一对全新的 UC 令牌，并替换上一轮迁移凭证。
+     * 迁移兑换签发：为一个 uid 现场签发一对全新的 TCL 令牌，并替换上一轮迁移凭证。
      *
      * <p>与 {@link #issueDirectToken} 的差异在于「先撤旧、再签新、后写映射」由 Lua 脚本
      * 一次性原子完成：签发前先撤销同一 (uid, clientId) 上上一轮迁移签发的 refresh_token，

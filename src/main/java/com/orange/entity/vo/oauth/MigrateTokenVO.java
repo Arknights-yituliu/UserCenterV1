@@ -4,7 +4,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
- * 迁移兑换端点响应视图对象（UC → BackEndV3 的服务端间响应）
+ * 迁移兑换端点响应视图对象（TCL → BackEndV3 的服务端间响应）
  *
  * <p>为缩小公网暴露下的响应面，不复用 ServerLoginVO：只回令牌与 scope，不回带
  * 昵称 / 头像 / 邮箱。用户资料由 BackEndV3 持新 access_token 调 /oauth2/userinfo 获取。</p>

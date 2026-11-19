@@ -5,6 +5,7 @@ import com.orange.common.context.UserContext;
 import com.orange.common.enums.ResultCode;
 import com.orange.common.exception.BusinessException;
 import com.orange.common.util.RedisKeyUtil;
+import com.orange.common.util.RequestUtil;
 import com.orange.entity.dto.SessionInfo;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -18,7 +19,7 @@ import java.io.IOException;
 /**
  * 用户认证拦截器（仅处理用户会话，OAuth 令牌由 {@link OAuthAuthInterceptor} 单独负责）
  *
- * <p>校验请求携带的用户会话凭证（Authorization: Bearer {token} 或 UC-Token），
+ * <p>校验请求携带的用户会话凭证（Authorization: Bearer {token} 或 TCL-Token（兼容 UC-Token）），
  * 实时查询 Redis 会话（uc:token:*），保证"踢下线"立即生效；
  * 通过后将 uid 与来源 client_id 写入 {@link UserContext}。</p>
  *
@@ -26,9 +27,6 @@ import java.io.IOException;
  */
 @Component
 public class UserAuthInterceptor implements HandlerInterceptor {
-
-    /** Authorization 请求头前缀 */
-    private static final String BEARER_PREFIX = "Bearer ";
 
     private final StringRedisTemplate stringRedisTemplate;
     private final ObjectMapper objectMapper;
@@ -96,17 +94,12 @@ public class UserAuthInterceptor implements HandlerInterceptor {
     }
 
     /**
-     * 从请求头解析 token：优先 Authorization: Bearer xxx，其次 UC-Token
+     * 从请求头解析 token：优先 Authorization: Bearer xxx，其次 TCL-Token（兼容 UC-Token）
      *
      * @param request 请求
      * @return token，未携带时返回 null
      */
     private String resolveToken(HttpServletRequest request) {
-        String authorization = request.getHeader("Authorization");
-        if (authorization != null && authorization.startsWith(BEARER_PREFIX)) {
-            return authorization.substring(BEARER_PREFIX.length()).trim();
-        }
-        String ucToken = request.getHeader("UC-Token");
-        return (ucToken == null || ucToken.isBlank()) ? null : ucToken.trim();
+        return RequestUtil.resolveToken(request);
     }
 }

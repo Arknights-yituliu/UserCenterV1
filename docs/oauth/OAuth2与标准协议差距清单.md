@@ -1,5 +1,7 @@
 # OAuth2 与标准协议差距清单
 
+> 名称兼容：示例统一使用 `TCL-Token`、`TCL-Client-Id`、`tcl_ticket`；对应入口仍接受旧名称 `UC-Token`、`UC-Client-Id`、`uc_ticket`。同一项新旧名称同时提供且非空值不一致时返回 `10001`；令牌解析仍优先使用 `Authorization: Bearer`。此说明不新增端点的认证要求，也不改变归档接口的历史状态。
+
 > 基于当前代码实现（OAuthController、OAuthTokenServiceImpl、OAuthTokenVO 等）对照 RFC 6749 / 6750 / 7636 / 7009 / 7662 的逐项评估。
 > 用途：记录与标准 OAuth2 的偏差，为后续协议合规改造与接入方说明提供依据。
 
@@ -81,22 +83,22 @@
 
 ### 3.4 OAuth2 之外的扩展说明（非差距）
 
-- **登录会话模型**：使用 UC 会话 token / uc\_ticket 而非浏览器 Cookie 会话重定向，属纯 API 化的产品改造，协议结果（code 回跳）与标准等价。
+- **登录会话模型**：使用 TCL 会话 token / tcl\_ticket 而非浏览器 Cookie 会话重定向，属纯 API 化的产品改造，协议结果（code 回跳）与标准等价。
 - **userinfo 自定义结构**：无 OIDC `sub`、`id_token`、Discovery/JWKS。仅当接入方要求标准 OIDC 时才构成差距。
 - **授权确认 API 化**：consent 采用「服务端返回回跳 URL，前端执行跳转」的接口化模型。
 
 ### 3.5 内部令牌迁移端点（非标准扩展，非差距但需登记）
 
-- **端点**：`POST /oauth2/internal/migrate-token`，完整定义见《BackEndV3与UC令牌统一方案》第 5 节。
-- **性质**：非标准扩展，不属于 RFC 6749 的任何 grant type，也不面向标准 OAuth 客户端；它是 BackEndV3 → UC 的服务端间内部接口，用于把「旧自签 token 对应的 uid」按需兑换为一对 UC 令牌。因此 3.1 中「响应包裹 envelope」「错误统一 200 + `{code,msg}`」的偏差对本端点**不构成互操作问题**（无标准客户端调用）。
-- **认证方式**：HTTP 层不使用任何 OAuth 凭证（无 Bearer、无 client\_secret），改用 **Ed25519 非对称签名**——BackEndV3 持私钥签名，UC 只存公钥验签。签名原文（canonical 串）为：
+- **端点**：`POST /oauth2/internal/migrate-token`，完整定义见《BackEndV3与TCL令牌统一方案》第 5 节。
+- **性质**：非标准扩展，不属于 RFC 6749 的任何 grant type，也不面向标准 OAuth 客户端；它是 BackEndV3 → TCL 的服务端间内部接口，用于把「旧自签 token 对应的 uid」按需兑换为一对 TCL 令牌。因此 3.1 中「响应包裹 envelope」「错误统一 200 + `{code,msg}`」的偏差对本端点**不构成互操作问题**（无标准客户端调用）。
+- **认证方式**：HTTP 层不使用任何 OAuth 凭证（无 Bearer、无 client\_secret），改用 **Ed25519 非对称签名**——BackEndV3 持私钥签名，TCL 只存公钥验签。签名原文（canonical 串）为：
 
   ```
   POST\n/oauth2/internal/migrate-token\n{kid}\n{client_id}\n{uid}\n{ts}\n{nonce}
   ```
 
   配套防护：`ts` 时间窗（默认 ±120s）+ `nonce` 一次性占用（`SET NX EX`，TTL 为时间窗的 2 倍）+ `kid` 公钥标识以支持轮换。**不采用共享密钥（HMAC）**：跨公网场景下任一侧泄漏即可伪造请求、冒充任意用户。
-- **公网可达这一事实**：BackEndV3 与 UC 分属两台服务器，无法只走内网，该路径**跨公网可达**；UC 亦未对该路径注册任何拦截器（`interceptor/WebConfig.java` 仅覆盖 `/user/**`、`/auth/logout`、`/oauth2/userinfo` 等），认证完全由端点自带。
+- **公网可达这一事实**：BackEndV3 与 TCL 分属两台服务器，无法只走内网，该路径**跨公网可达**；TCL 亦未对该路径注册任何拦截器（`interceptor/WebConfig.java` 仅覆盖 `/user/**`、`/auth/logout`、`/oauth2/userinfo` 等），认证完全由端点自带。
 - **加固要求**（网络层是加固、不是屏障；**认证层是唯一准入屏障**）：
   1. 认证层：Ed25519 验签必须始终开启，公钥经 `migrate.verify-keys` 按 `kid` 配置，支持轮换；
   2. 传输层：强制 HTTPS（含反代终止 TLS 时按 `X-Forwarded-Proto` 判定）；

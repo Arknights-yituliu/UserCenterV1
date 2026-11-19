@@ -1,5 +1,7 @@
 # OAuth 令牌直签接口文档
 
+> 名称兼容：示例统一使用 `TCL-Token`、`TCL-Client-Id`、`tcl_ticket`；对应入口仍接受旧名称 `UC-Token`、`UC-Client-Id`、`uc_ticket`。同一项新旧名称同时提供且非空值不一致时返回 `10001`；令牌解析仍优先使用 `Authorization: Bearer`。此说明不新增端点的认证要求，也不改变归档接口的历史状态。
+
 > **已下线（2026-11-19）**：本文描述的直签端点，以及同批下线的 4 个令牌增删查端点，均已从代码中删除，
 > 请求直接 404。涉及的具体路径：`GET/POST /user/oauth/custom-tokens`、
 > `POST /user/oauth/custom-tokens/revoke`、`POST /oauth2/token/from-refresh`、
@@ -35,7 +37,7 @@ POST /oauth2/token/from-refresh   # 凭证为 refresh_token（协议域，凭证
 | 换取目标 | 按客户端登记 TTL 签发 | **调用方指定** `expires_in` |
 | 是否轮转 refresh | 轮转模式下会换发 | **不轮转**，凭证保持有效 |
 
-需要强调二者的定位差异：`/user/oauth/custom-tokens` 是**本系统前端的用户自助入口**，与 `GET /user/oauth/custom-tokens`（查我的自定义令牌）同属 `/user` 用户态资源；它没有 `client_secret` 的概念，只认登录会话。`/oauth2/token/from-refresh` 则是**面向服务端**的非标准扩展（如 BackEndV3 → UC）。二者都不面向标准 OAuth 客户端库。协议兼容性说明见《OAuth2 与标准协议差距清单》第 3 节。
+需要强调二者的定位差异：`/user/oauth/custom-tokens` 是**本系统前端的用户自助入口**，与 `GET /user/oauth/custom-tokens`（查我的自定义令牌）同属 `/user` 用户态资源；它没有 `client_secret` 的概念，只认登录会话。`/oauth2/token/from-refresh` 则是**面向服务端**的非标准扩展（如 BackEndV3 → TCL）。二者都不面向标准 OAuth 客户端库。协议兼容性说明见《OAuth2 与标准协议差距清单》第 3 节。
 
 ### 1.2 典型用途
 
@@ -48,7 +50,7 @@ POST /oauth2/token/from-refresh   # 凭证为 refresh_token（协议域，凭证
 
 两个端点的认证方式**完全不同**：
 
-- `/user/oauth/custom-tokens`：注册在 `UserAuthInterceptor` 覆盖范围内（`/user/**`），**必须携带登录会话请求头**（`Authorization: Bearer` / `UC-Token`，与项目其他 `/user` 接口一致）。拦截器解析会话后把 `uid`、来源 `clientId` 注入 `UserContext`，因此**请求体中不需要传 `uc_token`**。
+- `/user/oauth/custom-tokens`：注册在 `UserAuthInterceptor` 覆盖范围内（`/user/**`），**必须携带登录会话请求头**（`Authorization: Bearer` / `TCL-Token`，与项目其他 `/user` 接口一致）。拦截器解析会话后把 `uid`、来源 `clientId` 注入 `UserContext`，因此**请求体中不需要传 `uc_token`**。
 - `/oauth2/token/from-refresh`：**不注册任何拦截器**，HTTP 层不校验会话，认证完全由请求体中的 `refresh_token` 承担。
 
 两者都**不需要 `client_secret`**。凭证不得出现在 URL 查询串、日志或监控中。
@@ -113,7 +115,7 @@ POST /oauth2/token/from-refresh   # 凭证为 refresh_token（协议域，凭证
 2. 确定目标应用：
    - **传了其它 `client_id`**：代该应用签发，查 `oauth_client` 表校验启用 + 已审批，否则 `90001` / `90013`；授权范围取用户对该应用的有效授权。
    - **没传（含空白）或显式传 `this_land_cloud`**：签成「用户个人令牌」，令牌归属保留标识 `this_land_cloud`。user 侧前端不注册 oauth client，因此该标识**直接放行、不查表**，只作为令牌记录里的归属与数据隔离维度。权限上限取系统可自助范围（`OAuthScope.selectable()` 全集，天然不含 `all`）。
-   - 两种情况都与会话里的来源客户端标识（`UC-Client-Id`）无关——后者只表示"从哪个前端登录"，不参与令牌归属。
+   - 两种情况都与会话里的来源客户端标识（`TCL-Client-Id`）无关——后者只表示"从哪个前端登录"，不参与令牌归属。
 3. 授权范围取 **`resolveGrantScope(client, null, uid)`**，即用户对当前应用的有效授权——**用户自定义授权范围表（`oauth_user_scope`）在此生效**，用户在确认页的裁剪/追加会被延续。个人令牌路径下该表不参与（`this_land_cloud` 下不存在自定义记录），直接用系统可自助范围。
 4. **不接受元范围 `all`**：先按请求 `scope` 做只减不增的收敛，再检查最终范围；若仍为 `all` 返回 `90003`。因此目标应用登记了 `all` 时，调用方必须显式传具体 `scope`（如 `user.read`），否则无法自助签发。该限制的目的：`all` 仅代表管理员手工授予的平台级可信应用，若允许用户自助领取，审计上无法区分"管理员授权"与"用户自签"。
 
@@ -195,8 +197,8 @@ POST /oauth2/token/from-refresh   # 凭证为 refresh_token（协议域，凭证
 ### 9.1 前端会话签发（个人令牌，沿用系统可自助范围）
 
 ```http
-POST {UC_BASE_URL}/user/oauth/custom-tokens
-Authorization: Bearer {UC_SESSION_TOKEN}
+POST {TCL_BASE_URL}/user/oauth/custom-tokens
+Authorization: Bearer {TCL_SESSION_TOKEN}
 Content-Type: application/x-www-form-urlencoded
 
 expires_in=600
@@ -208,8 +210,8 @@ expires_in=600
 ### 9.2 前端会话签发（收敛到只读）
 
 ```http
-POST {UC_BASE_URL}/user/oauth/custom-tokens
-Authorization: Bearer {UC_SESSION_TOKEN}
+POST {TCL_BASE_URL}/user/oauth/custom-tokens
+Authorization: Bearer {TCL_SESSION_TOKEN}
 Content-Type: application/x-www-form-urlencoded
 
 expires_in=600
@@ -220,8 +222,8 @@ expires_in=600
 ### 9.2.1 代某个已登记应用签发（可选）
 
 ```http
-POST {UC_BASE_URL}/user/oauth/custom-tokens
-Authorization: Bearer {UC_SESSION_TOKEN}
+POST {TCL_BASE_URL}/user/oauth/custom-tokens
+Authorization: Bearer {TCL_SESSION_TOKEN}
 Content-Type: application/x-www-form-urlencoded
 
 client_id={TARGET_CLIENT_ID}
@@ -234,7 +236,7 @@ client_id={TARGET_CLIENT_ID}
 ### 9.3 用刷新令牌换取短时令牌
 
 ```http
-POST {UC_BASE_URL}/oauth2/token/from-refresh
+POST {TCL_BASE_URL}/oauth2/token/from-refresh
 Content-Type: application/x-www-form-urlencoded
 
 refresh_token={REFRESH_TOKEN}
@@ -307,7 +309,7 @@ GET /oauth2/custom-tokens
 Authorization: Bearer {ACCESS_TOKEN}
 ```
 
-也可用 `UC-Token: {ACCESS_TOKEN}`。
+也可用 `TCL-Token: {ACCESS_TOKEN}`。
 
 - 认证：由 `OAuthAuthInterceptor` 完成，使用标准 `access_token`（`refresh_token` 提交会被判为无效令牌）。
 - 准入：服务层强制校验该应用**已启用、已由管理员审批且已开通直连认证能力**（`direct_auth_enabled=1`）。未开通返回 `90014`，未审批返回 `90013`，客户端无效返回 `90001`。该能力只授予管理员显式开通的机密客户端，公共客户端与普通第三方应用无法调用，避免凭普通 access_token 收割用户的自定义令牌明文。
@@ -383,7 +385,7 @@ GET /open/oauth/scopes
 
 ```http
 POST /user/oauth/custom-tokens/revoke
-Authorization: Bearer {UC_SESSION_TOKEN}
+Authorization: Bearer {TCL_SESSION_TOKEN}
 Content-Type: application/json
 
 { "token": "{ACCESS_TOKEN}" }
@@ -406,7 +408,7 @@ Content-Type: application/json
 { "token": "{ACCESS_TOKEN_TO_REVOKE}" }
 ```
 
-也可用 `UC-Token: {ACCESS_TOKEN}` 提交认证凭证。
+也可用 `TCL-Token: {ACCESS_TOKEN}` 提交认证凭证。
 
 - 认证：由 `OAuthAuthInterceptor` 完成，使用标准 `access_token`（`refresh_token` 提交会被判为无效令牌）。
 - 归属：**`uid` + `client_id` 双重限定**，只能吊销本应用为该用户签发的令牌。凭 token 字符串无法跨用户、跨应用越权吊销。
@@ -454,8 +456,8 @@ Content-Type: application/json
 用户侧吊销：
 
 ```http
-POST {UC_BASE_URL}/user/oauth/custom-tokens/revoke
-Authorization: Bearer {UC_SESSION_TOKEN}
+POST {TCL_BASE_URL}/user/oauth/custom-tokens/revoke
+Authorization: Bearer {TCL_SESSION_TOKEN}
 Content-Type: application/json
 
 { "token": "access_token_value" }
@@ -464,7 +466,7 @@ Content-Type: application/json
 OAuth 侧吊销：
 
 ```http
-POST {UC_BASE_URL}/oauth2/custom-tokens/revoke
+POST {TCL_BASE_URL}/oauth2/custom-tokens/revoke
 Authorization: Bearer {ACCESS_TOKEN}
 Content-Type: application/json
 

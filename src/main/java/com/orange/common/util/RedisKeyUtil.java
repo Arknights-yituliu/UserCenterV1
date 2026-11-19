@@ -12,23 +12,23 @@ public final class RedisKeyUtil {
     /** 会话 key 前缀：uc:token:{token} */
     private static final String PREFIX_TOKEN = "uc:token:";
 
-    /** 邮箱验证码 key 前缀：uc:code:{email} */
-    private static final String PREFIX_CODE = "uc:code:";
+    /** 邮箱验证码 key 前缀：tcl:code:{email} */
+    private static final String PREFIX_CODE = "tcl:code:";
 
-    /** 登录失败计数 key 前缀：uc:login:fail:{account} */
-    private static final String PREFIX_LOGIN_FAIL = "uc:login:fail:";
+    /** 登录失败计数 key 前缀：tcl:login:fail:{account} */
+    private static final String PREFIX_LOGIN_FAIL = "tcl:login:fail:";
 
-    /** 登录锁定 key 前缀：uc:lock:{account} */
-    private static final String PREFIX_LOGIN_LOCK = "uc:lock:";
+    /** 登录锁定 key 前缀：tcl:lock:{account} */
+    private static final String PREFIX_LOGIN_LOCK = "tcl:lock:";
 
-    /** 通用限流 key 前缀：uc:rate:{biz}:{target} */
-    private static final String PREFIX_RATE = "uc:rate:";
+    /** 通用限流 key 前缀：tcl:rate:{biz}:{target} */
+    private static final String PREFIX_RATE = "tcl:rate:";
 
-    /** OAuth 授权码 key 前缀：uc:oauth:code:{code} */
-    private static final String PREFIX_OAUTH_CODE = "uc:oauth:code:";
+    /** OAuth 授权码 key 前缀：tcl:oauth:code:{code} */
+    private static final String PREFIX_OAUTH_CODE = "tcl:oauth:code:";
 
-    /** OAuth 授权码已使用标记 key 前缀：uc:oauth:code:used:{code} */
-    private static final String PREFIX_OAUTH_CODE_USED = "uc:oauth:code:used:";
+    /** OAuth 授权码已使用标记 key 前缀：tcl:oauth:code:used:{code} */
+    private static final String PREFIX_OAUTH_CODE_USED = "tcl:oauth:code:used:";
 
     /** OAuth access_token key 前缀：uc:oauth:access:{token} */
     private static final String PREFIX_OAUTH_ACCESS = "uc:oauth:access:";
@@ -45,17 +45,17 @@ public final class RedisKeyUtil {
     /** OAuth 令牌家族索引 key 前缀：uc:oauth:family:{familyId}（Set，成员为同族 access/refresh） */
     private static final String PREFIX_OAUTH_FAMILY = "uc:oauth:family:";
 
-    /** OAuth 跨站登录票据 key 前缀：uc:oauth:ticket:{ticket} */
-    private static final String PREFIX_OAUTH_TICKET = "uc:oauth:ticket:";
+    /** OAuth 跨站登录票据 key 前缀：tcl:oauth:ticket:{ticket} */
+    private static final String PREFIX_OAUTH_TICKET = "tcl:oauth:ticket:";
 
-    /** OAuth 跨站登录票据已使用标记 key 前缀：uc:oauth:ticket:used:{ticket} */
-    private static final String PREFIX_OAUTH_TICKET_USED = "uc:oauth:ticket:used:";
+    /** OAuth 跨站登录票据已使用标记 key 前缀：tcl:oauth:ticket:used:{ticket} */
+    private static final String PREFIX_OAUTH_TICKET_USED = "tcl:oauth:ticket:used:";
 
-    /** OAuth 授权确认单 key 前缀：uc:oauth:consent:{pendingId} */
-    private static final String PREFIX_OAUTH_CONSENT = "uc:oauth:consent:";
+    /** OAuth 授权确认单 key 前缀：tcl:oauth:consent:{pendingId} */
+    private static final String PREFIX_OAUTH_CONSENT = "tcl:oauth:consent:";
 
-    /** OAuth 授权确认单已使用标记 key 前缀：uc:oauth:consent:used:{pendingId} */
-    private static final String PREFIX_OAUTH_CONSENT_USED = "uc:oauth:consent:used:";
+    /** OAuth 授权确认单已使用标记 key 前缀：tcl:oauth:consent:used:{pendingId} */
+    private static final String PREFIX_OAUTH_CONSENT_USED = "tcl:oauth:consent:used:";
 
     /** 用户会话反向索引 key 前缀：uc:uid:session:{uid}（Set，成员为会话 token） */
     private static final String PREFIX_UID_SESSION = "uc:uid:session:";
@@ -63,17 +63,17 @@ public final class RedisKeyUtil {
     /** 用户 OAuth 令牌反向索引 key 前缀：uc:uid:oauth:{uid}（Set，成员为带类型前缀的令牌） */
     private static final String PREFIX_UID_OAUTH = "uc:uid:oauth:";
 
-    /** 直连登录发起会话 key 前缀：uc:oauth:direct:channel:{channel}（前端登录的前置凭证） */
-    private static final String PREFIX_DIRECT_CHANNEL = "uc:oauth:direct:channel:";
+    /** 直连登录发起会话 key 前缀：tcl:oauth:direct:channel:{channel}（前端登录的前置凭证） */
+    private static final String PREFIX_DIRECT_CHANNEL = "tcl:oauth:direct:channel:";
 
-    /** 直连登录一次性票据 key 前缀：uc:oauth:direct:ticket:{ticket}（前端登录成功后的凭证） */
-    private static final String PREFIX_DIRECT_TICKET = "uc:oauth:direct:ticket:";
+    /** 直连登录一次性票据 key 前缀：tcl:oauth:direct:ticket:{ticket}（前端登录成功后的凭证） */
+    private static final String PREFIX_DIRECT_TICKET = "tcl:oauth:direct:ticket:";
 
-    /** 直连登录票据已使用标记 key 前缀：uc:oauth:direct:used:{ticket} */
-    private static final String PREFIX_DIRECT_USED = "uc:oauth:direct:used:";
+    /** 直连登录票据已使用标记 key 前缀：tcl:oauth:direct:used:{ticket} */
+    private static final String PREFIX_DIRECT_USED = "tcl:oauth:direct:used:";
 
-    /** 迁移兑换请求防重放 key 前缀：uc:oauth:migrate:nonce:{nonce} */
-    private static final String PREFIX_OAUTH_MIGRATE_NONCE = "uc:oauth:migrate:nonce:";
+    /** 迁移兑换请求防重放 key 前缀：tcl:oauth:migrate:nonce:{nonce} */
+    private static final String PREFIX_OAUTH_MIGRATE_NONCE = "tcl:oauth:migrate:nonce:";
 
     /** 迁移凭证当前映射 key 前缀：uc:oauth:migrate:current:{clientId}:{uid}（值为上一轮迁移签发的 refresh_token） */
     private static final String PREFIX_OAUTH_MIGRATE_CURRENT = "uc:oauth:migrate:current:";

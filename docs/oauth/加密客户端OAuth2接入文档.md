@@ -6,7 +6,7 @@
 
 接入前请向管理员取得：
 
-- UserCenter 服务地址：`{UC_BASE_URL}`
+- UserCenter 服务地址：`{TCL_BASE_URL}`
 - 加密客户端 ID：`{CLIENT_ID}`
 - 客户端密钥：`{CLIENT_SECRET}`
 - 已登记的回调地址：`{REDIRECT_URI}`
@@ -84,7 +84,7 @@ await authorizationStore.save(authorization.state, {
 业务后端让浏览器导航到：
 
 ```http
-GET {UC_BASE_URL}/oauth2/authorize
+GET {TCL_BASE_URL}/oauth2/authorize
     ?response_type=code
     &client_id={CLIENT_ID}
     &redirect_uri={URL_ENCODED_REDIRECT_URI}
@@ -127,7 +127,7 @@ GET {UC_BASE_URL}/oauth2/authorize
 业务后端通过服务端请求调用：
 
 ```http
-POST {UC_BASE_URL}/oauth2/token
+POST {TCL_BASE_URL}/oauth2/token
 Content-Type: application/x-www-form-urlencoded
 
 grant_type=authorization_code
@@ -176,7 +176,7 @@ grant_type=authorization_code
 业务后端使用 access token 调用：
 
 ```http
-GET {UC_BASE_URL}/oauth2/userinfo
+GET {TCL_BASE_URL}/oauth2/userinfo
 Authorization: Bearer {ACCESS_TOKEN}
 ```
 
@@ -211,7 +211,7 @@ Authorization: Bearer {ACCESS_TOKEN}
 仅当客户端登记了 `refresh_token` grant 且换码响应返回了 refresh token 时调用。
 
 ```http
-POST {UC_BASE_URL}/oauth2/token
+POST {TCL_BASE_URL}/oauth2/token
 Content-Type: application/x-www-form-urlencoded
 
 grant_type=refresh_token
@@ -257,7 +257,7 @@ refresh token 有两种模型，由客户端是否开启 `rotateRefreshToken` �
 用户退出登录或不再使用令牌时，由业务后端调用：
 
 ```http
-POST {UC_BASE_URL}/oauth2/revoke
+POST {TCL_BASE_URL}/oauth2/revoke
 Content-Type: application/x-www-form-urlencoded
 
 client_id={CLIENT_ID}

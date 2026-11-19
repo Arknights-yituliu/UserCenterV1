@@ -1,10 +1,12 @@
 # UserCenter 项目 API 文档
 
+> 名称兼容：示例统一使用 `TCL-Token`、`TCL-Client-Id`、`tcl_ticket`；对应入口仍接受旧名称 `UC-Token`、`UC-Client-Id`、`uc_ticket`。同一项新旧名称同时提供且非空值不一致时返回 `10001`；令牌解析仍优先使用 `Authorization: Bearer`。此说明不新增端点的认证要求，也不改变归档接口的历史状态。
+
 > 鉴权方式说明：
 >
-> - **用户会话**：登录后返回的会话 token，请求头携带 `Authorization: Bearer {token}` 或 `UC-Token: {token}`，由 `UserAuthInterceptor` 校验 Redis 会话（`/user/**`、`/auth/logout`）。
-> - **OAuth access_token**：OAuth 授权签发的访问令牌，请求头携带 `Authorization: Bearer {access_token}`（或 `UC-Token`），由 `OAuthAuthInterceptor` 校验，部分接口额外要求 scope 或直连认证开关。
-> - **PAT（个人访问令牌）**：独立于上述两种凭证的第三类凭证，请求头携带 `Authorization: Bearer {PAT}` 或 `UC-Token: {PAT}`，由 `PatAuthInterceptor` 按**令牌明文**查 `tlc_pat` 校验 `/pat/**`。两代令牌都认：带 `tlc_pat_` 前缀的 72 字符新令牌，以及迁移进来的无前缀 64 位 hex 旧令牌。`/oauth2/**` 链路不认 PAT，PAT 也不能当 access_token 用。
+> - **用户会话**：登录后返回的会话 token，请求头携带 `Authorization: Bearer {token}` 或 `TCL-Token: {token}`，由 `UserAuthInterceptor` 校验 Redis 会话（`/user/**`、`/auth/logout`）。
+> - **OAuth access_token**：OAuth 授权签发的访问令牌，请求头携带 `Authorization: Bearer {access_token}`（或 `TCL-Token`），由 `OAuthAuthInterceptor` 校验，部分接口额外要求 scope 或直连认证开关。
+> - **PAT（个人访问令牌）**：独立于上述两种凭证的第三类凭证，请求头携带 `Authorization: Bearer {PAT}` 或 `TCL-Token: {PAT}`，由 `PatAuthInterceptor` 按**令牌明文**查 `tlc_pat` 校验 `/pat/**`。两代令牌都认：带 `tlc_pat_` 前缀的 72 字符新令牌，以及迁移进来的无前缀 64 位 hex 旧令牌。`/oauth2/**` 链路不认 PAT，PAT 也不能当 access_token 用。
 > - **协议级认证**：OAuth 协议端点自带认证（client_id + client_secret、授权码、refresh_token、PKCE、一次性票据等），在服务层校验，不走拦截器。
 > - **签名认证**：Ed25519 验签 + 时间窗 + nonce 防重放（仅 `/oauth2/internal/migrate-token`；PAT 迁移端点无鉴权，靠内网隔离）。
 > - **访问密钥**：请求参数 `key` 携带明文密钥，服务端只保存其 SHA-256 摘要并做常量时间比对，与后台控制台的校验方式一致；缺失或不匹配返回 `80008 无权限操作`。
@@ -17,8 +19,8 @@
 |---|---|---|---|---|
 | `/` | GET | 否 | - | 根路径健康检查，返回后端启动成功提示，用于部署后验证服务可用。 |
 | `/auth/send-code` | POST | 否 | - | 发送邮箱验证码（注册/换绑/重置密码等用途），按 IP 与邮箱限流防滥用。 |
-| `/auth/register` | POST | 否 | - | 注册（邮箱+用户名+密码+昵称+验证码），成功后自动登录并返回会话 token。来源客户端经**必填**头 `UC-Client-Id` 标识（缺失返回 `10001`，不创建账号）。 |
-| `/auth/login` | POST | 否 | - | 登录（密码或邮箱验证码两种方式），成功后返回会话 token，前端后续以 Authorization 或 UC-Token 头携带。须携带**必填**头 `UC-Client-Id`（缺失或超 64 字符返回 `10001`）。 |
+| `/auth/register` | POST | 否 | - | 注册（邮箱+用户名+密码+昵称+验证码），成功后自动登录并返回会话 token。来源客户端经**必填**头 `TCL-Client-Id` 标识（缺失返回 `10001`，不创建账号）。 |
+| `/auth/login` | POST | 否 | - | 登录（密码或邮箱验证码两种方式），成功后返回会话 token，前端后续以 Authorization 或 TCL-Token 头携带。须携带**必填**头 `TCL-Client-Id`（缺失或超 64 字符返回 `10001`）。 |
 | `/auth/reset-code` | POST | 否 | - | 发送重设密码验证码，发到账号绑定邮箱，无需登录，按 IP 限流。 |
 | `/auth/reset-password` | POST | 否 | - | 通过邮箱验证码重设密码，无需登录，成功后踢出该账号全部会话。 |
 | `/open/oauth/scopes` | GET | 否 | - | 公开查询系统全部可选 OAuth 权限（code+中文描述），不含元范围 all，无用户数据。 |
@@ -27,7 +29,7 @@
 | `/open/ak-operator-statistics/v2/result` | GET | 否 | - | 干员统计结果 V2：内容与 V1 一致，模组分布字段改用 `equipA`/`equipX`/`equipY`/`equipD`/`equipB`，与源表列名对齐。 |
 | `/open/ak-skin-statistics/result` | GET | 是 | 访问密钥（`key` 参数） | 查询皮肤持有统计结果，一行一个皮肤（拥有账号数、参与统计账号总数），读取离线跑批结果表（每小时 10 分刷新一轮），不触发全表扫描。需携带 `?key=明文密钥`，与后台控制台共用同一把密钥。 |
 
-## 二、用户会话鉴权接口（`Authorization: Bearer {token}` 或 `UC-Token`）
+## 二、用户会话鉴权接口（`Authorization: Bearer {token}` 或 `TCL-Token`）
 
 ### 认证相关
 
@@ -135,8 +137,8 @@
 
 | API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
 |---|---|---|---|---|
-| `/oauth2/authorize` | GET | 是 | 用户会话或 uc_ticket | 授权码签发：第三方网站引导浏览器跳转至此，校验登录会话或跨站登录票据后 302 跳回回调地址，支持 PKCE。 |
-| `/oauth2/authorize` | POST | 是 | 用户会话或 uc_ticket | 授权码签发 POST 变体：跨站登录页可用表单 POST 携带 uc_ticket，避免票据出现在 URL/日志中，参数与 GET 一致。 |
+| `/oauth2/authorize` | GET | 是 | 用户会话或 tcl_ticket | 授权码签发：第三方网站引导浏览器跳转至此，校验登录会话或跨站登录票据后 302 跳回回调地址，支持 PKCE。 |
+| `/oauth2/authorize` | POST | 是 | 用户会话或 tcl_ticket | 授权码签发 POST 变体：跨站登录页可用表单 POST 携带 tcl_ticket，避免票据出现在 URL/日志中，参数与 GET 一致。 |
 | `/oauth2/ticket` | POST | 是 | 用户会话 | 签发跨站登录票据：携带本系统会话 token 调用，换取短时一次性凭证，供 authorize 跳转时使用（替代跨站 Cookie）。 |
 | `/oauth2/consent/info` | GET | 是 | 用户会话 | 授权确认信息查询：确认页加载时调用，校验登录态与确认单归属，返回客户端名称、申请权限、回调地址。 |
 | `/oauth2/consent` | POST | 是 | 用户会话 | 授权确认/拒绝：同意则签发授权码并返回回跳地址，拒绝则回跳 error=access_denied，确认单一次性消费。 |
@@ -149,7 +151,7 @@
 
 | API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
 |---|---|---|---|---|
-| `/oauth2/userinfo` | GET | 是 | OAuth access_token + `user.read` scope | 获取授权用户信息（uid、用户名、昵称、头像），供无自有账户体系的接入方直接以 UC 用户登录。 |
+| `/oauth2/userinfo` | GET | 是 | OAuth access_token + `user.read` scope | 获取授权用户信息（uid、用户名、昵称、头像），供无自有账户体系的接入方直接以 TCL 用户登录。 |
 
 ### 用户配置（`/oauth2/config/**`，client_id 取自 OAuth token）
 
@@ -208,18 +210,18 @@
 | API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
 |---|---|---|---|---|
 | `/oauth2/direct-session` | POST | 是 | client_id + client_secret | 直连登录-发起会话：旧系统后端以密钥换取短时会话凭证（channel），前端持凭证调直连接口，secret 不暴露给浏览器。 |
-| `/oauth2/direct-login` | POST | 是 | channel 短时凭证 + 账号密码/邮箱验证码 | 直连登录-提交凭证：前端直接向 UC 提交登录凭证（不经旧系统后端），校验通过返回一次性登录票据。 |
-| `/oauth2/direct-register` | POST | 是 | channel 短时凭证 + 注册信息（邮箱验证码） | 直连注册：注册信息由浏览器直接提交 UC 创建用户，返回一次性登录票据供旧系统后端兑换用户信息。 |
+| `/oauth2/direct-login` | POST | 是 | channel 短时凭证 + 账号密码/邮箱验证码 | 直连登录-提交凭证：前端直接向 TCL 提交登录凭证（不经旧系统后端），校验通过返回一次性登录票据。 |
+| `/oauth2/direct-register` | POST | 是 | channel 短时凭证 + 注册信息（邮箱验证码） | 直连注册：注册信息由浏览器直接提交 TCL 创建用户，返回一次性登录票据供旧系统后端兑换用户信息。 |
 | `/oauth2/direct-user` | POST | 是 | client_id + client_secret + 一次性票据 | 直连登录-兑换用户信息：凭一次性票据兑换用户信息并签发 OAuth 令牌，校验票据归属与未消费，需开通直连认证。 |
 
 ## 六、内部迁移端点（不对外，仅内网访问）
 
 | API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
 |---|---|---|---|---|
-| `/oauth2/internal/migrate-token` | POST | 是 | Ed25519 验签 + 时间窗 + nonce 防重放（ts/nonce/kid/sig） | 迁移兑换：BackEndV3 服务端凭旧自签 token 对应的 uid 换取一对全新 UC 令牌（access+refresh）。 |
+| `/oauth2/internal/migrate-token` | POST | 是 | Ed25519 验签 + 时间窗 + nonce 防重放（ts/nonce/kid/sig） | 迁移兑换：BackEndV3 服务端凭旧自签 token 对应的 uid 换取一对全新 TCL 令牌（access+refresh）。 |
 | `/internal/pat-migration/run` | GET | 否 | 无鉴权；**不设开关、随应用启动注册**，必须限定内网访问 | 触发旧自定义令牌向 `tlc_pat` 的全量迁移（旧令牌保留原样明文写入）。**搬迁不判有效性**：`oauth_custom_token` 中所有未过期行都会写入，已被撤销（Redis 明细已删、签发记录仍在）的令牌会重新变成可用 PAT，该取舍已确认接受。每批 500 行批量 `INSERT IGNORE` 后，按 uid 摘除 `uc:uid:oauth:{uid}` 索引成员并批量 `DEL` 旧 key。幂等，返回 `total`/`migrated`/`skipped`（恒 0）/`failed`/`elapsedMs`，满足 `migrated + failed == total`。一次性运维端点：前置条件是新链路已能校验 PAT、旧表已备份、迁移期间停写；**跑完立即删除该 Controller 并重新发布**。服务层方法已加锁串行，重复触发会排队执行，已入库明文被唯一键忽略，不会翻倍。 |
 
-## 七、PAT 鉴权接口（`Authorization: Bearer {PAT}` 或 `UC-Token`）
+## 七、PAT 鉴权接口（`Authorization: Bearer {PAT}` 或 `TCL-Token`）
 
 > 本组是 PAT 的**消费面**：PAT 在此作为请求凭证，由 `PatAuthInterceptor` 独立校验，不经过 `OAuthAuthInterceptor`。凭证无效、格式不符或已过期统一返回 `80001`；scope 不足或账号不归属返回 `80008`；payload 非法返回 `10002`。
 

@@ -1,14 +1,14 @@
 package com.orange.entity.dto.oauth;
 
 /**
- * 迁移兑换请求参数（BackEndV3 → UC 的服务端间调用）
+ * 迁移兑换请求参数（BackEndV3 → TCL 的服务端间调用）
  *
  * <p>表单原始值统一以字符串承载，由服务层负责格式校验与错误码转换，避免参数解析
  * 异常绕过统一的错误码体系（否则非法 uid 会得到框架默认的 400 而非 10001）。</p>
  *
  * @param clientId        目标 OAuth 客户端 ID
  * @param uidText         uid 字符串
- * @param kid             公钥标识（对应 UC 侧 kid → 公钥映射表，用于轮换）
+ * @param kid             公钥标识（对应 TCL 侧 kid → 公钥映射表，用于轮换）
  * @param tsText          请求时间戳（Unix 秒）
  * @param nonce           一次性随机串
  * @param sig             Ed25519 签名（Base64）
