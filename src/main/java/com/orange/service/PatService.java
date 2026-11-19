@@ -18,7 +18,8 @@ import java.util.List;
  *
  * <p>语义基线：撤销 = 删行；{@code scope} 是签发时快照、只能收敛；{@code payload} 是
  * 自定义实体 {@code PatPayload}（DB 存 JSON 文本，读取时转对象、忽略未定义字段），默认不解读，
- * 唯一例外是消费端约定的 {@code game_uid}；{@code last_used_at} 消费端暂不回写；
+ * 消费端用 {@code game_uid} 定位账号，终末地另用 {@code server_id} 定位服务器；
+ * {@code last_used_at} 消费端暂不回写；
  * <strong>全链路明文</strong>——不做摘要，库、Redis 预留键与列表接口都用令牌明文本身，
  * 这是明确的业务取舍，配套要求是日志/异常不落明文与存储侧最小权限。</p>
  *

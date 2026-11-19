@@ -9,6 +9,8 @@
 
 用户侧同名接口为 `/user/ef-accounts/**`、`/user/ef-pool-records/**`，请求与响应结构完全一致，仅鉴权方式不同。
 
+长期脚本也可通过 `GET /pat/ef-accounts/player-data` 读取玩家数据，凭证为 PAT，角色由令牌的 `payload.game_uid` + `server_id` 决定；响应结构与本文 2.2 一致，详见 [PAT 接口文档第 7.4 节](../pat/PAT接口文档.md#74-get-patef-accountsplayer-data终末地玩家数据)。
+
 ## 1. 通用约定
 
 ### 1.1 认证

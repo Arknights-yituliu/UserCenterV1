@@ -50,8 +50,8 @@ curl https://<host>/pat/ak-accounts/operators -H 'Authorization: Bearer <PAT明�
 
 | 代际 | 形态 | 来源 | 目标账号如何决定 |
 | --- | --- | --- | --- |
-| 新令牌 | `tlc_pat_` + 64 位小写 hex，共 **72 字符** | `POST /user/pat` 或 `POST /oauth2/pat` | 取 `payload.game_uid`，并强制核对账号绑定关系 |
-| 旧令牌 | 纯 **64 位小写 hex**，无前缀 | 由存量自定义令牌迁移进 `tlc_pat` | 没有 payload，按「用户默认来源 → 最近变更」取数 |
+| 新令牌 | `tlc_pat_` + 64 位小写 hex，共 **72 字符** | `POST /user/pat` 或 `POST /oauth2/pat` | 取 `payload.game_uid`（终末地另取 `server_id`），并强制核对账号绑定关系 |
+| 旧令牌 | 纯 **64 位小写 hex**，无前缀 | 由存量自定义令牌迁移进 `tlc_pat` | 忽略 payload；明日方舟按「用户默认来源 → 最近变更」，终末地取当前用户已绑定角色中最近保存的玩家数据 |
 
 > 旧令牌迁移时**原样保留明文**写入新表，不换形态、不重算任何值。已经发出去多年的凭证，调用方无需更换字符串，只需把请求打到 `/pat/**`。
 
@@ -99,7 +99,7 @@ Authorization: Bearer tlc_pat_0123456789abcdef...
 | code | 含义 | 本接口族中的典型触发点 |
 | --- | --- | --- |
 | `10001` | 参数错误 | `name` 空/超长、`expires_in` 非正或超上限、`payload` 字段类型不匹配（如传数组）或序列化后超 4KB、`client_id` 传了非保留值、`id`/`token` 为空 |
-| `10002` | 参数校验失败 | DTO 注解校验不通过（缺必填字段、长度超限）；新令牌 `payload.game_uid` 缺失或为空白 |
+| `10002` | 参数校验失败 | DTO 注解校验不通过（缺必填字段、长度超限）；新令牌 `payload.game_uid` 缺失或为空白；终末地角色/服务器格式非法或旧令牌无可用默认数据 |
 | `80001` | 未登录或登录已失效 | 消费面 PAT 缺失、格式不符、查不到或已过期；管理面会话/access_token 失效 |
 | `80008` | 无权限操作 | 消费面 scope 不足，或目标游戏账号不归属令牌用户 |
 | `90003` | 请求的权限范围未授权 | 签发时 `scope` 超出可自助范围，或试图签 `all` |
@@ -129,19 +129,20 @@ PAT **不做摘要**。`tlc_pat.token` 保存令牌明文本身，Redis 预留�
 | `expires_in` | 是 | 正整数，上限 `318038400` 秒（10 年零 1 个月） | 有效期（秒），签发后不可改 |
 | `scope` | 否 | ≤ 256 字符，英文逗号分隔 | 只能在系统可自助范围内**收敛**；不传取可自助范围全集；不接受元范围 `all` |
 | `client_id` | 否 | 留空或 `this_land_cloud` | PAT 只承载个人令牌，传其它值返回 `10001` |
-| `payload` | 否 | 必须是 JSON object，序列化后 ≤ 4KB | 自定义结构 `PatPayload`；**所有字段均可为空**，可传 `{}` 或只填部分。服务端默认不解读内容，**唯一例外是 `game_uid`** |
+| `payload` | 否 | 必须是 JSON object，序列化后 ≤ 4KB | 自定义结构 `PatPayload`；**所有字段均可为空**，可传 `{}` 或只填部分。消费端使用 `game_uid` 定位账号，终末地另用 `server_id` 定位服务器 |
 
 **payload 是固定结构的实体，不是任意 KV**：DB 里仍存 JSON 文本，读取时才反序列化成 `PatPayload`。JSON 里未定义的键会被静默忽略，实体里未提供的字段保持 `null`；因此列表与签发响应只回传已定义字段。当前字段：
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `game_uid` | string / null | 干员数据接口要读取的游戏账号 UID，可空；也接受驼峰别名 `gameUid` |
+| `game_uid` | string / null | 明日方舟账号 UID / 终末地角色 `roleId`，可空；也接受驼峰别名 `gameUid` |
 | `game_name` | string / null | 游戏名称，可空；当前不参与鉴权与取数，仅随签发与列表透传；也接受驼峰别名 `gameName` |
+| `server_id` | string / null | 终末地服务器 ID，也接受驼峰别名 `serverId`；读取时 trim，省略或空白按 `""` 精确定位，不自动选择其它服务器；明日方舟接口忽略此字段 |
 | `source` | string / null | 令牌来源标识，可空；由签发方自行填写（如 `web`、`mini_app`、`script`），服务端**不校验取值、不参与鉴权与取数**，仅随签发、列表与消费端解析透传，便于在列表中辨认令牌用途 |
 
-三个字段都**允许全空或部分为空**：不传 payload、传 `{}`、或只填其中任意几个都合法。`game_name` / `source` 单独存在时 `payload` 不算空，会正常落库与回显，但消费端仍会因缺 `game_uid` 返回 `10002`。后续新增字段不需要迁移存量数据，缺字段的历史行自动为 `null`。
+四个字段都**允许全空或部分为空**：不传 payload、传 `{}`、或只填其中任意几个都合法。`game_name` / `source` / `server_id` 单独存在时 `payload` 不算空，会正常落库与回显，但新令牌消费时仍会因缺 `game_uid` 返回 `10002`。后续新增字段不需要迁移存量数据，缺字段的历史行自动为 `null`。
 
-`payload.game_uid` 的取值规则（消费端强制）：字段声明为 `String`，JSON 里写成整数会被 Jackson 转成十进制字符串；取值时 trim，空白、缺失一律返回 `10002`。布尔/浮点标量也会被 Jackson 强转成字符串（不再由取值层拒绝，最终由绑定校验挡下），对象/数组则在请求体绑定阶段报 `10001`。**新令牌必须提供 `game_uid`**，否则读取干员数据时返回 `10002`。签发后没有修改接口，改账号只能撤销后重新签发。
+`payload.game_uid` 的取值规则（消费端强制）：字段声明为 `String`，JSON 里写成整数会被 Jackson 转成十进制字符串；取值时 trim，空白、缺失一律返回 `10002`。布尔/浮点标量也会被 Jackson 强转成字符串（不再由取值层拒绝，最终由绑定校验挡下），对象/数组则在请求体绑定阶段报 `10001`。**新令牌必须提供 `game_uid`**，否则读取干员或终末地玩家数据时返回 `10002`。签发后没有修改接口，改账号或服务器只能撤销后重新签发。
 
 请求示例：
 
@@ -273,7 +274,7 @@ PAT **不做摘要**。`tlc_pat.token` 保存令牌明文本身，Redis 预留�
 
 无需请求体，使用 `Authorization: Bearer <access_token>`。与 `POST /user/pat/revoke-all` 一致，仅按认证凭证中的 uid 删除当前用户全部 PAT（跨应用，包含已过期记录），幂等。调用应用须启用、已审批且 `direct_auth_enabled=1`；用户与客户端身份均不接受请求参数覆盖。
 
-## 7. 消费面：用 PAT 读干员数据
+## 7. 消费面：用 PAT 读游戏数据
 
 ### 7.1 `GET /pat/ak-accounts/operators`
 
@@ -281,14 +282,14 @@ PAT **不做摘要**。`tlc_pat.token` 保存令牌明文本身，Redis 预留�
 - 请求参数：**无**。控制器方法不声明任何参数，账号完全由 PAT 决定；多传的 `akUid` 等查询参数由框架忽略，不参与取数，也不会报错。**不要依赖请求参数指定账号**，请以签发时写入的 `payload.game_uid` 为准。
 - 响应：`Result<OperatorListVO>`，与 `GET /oauth2/ak-accounts/operators` **逐字段一致**，共用同一取数服务；`Cache-Control: private, no-cache`（只允许私人缓存且每次回源校验）。
 
-### 7.2 目标账号如何决定
+### 7.2 明日方舟目标账号如何决定
 
 | 令牌 | 行为 |
 | --- | --- |
 | 新令牌（带 `tlc_pat_`） | 取 `payload.game_uid`，显式以 `source=skland` 进入业务层，绕过「akUid 等于本人 uid 时按手动版读取」的撞号兼容分支，**强制核对 `ak_account_binding`**；未绑定返回 `80008` |
 | 旧令牌（无前缀 64 位 hex） | 不指定账号，按「用户默认来源 → 最近变更」取数，等价于 OAuth 版不传 `akUid` |
 
-### 7.3 与 OAuth 版的差异速查
+### 7.3 明日方舟与 OAuth 版的差异速查
 
 | 维度 | `GET /oauth2/ak-accounts/operators` | `GET /pat/ak-accounts/operators` |
 | --- | --- | --- |
@@ -296,6 +297,40 @@ PAT **不做摘要**。`tlc_pat.token` 保存令牌明文本身，Redis 预留�
 | 目标账号 | 请求参数 `akUid` + 可选 `source` | 令牌自身决定，接口不声明查询参数（多余参数被忽略） |
 | 响应结构 | `OperatorListVO` | 完全一致 |
 | 缓存头 | `private, no-cache` | 完全一致 |
+
+### 7.4 `GET /pat/ef-accounts/player-data`（终末地玩家数据）
+
+- 鉴权：PAT 明文 + `endfield-data.read`；上级 `gama-data.read` 与元范围 `all` 可覆盖。只有 `arknights-data.read` 或 `endfield-data.write` 不可读取。
+- 请求参数：**无**。`roleId`、`serverId`、`uid` 等查询参数均不参与取数，不能覆盖 PAT 中的角色与用户。
+- 新令牌：`payload.game_uid` 对应终末地角色 `roleId`，trim 后必填；`payload.server_id` 对应服务器 ID，trim 后省略或空白按 `""` 定位。服务层按 `roleId + serverId + 当前用户 uid` 校验 `ef_account_binding`，未绑定返回 `80008`，不回退其它服务器或角色。
+- 旧令牌：忽略 payload，不指定角色或服务器；读取当前用户已绑定角色中最近保存的玩家数据，与 OAuth 版不传参数一致。按玩家数据保存时间倒序，同一时间按角色、服务器升序；无可用数据返回 `10002`。
+- 响应：`Result<EfPlayerDataVO>`，字段为 `roleId`、`serverId`、`playerData`（JSON 对象）、`updateTime`；与 `GET /oauth2/ef-accounts/player-data` 一致，共用 `EfPlayerDataService#getPlayerData`。绑定存在但数据行缺失时返回成功、`data=null`。缓存头为 `Cache-Control: private, no-cache`。
+- 格式约束：`game_uid` trim 后不超过 32 位可见 ASCII 字符，`server_id` trim 后不超过 16 位可见 ASCII 字符，非法返回 `10002`。已有 PAT 缺少服务器字段时按空串定位；若实际绑定使用 `"1"`，需重新签发并填入 `server_id: "1"`。
+
+签发示例（使用会话凭证调用 `POST /user/pat`，或按 6.1 使用 refresh_token 调用 `POST /oauth2/pat`）：
+
+```json
+{
+  "name": "终末地数据同步",
+  "expires_in": 2592000,
+  "scope": "endfield-data.read",
+  "payload": {
+    "game_uid": "123456789",
+    "server_id": "1",
+    "game_name": "终末地",
+    "source": "script"
+  }
+}
+```
+
+读取示例：
+
+```bash
+curl https://<host>/pat/ef-accounts/player-data \
+  -H 'Authorization: Bearer <PAT明文>'
+```
+
+`game_name` 与 `source` 仍为展示信息，游戏读取权限由 scope 决定。本接口仅读取已保存的玩家数据；角色列表、数据上传与寻访记录接口见 `docs/oauth/OAuth终末地数据接口文档.md`。
 
 ## 8. 旧令牌迁移与消费
 

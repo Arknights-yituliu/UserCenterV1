@@ -164,12 +164,14 @@ class PatServiceImplTest {
         when(oauthTokenService.resolveSelfIssuedScope(null)).thenReturn(SCOPE);
         PatIssueRequest request = request("ci", 3600L, null);
         request.setPayload(payload("123456789"));
+        request.getPayload().setServerId("1");
 
         PatIssueVO vo = service.issue(UID, request);
 
-        assertThat(captureInserted().getPayload()).contains("\"game_uid\":\"123456789\"");
+        assertThat(captureInserted().getPayload()).contains("\"game_uid\":\"123456789\"", "\"server_id\":\"1\"");
         assertThat(vo.getPayload()).isInstanceOf(PatPayload.class);
         assertThat(vo.getPayload().getGameUid()).isEqualTo("123456789");
+        assertThat(vo.getPayload().getServerId()).isEqualTo("1");
     }
 
     @Test
@@ -276,7 +278,7 @@ class PatServiceImplTest {
     @Test
     void listParsesPayloadAndComputesRemainingSeconds() {
         TlcPat row = oldToken();
-        row.setPayload("{\"game_uid\":\"123456789\"}");
+        row.setPayload("{\"game_uid\":\"123456789\",\"server_id\":\"1\"}");
         row.setExpireTime(LocalDateTime.now().plusSeconds(120));
         when(tlcPatMapper.selectList(any())).thenReturn(List.of(row));
 
@@ -284,6 +286,7 @@ class PatServiceImplTest {
 
         assertThat(list).hasSize(1);
         assertThat(list.get(0).getPayload().getGameUid()).isEqualTo("123456789");
+        assertThat(list.get(0).getPayload().getServerId()).isEqualTo("1");
         assertThat(list.get(0).getExpiresInSeconds()).isBetween(100L, 120L);
         assertThat(list.get(0).getTokenPrefix()).isEqualTo(row.getTokenPrefix());
         assertThat(list.get(0).getToken()).isEqualTo(row.getToken());
@@ -378,6 +381,7 @@ class PatServiceImplTest {
 
         PatIssueByRefreshRequest request = refreshRequest("refresh-raw", "ci-token", 3600L, null);
         request.setPayload(payload("123456789"));
+        request.getPayload().setServerId("1");
         PatIssueVO vo = service.issueByRefreshToken(request);
 
         assertThat(vo.getClientId()).isEqualTo("app-alpha");
@@ -385,11 +389,12 @@ class PatServiceImplTest {
         assertThat(vo.getToken()).hasSize(72).startsWith("tlc_pat_");
         assertThat(vo.getPayload()).isInstanceOf(PatPayload.class);
         assertThat(vo.getPayload().getGameUid()).isEqualTo("123456789");
+        assertThat(vo.getPayload().getServerId()).isEqualTo("1");
         TlcPat saved = captureInserted();
         assertThat(saved.getUid()).isEqualTo(UID);
         assertThat(saved.getClientId()).isEqualTo("app-alpha");
         assertThat(saved.getToken()).isEqualTo(vo.getToken());
-        assertThat(saved.getPayload()).contains("game_uid");
+        assertThat(saved.getPayload()).contains("game_uid", "\"server_id\":\"1\"");
         verify(oauthTokenService).requireDirectAuthEnabledClient("app-alpha");
         verify(oauthTokenService, never()).resolveSelfIssuedScopeWithin(any(), any());
     }
@@ -529,7 +534,7 @@ class PatServiceImplTest {
     @Test
     void resolveReturnsPrincipalWithParsedPayload() {
         TlcPat row = oldToken();
-        row.setPayload("{\"game_uid\":\"123456789\"}");
+        row.setPayload("{\"game_uid\":\"123456789\",\"server_id\":\"1\"}");
         when(tlcPatMapper.selectOne(any())).thenReturn(row);
 
         PatPrincipal principal = service.resolve(PatUtil.generate());
@@ -538,6 +543,7 @@ class PatServiceImplTest {
         assertThat(principal.getClientId()).isEqualTo("this_land_cloud");
         assertThat(principal.getScope()).isEqualTo(SCOPE);
         assertThat(principal.getPayload().getGameUid()).isEqualTo("123456789");
+        assertThat(principal.getPayload().getServerId()).isEqualTo("1");
         assertThat(principal.isPrefixed()).isTrue();
     }
 

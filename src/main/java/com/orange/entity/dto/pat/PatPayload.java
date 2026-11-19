@@ -38,11 +38,14 @@ public class PatPayload {
     /** 游戏名称在 JSON 里的字段名（DB 文本与对外接口统一用蛇形） */
     public static final String FIELD_GAME_NAME = "game_name";
 
+    /** 终末地服务器 ID 在 JSON 里的字段名 */
+    public static final String FIELD_SERVER_ID = "server_id";
+
     /** 令牌来源在 JSON 里的字段名 */
     public static final String FIELD_SOURCE = "source";
 
     /**
-     * 干员数据接口要读取的游戏账号 UID，可空。
+     * 游戏数据接口要读取的账号 UID（明日方舟账号 UID / 终末地角色 roleId），可空。
      *
      * <p>另接受驼峰写法 {@code gameUid} 作为反序列化别名；序列化输出固定为 {@code game_uid}。</p>
      */
@@ -54,6 +57,11 @@ public class PatPayload {
     @JsonProperty(FIELD_GAME_NAME)
     @JsonAlias("gameName")
     private String gameName;
+
+    /** 终末地服务器 ID，可空；读取终末地数据时与 game_uid 一起定位角色，缺省按空串处理 */
+    @JsonProperty(FIELD_SERVER_ID)
+    @JsonAlias("serverId")
+    private String serverId;
 
     /**
      * 令牌来源标识，可空。
@@ -75,7 +83,7 @@ public class PatPayload {
      */
     @JsonIgnore
     public boolean isEmpty() {
-        return gameUid == null && gameName == null && source == null;
+        return gameUid == null && gameName == null && serverId == null && source == null;
     }
 
     public String getGameUid() {
@@ -92,6 +100,14 @@ public class PatPayload {
 
     public void setGameName(String gameName) {
         this.gameName = gameName;
+    }
+
+    public String getServerId() {
+        return serverId;
+    }
+
+    public void setServerId(String serverId) {
+        this.serverId = serverId;
     }
 
     public String getSource() {

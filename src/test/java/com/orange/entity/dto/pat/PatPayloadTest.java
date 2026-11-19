@@ -25,6 +25,7 @@ class PatPayloadTest {
         assertThat(payload).isNotNull();
         assertThat(payload.getGameUid()).isNull();
         assertThat(payload.getGameName()).isNull();
+        assertThat(payload.getServerId()).isNull();
         assertThat(payload.isEmpty()).isTrue();
     }
 
@@ -115,5 +116,26 @@ class PatPayloadTest {
     @Test
     void emptyEntitySerializesToEmptyObject() throws Exception {
         assertThat(objectMapper.writeValueAsString(new PatPayload())).isEqualTo("{}");
+    }
+
+    @Test
+    void serverIdAcceptsBothNamesAndSerializesAsSnakeCase() throws Exception {
+        PatPayload snake = objectMapper.readValue("{\"game_uid\":\"role-1\",\"server_id\":\"1\"}", PatPayload.class);
+        PatPayload camel = objectMapper.readValue("{\"gameUid\":\"role-1\",\"serverId\":\"1\"}", PatPayload.class);
+
+        assertThat(snake.getServerId()).isEqualTo("1");
+        assertThat(camel.getServerId()).isEqualTo("1");
+        JsonNode json = objectMapper.readTree(objectMapper.writeValueAsString(camel));
+        assertThat(json.get("server_id").asText()).isEqualTo("1");
+        assertThat(json.has("serverId")).isFalse();
+    }
+
+    @Test
+    void serverIdAloneIsPreservedAndNumericValueIsCoerced() throws Exception {
+        PatPayload payload = objectMapper.readValue("{\"server_id\":1}", PatPayload.class);
+        assertThat(payload.getServerId()).isEqualTo("1");
+        assertThat(payload.isEmpty()).isFalse();
+        assertThat(objectMapper.writeValueAsString(payload)).isEqualTo("{\"server_id\":\"1\"}");
+        assertThat(objectMapper.readValue("{\"server_id\":null}", PatPayload.class).isEmpty()).isTrue();
     }
 }

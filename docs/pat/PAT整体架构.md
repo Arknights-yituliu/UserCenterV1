@@ -30,7 +30,7 @@
   运维       --无鉴权-------->  /internal/pat-migration/run   PatMigrationService ─┘
 
 消费面（PAT 是「请求的凭证」）
-  调用方     --PAT----------->  /pat/**  PatAuthInterceptor ─> PatService#resolve ─> PatAkAccountController
+  调用方     --PAT----------->  /pat/**  PatAuthInterceptor ─> PatService#resolve ─> PatAkAccountController / PatEfPlayerDataController
                                                                                         └─> AkAccountService ─> ak_* 表
 ```
 
@@ -73,8 +73,8 @@
 
 | 代际 | 形态 | 来源 | payload | 消费端取数口径 |
 | --- | --- | --- | --- | --- |
-| 新令牌 | `tlc_pat_` + 64 位小写 hex，共 72 字符 | `/user/pat`、`POST /oauth2/pat` | 可能有 | 取 `payload.game_uid`，缺失/空白报 `10002`；强制核对绑定关系 |
-| 旧令牌 | 纯 64 位小写 hex，无前缀 | 由 `oauth_custom_token` 迁移而来 | 恒为 `null` | 不指定账号，按「默认来源 → 最近变更」取数 |
+| 新令牌 | `tlc_pat_` + 64 位小写 hex，共 72 字符 | `/user/pat`、`POST /oauth2/pat` | 可能有 | 取 `payload.game_uid`，终末地另取 `server_id`；game_uid 缺失/空白报 `10002`，强制核对绑定关系 |
+| 旧令牌 | 纯 64 位小写 hex，无前缀 | 由 `oauth_custom_token` 迁移而来 | 恒为 `null` | 不指定账号；明日方舟按「默认来源 → 最近变更」，终末地读取当前用户已绑定角色中最新保存的数据 |
 
 判据是**明文形态**（`PatUtil.isPat` / `isLegacyToken`），不是任何数据库列——当初的 `tlc_pat.source` 已删除，来源可由前缀、`client_id`、`payload` 反推。
 
@@ -84,8 +84,9 @@
 
 | JSON 键 | 类型 | 作用 |
 | --- | --- | --- |
-| `game_uid` | String（别名 `gameUid`） | **唯一被服务端解读的字段**：决定读哪个游戏账号 |
+| `game_uid` | String（别名 `gameUid`） | 决定读哪个明日方舟账号 / 终末地角色 |
 | `game_name` | String（别名 `gameName`） | 纯展示，不参与鉴权与取数 |
+| `server_id` | String（别名 `serverId`） | 终末地服务器 ID，与 game_uid 共同定位角色；缺省或空白按空串，明日方舟忽略 |
 | `source` | String | 签发方自填的来源标识（`web`/`mini_app`/`script` 等），不校验、不参与鉴权，仅透传 |
 
 规则：
@@ -114,6 +115,7 @@ controller/
   user/UserPatController            用户自助：签发 / 列表 / 撤销 / 全撤销（会话）
   oauth/OAuthPatController          直连应用：签发（refresh_token）/ 列表 / 单条撤销 / 全部撤销（access_token）
   pat/PatAkAccountController        消费面：干员数据（PAT）
+  pat/PatEfPlayerDataController     消费面：终末地玩家数据（PAT）
   internal/PatMigrationController   一次性运维：触发迁移（无鉴权）
 interceptor/
   PatAuthInterceptor                解析 PAT → 写上下文（仅 /pat/**）
@@ -165,7 +167,7 @@ entity/vo/pat/PatIssueVO, PatVO     签发响应 / 列表项（都含明文）
 
 `excludePathPatterns` 优先于 `addPathPatterns`，所以「排掉根路径、保留子路径」是可行的；写反或漏配的表现都是**「接口能访问但没校验过」**，验证时必须特意测「不带凭证」这一场景。
 
-### 5.2 消费面时序
+### 5.2 消费面时序（以明日方舟为例）
 
 ```
 调用方 ── Authorization: Bearer tlc_pat_xxx ──> GET /pat/ak-accounts/operators
@@ -187,6 +189,8 @@ entity/vo/pat/PatIssueVO, PatVO     签发响应 / 列表项（都含明文）
 - **不写缓存**：每次消费一次库查询。PAT 调用量远低于普通接口，缓存、负缓存、单飞都是「出现性能压力再加」的预案。
 - **不写 `last_used_at`**：当前没有回写点，列表里这一列恒为 `null`。
 - **`source` 显式传 `skland`**：绕开业务层「akUid 等于本人 uid 时按手动版读取」的撞号兼容分支，强制核对 `ak_account_binding`。
+
+终末地共用同一认证链路，控制器检查 `EF_DATA_READ`。新令牌调用 `getPlayerData(uid, game_uid, server_id)`（game_uid trim 后必填），旧令牌调用 `getPlayerData(uid, null, null)`；取数服务按角色与服务器检查 `ef_account_binding`，响应缓存策略一致。
 
 ### 5.3 scope 判定
 
@@ -232,6 +236,9 @@ entity/vo/pat/PatIssueVO, PatVO     签发响应 / 列表项（都含明文）
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/pat/ak-accounts/operators` | 干员全量数据；账号完全由令牌决定，**接口不声明任何查询参数** |
+| GET | `/pat/ef-accounts/player-data` | 终末地玩家数据；新令牌按 payload.game_uid + server_id 校验绑定，旧令牌读当前用户最新保存的数据；无查询参数 |
+
+终末地接口需要 `endfield-data.read`（`gama-data.read` / `all` 可覆盖），共用 `EfPlayerDataService#getPlayerData`，响应与 OAuth 版相同，缓存头为 `private, no-cache`。新令牌 game_uid 缺失不回退默认角色，server_id 缺省按空串精确定位；未绑定返回 `80008`。新增 payload 字段存入现有 JSON 文本，无需调整表结构。
 
 ### 6.4 一次性运维
 

@@ -7,13 +7,13 @@ import com.orange.entity.dto.pat.PatPayload;
 /**
  * PAT payload 取值工具
  *
- * <p>payload 是结构固定的 {@link PatPayload}，服务端默认不解读内容。当前唯一被解读的字段是
- * {@code game_uid}：PAT 干员数据接口据此定位要读取的游戏账号，因此该字段的取值口径必须收得
+ * <p>payload 是结构固定的 {@link PatPayload}。{@code game_uid} 用于定位明日方舟账号或
+ * 终末地角色，终末地还使用 {@code server_id} 定位服务器，因此 game_uid 的取值口径必须收得
  * 很紧——缺失、空白一律报 10002，绝不返回空串。</p>
  *
  * <p>为什么不能放行空值：业务层把「akUid 为空」解释为「读用户设置的默认来源」，
  * 一旦空串被传下去，请求会静默读到另一个账号的数据，属于越权。账号归属最终由
- * {@code ak_account_binding} 的绑定校验把关。</p>
+ * {@code ak_account_binding} / {@code ef_account_binding} 的绑定校验把关。</p>
  *
  * <p>{@code game_uid} 在实体里是 {@code String}，JSON 中的整型数字已由 Jackson 转成十进制
  * 字符串，这里只需 trim 与判空，不再做 {@code Object} 的类型分支。</p>
@@ -22,7 +22,7 @@ import com.orange.entity.dto.pat.PatPayload;
  */
 public final class PatPayloadUtil {
 
-    /** 干员数据接口约定的 payload 字段：要读取的游戏账号 UID */
+    /** 游戏数据接口约定的 payload 字段：要读取的游戏账号或角色 UID */
     public static final String KEY_GAME_UID = PatPayload.FIELD_GAME_UID;
 
     private PatPayloadUtil() {
