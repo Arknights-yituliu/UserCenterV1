@@ -191,6 +191,89 @@ class PatServiceImplTest {
     }
 
     @Test
+    void revokeByClientDeletesOwnTokenWithoutRestrictingIssuingApplication() {
+        String token = PatUtil.generate();
+        when(tlcPatMapper.delete(any())).thenAnswer(invocation -> {
+            LambdaQueryWrapper<TlcPat> query = invocation.getArgument(0);
+            assertThat(query.getSqlSegment()).contains("token =", "uid =")
+                    .doesNotContain("client_id");
+            assertThat(query.getParamNameValuePairs().values()).containsExactlyInAnyOrder(token, UID);
+            return 1;
+        });
+
+        service.revokeByClient(UID, "app-alpha", token);
+
+        verify(oauthTokenService).requireDirectAuthEnabledClient("app-alpha");
+        verify(tlcPatMapper).delete(any());
+    }
+
+    @Test
+    void revokeByClientRejectsNonDirectApplicationBeforeDeletingTokens() {
+        doThrow(new BusinessException(ResultCode.OAUTH_DIRECT_AUTH_NOT_ALLOWED))
+                .when(oauthTokenService).requireDirectAuthEnabledClient("app-alpha");
+
+        assertThatThrownBy(() -> service.revokeByClient(UID, "app-alpha", PatUtil.generate()))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(e -> assertThat(((BusinessException) e).getCode()).isEqualTo(90014));
+        verify(tlcPatMapper, never()).delete(any());
+    }
+
+    @Test
+    void revokeByClientRejectsMissingIdentityOrTokenBeforeDeleting() {
+        assertThatThrownBy(() -> service.revokeByClient(null, "app-alpha", "token"))
+                .isInstanceOf(BusinessException.class);
+        assertThatThrownBy(() -> service.revokeByClient(UID, null, "token"))
+                .isInstanceOf(BusinessException.class);
+        assertThatThrownBy(() -> service.revokeByClient(UID, " ", "token"))
+                .isInstanceOf(BusinessException.class);
+        assertThatThrownBy(() -> service.revokeByClient(UID, "app-alpha", null))
+                .isInstanceOf(BusinessException.class);
+        assertThatThrownBy(() -> service.revokeByClient(UID, "app-alpha", " "))
+                .isInstanceOf(BusinessException.class);
+        verify(tlcPatMapper, never()).delete(any());
+    }
+
+    @Test
+    void revokeByClientIsIdempotentWhenNothingDeleted() {
+        when(tlcPatMapper.delete(any())).thenReturn(0);
+
+        service.revokeByClient(UID, "app-alpha", PatUtil.generate());
+
+        verify(oauthTokenService).requireDirectAuthEnabledClient("app-alpha");
+        verify(tlcPatMapper).delete(any());
+    }
+
+    @Test
+    void revokeByClientIdDeletesOnlyCurrentUsersRecordAcrossApplications() {
+        when(tlcPatMapper.delete(any())).thenAnswer(invocation -> {
+            LambdaQueryWrapper<TlcPat> query = invocation.getArgument(0);
+            assertThat(query.getSqlSegment()).contains("id =", "uid =").doesNotContain("client_id");
+            assertThat(query.getParamNameValuePairs().values()).containsExactlyInAnyOrder(21L, UID);
+            return 1;
+        });
+
+        service.revokeByClientId(UID, "app-alpha", 21L);
+
+        verify(oauthTokenService).requireDirectAuthEnabledClient("app-alpha");
+        verify(tlcPatMapper).delete(any());
+    }
+
+    @Test
+    void revokeAllByClientDeletesOnlyCurrentUsersTokensAcrossApplications() {
+        when(tlcPatMapper.delete(any())).thenAnswer(invocation -> {
+            LambdaQueryWrapper<TlcPat> query = invocation.getArgument(0);
+            assertThat(query.getSqlSegment()).contains("uid =").doesNotContain("client_id", "token =");
+            assertThat(query.getParamNameValuePairs().values()).containsExactly(UID);
+            return 3;
+        });
+
+        service.revokeAllByClient(UID, "app-alpha");
+
+        verify(oauthTokenService).requireDirectAuthEnabledClient("app-alpha");
+        verify(tlcPatMapper).delete(any());
+    }
+
+    @Test
     void listParsesPayloadAndComputesRemainingSeconds() {
         TlcPat row = oldToken();
         row.setPayload("{\"game_uid\":\"123456789\"}");
@@ -271,18 +354,21 @@ class PatServiceImplTest {
 
     @Test
     void listByClientDoesNotQueryTokensWithoutUserOrApplicationIdentity() {
-        assertThat(service.listByClient(null, "app-alpha")).isEmpty();
-        assertThat(service.listByClient(UID, null)).isEmpty();
-        assertThat(service.listByClient(UID, " ")).isEmpty();
+        assertThatThrownBy(() -> service.listByClient(null, "app-alpha"))
+                .isInstanceOf(BusinessException.class);
+        assertThatThrownBy(() -> service.listByClient(UID, null))
+                .isInstanceOf(BusinessException.class);
+        assertThatThrownBy(() -> service.listByClient(UID, " "))
+                .isInstanceOf(BusinessException.class);
         verify(tlcPatMapper, never()).selectList(any());
     }
 
 
     @Test
-    void issueByRefreshTokenUsesCredentialIdentityAndScope() {
+    void issueByRefreshTokenUsesCredentialIdentityAndSelfIssuedScope() {
         when(oauthTokenService.resolveRefreshToken("refresh-raw"))
                 .thenReturn(refreshPrincipal("app-alpha", "user.read,config.read"));
-        when(oauthTokenService.resolveSelfIssuedScopeWithin("user.read,config.read", null)).thenReturn(SCOPE);
+        when(oauthTokenService.resolveSelfIssuedScope(null)).thenReturn(SCOPE);
         when(tlcPatMapper.insert(any(TlcPat.class))).thenAnswer(invocation -> {
             TlcPat pat = invocation.getArgument(0);
             pat.setId(31L);
@@ -305,6 +391,23 @@ class PatServiceImplTest {
         assertThat(saved.getToken()).isEqualTo(vo.getToken());
         assertThat(saved.getPayload()).contains("game_uid");
         verify(oauthTokenService).requireDirectAuthEnabledClient("app-alpha");
+        verify(oauthTokenService, never()).resolveSelfIssuedScopeWithin(any(), any());
+    }
+
+    @Test
+    void issueByRefreshTokenCanSelectUserSideScopesBeyondCredentialScope() {
+        when(oauthTokenService.resolveRefreshToken("refresh-raw"))
+                .thenReturn(refreshPrincipal("app-alpha", "user.read"));
+        when(oauthTokenService.resolveSelfIssuedScope("endfield-data.write"))
+                .thenReturn("endfield-data.write");
+
+        PatIssueVO vo = service.issueByRefreshToken(
+                refreshRequest("refresh-raw", "ci", 3600L, "endfield-data.write"));
+
+        assertThat(vo.getScope()).isEqualTo("endfield-data.write");
+        assertThat(captureInserted().getScope()).isEqualTo("endfield-data.write");
+        verify(oauthTokenService).requireDirectAuthEnabledClient("app-alpha");
+        verify(oauthTokenService, never()).resolveSelfIssuedScopeWithin(any(), any());
     }
 
     @Test
@@ -331,10 +434,10 @@ class PatServiceImplTest {
     }
 
     @Test
-    void issueByRefreshTokenRejectsScopeEscalation() {
+    void issueByRefreshTokenRejectsScopesOutsideSelfIssuedScopes() {
         when(oauthTokenService.resolveRefreshToken("refresh-raw"))
                 .thenReturn(refreshPrincipal("app-alpha", "user.read"));
-        when(oauthTokenService.resolveSelfIssuedScopeWithin("user.read", "all"))
+        when(oauthTokenService.resolveSelfIssuedScope("all"))
                 .thenThrow(new BusinessException(ResultCode.OAUTH_SCOPE_INVALID));
 
         assertThatThrownBy(() -> service.issueByRefreshToken(

@@ -16,8 +16,8 @@ import java.time.LocalDateTime;
  *
  * <p><strong>全链路明文（业务取舍）</strong>：{@code token} 直接保存令牌明文，不计算摘要；
  * 新签发的 72 字符令牌与迁移进来的 64 位 hex 旧令牌都原样入库，列表接口也回传明文。
- * 因此本表是敏感数据源，需配套库表权限、备份加密与日志脱敏。{@code clientId} 固定为个人
- * 令牌标识 {@code this_land_cloud}（它在 user_config 等表中同时是分区键）。{@code payload}
+ * 因此本表是敏感数据源，需配套库表权限、备份加密与日志脱敏。{@code clientId} 在用户自助
+ * 签发时为 {@code this_land_cloud}，直连应用签发时为 refresh_token 所属应用。{@code payload}
  * 存的是自定义结构 {@code PatPayload} 序列化后的 JSON 文本，服务端默认不解读内容、唯一
  * 例外是消费端约定的 {@code game_uid}；反序列化时忽略未定义字段，缺失字段为 null。</p>
  *
@@ -33,7 +33,7 @@ public class TlcPat {
     /** 所属用户 uid */
     private Long uid;
 
-    /** 个人令牌固定 this_land_cloud */
+    /** 签发来源：用户自助为 this_land_cloud，直连应用为 refresh_token 所属应用 */
     private String clientId;
 
     /** 用户命名的用途 */

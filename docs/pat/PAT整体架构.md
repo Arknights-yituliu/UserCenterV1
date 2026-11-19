@@ -25,7 +25,7 @@
 ```
 管理面（PAT 是「被管理的对象」）
   浏览器     --会话---------->  /user/pat/**                 UserPatController   ─┐
-  第三方前端 --access_token-->  /oauth2/pat/{list,revoke}     OAuthPatController  ─┤
+  直连应用   --access_token-->  /oauth2/pat/{list,revoke,revoke-all} OAuthPatController ─┤
   第三方后端 --refresh_token->  POST /oauth2/pat              OAuthPatController  ─┼─> PatService ─> tlc_pat (MySQL)
   运维       --无鉴权-------->  /internal/pat-migration/run   PatMigrationService ─┘
 
@@ -112,7 +112,7 @@
 ```
 controller/
   user/UserPatController            用户自助：签发 / 列表 / 撤销 / 全撤销（会话）
-  oauth/OAuthPatController          应用视角：签发（refresh_token）/ 列表 / 吊销（access_token）
+  oauth/OAuthPatController          直连应用：签发（refresh_token）/ 列表 / 单条撤销 / 全部撤销（access_token）
   pat/PatAkAccountController        消费面：干员数据（PAT）
   internal/PatMigrationController   一次性运维：触发迁移（无鉴权）
 interceptor/
@@ -137,13 +137,12 @@ entity/vo/pat/PatIssueVO, PatVO     签发响应 / 列表项（都含明文）
 
 ### 4.2 依赖与复用
 
-`PatServiceImpl` 只依赖三样东西：`TlcPatMapper`、`OAuthTokenService`、`ObjectMapper`。OAuth 侧被复用的四个方法，都是「规则本来就只有一份」的东西，不复制实现：
+`PatServiceImpl` 只依赖三样东西：`TlcPatMapper`、`OAuthTokenService`、`ObjectMapper`。OAuth 侧被复用的三个方法，都是「规则本来就只有一份」的东西，不复制实现：
 
 | 复用点 | 作用 |
 | --- | --- |
-| `OAuthTokenService#resolveSelfIssuedScope` | 用户自助签发的权限上限 = 系统可自助范围，复用 `narrowScope` / `requireSelectableScopes` |
-| `OAuthTokenService#resolveSelfIssuedScopeWithin` | 应用侧签发的上限 = 「refresh_token 已授予范围 ∩ 可自助范围」，请求只减不增 |
-| `OAuthTokenService#requireDirectAuthEnabledClient` | 应用侧三个接口的统一准入：客户端启用、已审批、`direct_auth_enabled=1` |
+| `OAuthTokenService#resolveSelfIssuedScope` | 用户侧与直连应用签发共用：权限上限 = 系统可自助范围，不受 refresh_token 自身 scope 限制，仍不允许 `all` |
+| `OAuthTokenService#requireDirectAuthEnabledClient` | 应用侧四个接口的统一准入：客户端启用、已审批、`direct_auth_enabled=1` |
 | `OAuthTokenService#resolveRefreshToken` | 解析请求体 refresh_token（uid / clientId / scope / familyId），不消费、不轮转 |
 
 ### 4.3 上下文为什么拆成两个
@@ -160,7 +159,7 @@ entity/vo/pat/PatIssueVO, PatVO     签发响应 / 列表项（都含明文）
 | --- | --- | --- |
 | `/user/**`、`/auth/logout` | `UserAuthInterceptor` | 会话；`/user/pat/**` 由通配覆盖 |
 | `/oauth2/pat`（根路径，POST） | **无**（`excludePathPatterns`） | 凭请求体 refresh_token 做协议级认证 |
-| `/oauth2/pat/**`（`/list`、`/revoke`） | `OAuthAuthInterceptor` | access_token；服务层再校验直连准入 |
+| `/oauth2/pat/**`（`/list`、`/revoke`、`/revoke-all`） | `OAuthAuthInterceptor` | access_token；服务层再校验直连准入 |
 | `/pat/**` | `PatAuthInterceptor` | PAT；服务层按明文查库 |
 | `/internal/**` | 无 | 一次性运维端点，只能靠部署侧内网限制 |
 
@@ -221,11 +220,12 @@ entity/vo/pat/PatIssueVO, PatVO     签发响应 / 列表项（都含明文）
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/oauth2/pat` | **协议级例外**：凭请求体 refresh_token 签发，`client_id` 取凭证所属应用 |
+| POST | `/oauth2/pat` | **协议级例外**：凭请求体 refresh_token 签发，`client_id` 取凭证所属应用，可选权限与 user 侧一致 |
 | GET | `/oauth2/pat/list` | 当前用户的全部令牌（仅按 uid 过滤，跨应用，含用户自助签发与已过期记录） |
-| POST | `/oauth2/pat/revoke` | 按明文吊销，归属按 uid + client_id + token 三条件 |
+| POST | `/oauth2/pat/revoke` | 按 id 或 token 二选一撤销当前用户的 PAT（跨应用），按 uid + id/token 精确匹配 |
+| POST | `/oauth2/pat/revoke-all` | 与 user 侧一致，仅按 uid 撤销当前用户全部 PAT（跨应用） |
 
-三个接口都要求 `direct_auth_enabled=1`（未开通返回 `90014`）。列表中的 client_id 仅用于准入校验，可查看当前用户跨应用的全部 PAT；签发归属与吊销范围仍限定「本应用 + 本用户」。
+四个接口都要求 `direct_auth_enabled=1`（未开通返回 `90014`）。直连应用是旧系统的用户侧管理入口，可选签发权限、列表、单条撤销与全部撤销功能与 user 侧一致。列表与撤销中的 client_id 仅用于准入校验；签发归属仍取 refresh_token 所属应用，所有操作保留 uid 归属校验。
 
 ### 6.3 消费面（PAT）
 
@@ -403,13 +403,13 @@ END
 
 | 缺口 | 现状 | 建议 |
 | --- | --- | --- |
-| `revokeByClient` 无直接单测 | 只覆盖了签发侧准入；「client_id 不符删不掉」「`direct_auth_enabled=0` 删不掉」「明文不存在幂等」都没测 | 补 3 例 service 单测 |
+| ~~`revokeByClient` 无直接单测~~ | **已闭合（2026-11-19）**：覆盖按 uid + token 跨应用删除、非直连应用返回 `90014` 且不删除、缺失身份或明文不删除、明文不存在幂等；MVC 覆盖 access_token 身份与明文 trim | — |
 | ~~`listByClient` 未测准入~~ | **已闭合（2026-11-19）**：覆盖非直连应用返回 `90014` 且不查库、缺失用户或应用身份不查库、跨应用列表仅按当前 uid 查询（含明文与已过期记录） | — |
 | `UserPatController` 无端到端测试 | 4 个端点只有服务层单测 | 补 MVC 测试（尤其 `revoke-all` 的越权边界） |
 | ~~消费端响应与 OAuth 版一致性~~ | **已失效（2026-11-19）**：OAuth 侧 `custom-tokens` 响应（`OAuthCustomTokenVO`）随端点下线一并删除，已无比对对象；`/oauth2/pat/**` 与 `/user/pat/**` 共用 `PatVO`，本身同源 | — |
 | ~~`PatMigrationServiceImpl` 无单测~~ | **已闭合**：`PatMigrationServiceImplTest` 覆盖 4 例——全量搬迁不读令牌明细（`opsForValue` 从未调用）、明文/前缀/`create_time` 原样搬迁、插入失败时 Redis 一条不动、无待处理行时不发写命令 | — |
 | 过期行返回 `null` 无断言 | `.gt(expireTime, now)` 加在 wrapper 上，单测 mock 掉 `selectOne` 后验证不到 | 用集成测试或捕获 wrapper 条件断言 |
-| ~~`/oauth2/pat/**` 无 token → `90009`~~ | **已闭合**：`OAuthPatMvcTest` 覆盖 `/list`、`/revoke` 无 token | — |
+| ~~OAuth2 PAT 管理入口鉴权边界~~ | **已闭合（2026-11-19）**：`OAuthPatMvcTest` 复用生产 `WebConfig`，覆盖列表、单条撤销和全部撤销缺少 access_token；`OAuthPatDirectAuthMvcTest` 使用真实 PAT 服务覆盖四个接口拒绝未开通直连、停用、未审批的应用且不访问 PAT 数据 | — |
 
 ### 12.4 已知缺口（接受或待定）
 

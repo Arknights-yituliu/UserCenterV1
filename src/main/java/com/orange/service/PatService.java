@@ -50,8 +50,9 @@ public interface PatService {
      * refresh_token 记录，不接受调用方指定；签发侧与应用视角列表/吊销一样要求客户端已开通
      * 直连认证能力（{@code direct_auth_enabled=1}）。</p>
      *
-     * <p>权限上限为「refresh_token 已授予范围 ∩ 系统可自助范围」，请求 scope 只能在此范围内
-     * 收敛，防止凭低权限刷新令牌签出高权限 PAT。不消费、不轮转 refresh_token。</p>
+     * <p>直连应用作为用户侧管理入口，权限上限与 {@link #issue} 一致，为系统可自助范围，
+     * 不受 refresh_token 的 scope 限制。元范围 {@code all} 仍不可自助签发。
+     * 不消费、不轮转 refresh_token。</p>
      *
      * @param request 签发参数（含 refresh_token）
      * @return 含明文令牌的签发结果
@@ -79,7 +80,7 @@ public interface PatService {
     /**
      * 作废本人名下全部 PAT（用户自助）
      *
-     * <p>只由 {@code POST /user/pat/revoke-all} 调用。账号侧安全事件（改密、删应用）
+     * <p>用户侧直接调用，OAuth2 侧经直连应用准入校验后复用。账号侧安全事件（改密、删应用）
      * 不联动 PAT，见方案第 6 节。</p>
      *
      * @param uid 用户 uid
@@ -100,11 +101,29 @@ public interface PatService {
     List<PatVO> listByClient(Long uid, String clientId);
 
     /**
-     * 应用视角按明文吊销本应用为该用户签发的一条 PAT
+     * 直连应用按 id 撤销当前用户的一条 PAT（跨应用）。
+     * 准入同 {@link #listByClient}；删除条件与用户侧一致，为 {@code uid + id}，幂等。
      *
-     * <p>调用方手里只有令牌本身，因此按明文提交、服务端按
-     * {@code uid + client_id + token} 三条件精确删除，避免跨用户、跨应用越权吊销。
-     * 准入同 {@link #listByClient}；幂等，删不到也视为成功。</p>
+     * @param uid 用户 uid（由 access_token 解析得出）
+     * @param clientId 调用方应用 ID（由 access_token 解析得出）
+     * @param id PAT 记录主键
+     */
+    void revokeByClientId(Long uid, String clientId, Long id);
+
+    /**
+     * 直连应用撤销当前用户的全部 PAT（跨应用）。准入同 {@link #listByClient}。
+     *
+     * @param uid 用户 uid（由 access_token 解析得出）
+     * @param clientId 调用方应用 ID（由 access_token 解析得出）
+     */
+    void revokeAllByClient(Long uid, String clientId);
+
+    /**
+     * 直连应用按明文吊销当前用户的一条 PAT（跨应用）
+     *
+     * <p>按明文提交，服务端按 {@code uid + token} 精确删除，避免跨用户吊销。
+     * 准入同 {@link #listByClient}；{@code clientId} 仅用于直连应用准入校验，
+     * 可吊销用户自助签发及其它应用签发的 PAT。幂等，删不到也视为成功。</p>
      *
      * @param uid      用户 uid（由 access_token 解析得出）
      * @param clientId 调用方应用 ID（由 access_token 解析得出）

@@ -6,11 +6,16 @@ import com.orange.common.exception.GlobalExceptionHandler;
 import com.orange.entity.vo.pat.PatIssueVO;
 import com.orange.entity.vo.pat.PatVO;
 import com.orange.interceptor.OAuthAuthInterceptor;
+import com.orange.interceptor.PatAuthInterceptor;
+import com.orange.interceptor.UserAuthInterceptor;
+import com.orange.interceptor.WebConfig;
 import com.orange.service.PatService;
 import com.orange.service.OAuthTokenService.OAuthTokenPrincipal;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.MediaType;
@@ -39,8 +44,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 应用侧 PAT 接口的 MVC 契约测试
  *
  * <p>验证拦截器注册的关键边界：根路径 {@code POST /oauth2/pat} 凭请求体 refresh_token
- * 签发、不经过 access_token 拦截器；而 {@code /list}、{@code /revoke} 仍必须携带
- * access_token。测试内的路径注册与生产 {@code WebConfig} 保持一致。</p>
+ * 签发、不经过 access_token 拦截器；列表、单条撤销与全部撤销必须携带
+ * access_token。测试复用生产 {@code WebConfig} 注册路径。</p>
  *
  * @author UserCenter
  */
@@ -164,6 +169,75 @@ class OAuthPatMvcTest {
         verify(patService, never()).revokeByClient(any(), any(), any());
     }
 
+    @Test
+    void revokeUsesAccessTokenIdentityAndTrimsTargetToken() throws Exception {
+        when(oauthTokenResolver.resolve("access-raw"))
+                .thenReturn(new OAuthTokenPrincipal(7001L, "app-alpha", "user.read"));
+
+        mockMvc.perform(post("/oauth2/pat/revoke")
+                        .header("Authorization", "Bearer access-raw")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"  tlc_pat_target-token  \",\"uid\":9999,\"client_id\":\"app-beta\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        verify(patService).revokeByClient(7001L, "app-alpha", "tlc_pat_target-token");
+    }
+
+    @Test
+    void revokeByIdUsesAccessTokenIdentity() throws Exception {
+        when(oauthTokenResolver.resolve("access-raw"))
+                .thenReturn(new OAuthTokenPrincipal(7001L, "app-alpha", "user.read"));
+
+        mockMvc.perform(post("/oauth2/pat/revoke")
+                        .header("Authorization", "Bearer access-raw")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":21,\"uid\":9999,\"client_id\":\"app-beta\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        verify(patService).revokeByClientId(7001L, "app-alpha", 21L);
+        verify(patService, never()).revokeByClient(any(), any(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{}", "{\"token\":\" \"}", "{\"id\":21,\"token\":\"token\"}"})
+    void revokeRejectsMissingOrAmbiguousTarget(String body) throws Exception {
+        when(oauthTokenResolver.resolve("access-raw"))
+                .thenReturn(new OAuthTokenPrincipal(7001L, "app-alpha", "user.read"));
+
+        mockMvc.perform(post("/oauth2/pat/revoke")
+                        .header("Authorization", "Bearer access-raw")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(ResultCode.PARAM_VALID_ERROR.getCode()));
+
+        verifyNoInteractions(patService);
+    }
+
+    @Test
+    void revokeAllRequiresAccessToken() throws Exception {
+        mockMvc.perform(post("/oauth2/pat/revoke-all"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(ResultCode.NOT_LOGIN.getCode()));
+
+        verifyNoInteractions(patService);
+    }
+
+    @Test
+    void revokeAllUsesAccessTokenIdentity() throws Exception {
+        when(oauthTokenResolver.resolve("access-raw"))
+                .thenReturn(new OAuthTokenPrincipal(7001L, "app-alpha", "user.read"));
+
+        mockMvc.perform(post("/oauth2/pat/revoke-all")
+                        .header("Authorization", "Bearer access-raw")
+                        .param("uid", "9999").param("client_id", "app-beta"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        verify(patService).revokeAllByClient(7001L, "app-alpha");
+    }
+
     @Configuration
     @EnableWebMvc
     static class TestWebConfig implements WebMvcConfigurer {
@@ -195,9 +269,8 @@ class OAuthPatMvcTest {
 
         @Override
         public void addInterceptors(InterceptorRegistry registry) {
-            registry.addInterceptor(oauthAuthInterceptor(oauthTokenResolver()))
-                    .addPathPatterns("/oauth2/pat", "/oauth2/pat/**")
-                    .excludePathPatterns("/oauth2/pat");
+            new WebConfig(mock(UserAuthInterceptor.class), oauthAuthInterceptor(oauthTokenResolver()),
+                    mock(PatAuthInterceptor.class)).addInterceptors(registry);
         }
     }
 }

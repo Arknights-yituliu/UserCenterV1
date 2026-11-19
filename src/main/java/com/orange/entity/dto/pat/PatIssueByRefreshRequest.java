@@ -36,7 +36,7 @@ public class PatIssueByRefreshRequest {
     @JsonAlias("expiresIn")
     private Long expiresIn;
 
-    /** 期望的权限范围（英文逗号分隔，可空表示取「凭证范围 ∩ 可自助范围」） */
+    /** 期望的权限范围（英文逗号分隔，与用户侧一致，可空表示取系统全部可自助范围） */
     @Size(max = 256, message = "scope 长度不能超过 256")
     private String scope;
 

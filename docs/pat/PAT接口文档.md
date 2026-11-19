@@ -77,7 +77,7 @@ Authorization: Bearer tlc_pat_0123456789abcdef...
 | `POST /user/oauth/custom-tokens/revoke` | 按明文吊销我的一条令牌 | `POST /user/pat/revoke` | 改为按 `id` 撤销（列表项自带 `id`），不再按明文；另有 `POST /user/pat/revoke-all` 一键全撤销 |
 | `POST /oauth2/token/from-refresh` | 拿 refresh_token 换长有效期 access_token | `POST /oauth2/pat` | 同样「不消费、不轮转」refresh_token，但产出 PAT；不再接受 `client_id`，归属由凭证自身决定；不再产出新的长期 access_token |
 | `GET /oauth2/custom-tokens` | 应用视角的签发记录列表 | `GET /oauth2/pat/list` | 准入仍是 `direct_auth_enabled=1`；改为按当前用户 `uid` 查询全部 PAT，跨应用返回，不再按 `clientId` 过滤 |
-| `POST /oauth2/custom-tokens/revoke` | 应用视角按明文吊销 | `POST /oauth2/pat/revoke` | 同样按明文 + `uid + clientId` 三条件精确删除，幂等 |
+| `POST /oauth2/custom-tokens/revoke` | 应用视角按明文吊销 | `POST /oauth2/pat/revoke` | 支持 `id` 或 `token` 二选一，精确删除当前用户的 PAT（跨应用），调用应用须开通直连认证，幂等 |
 
 配套变化：
 
@@ -103,7 +103,7 @@ Authorization: Bearer tlc_pat_0123456789abcdef...
 | `80001` | 未登录或登录已失效 | 消费面 PAT 缺失、格式不符、查不到或已过期；管理面会话/access_token 失效 |
 | `80008` | 无权限操作 | 消费面 scope 不足，或目标游戏账号不归属令牌用户 |
 | `90003` | 请求的权限范围未授权 | 签发时 `scope` 超出可自助范围，或试图签 `all` |
-| `90014` | 客户端未开通直连认证能力 | 应用侧 `/oauth2/pat/list`、`/oauth2/pat/revoke` 的准入失败 |
+| `90014` | 客户端未开通直连认证能力 | 全部 `/oauth2/pat` 管理接口的准入失败（签发、列表、单条撤销、全部撤销） |
 | `90009` | OAuth 令牌无效 | 迁移完成后旧令牌再打 `/oauth2/userinfo`（预期行为，不是故障） |
 
 > 无效 PAT 统一返回 `80001`，**不区分**「不存在」「已过期」「格式错误」，避免泄露令牌状态。
@@ -208,9 +208,9 @@ PAT **不做摘要**。`tlc_pat.token` 保存令牌明文本身，Redis 预留�
 
 ## 6. 应用视角管理面（`/oauth2/pat/**`）
 
-`/oauth2/pat/list` 与 `/oauth2/pat/revoke` 走 access_token 鉴权；根路径 `POST /oauth2/pat` 是协议级例外，凭请求体 refresh_token 签发（见 6.1）。
+全部接口仅限直连应用调用，功能与 user 侧一致：签发、查看当前用户全部 PAT、撤销单条、全部撤销。`/list`、`/revoke`、`/revoke-all` 走 access_token 鉴权；根路径 `POST /oauth2/pat` 凭请求体 refresh_token 签发（见 6.1）。
 
-准入条件：客户端启用、已审批且 `direct_auth_enabled=1`；未开通直连认证返回 `90014`。列表/吊销的 `uid` 与 `clientId` 均取自 access_token，调用方无法伪造；签发的 `uid` 与 `clientId` 取自 refresh_token 记录，同样无法伪造。列表返回当前用户跨应用的全部 PAT，`clientId` 仅用于准入校验；签发归属与吊销范围仍限定在当前应用。
+准入条件：客户端启用、已审批且 `direct_auth_enabled=1`；未开通直连认证返回 `90014`。列表/吊销的 `uid` 与 `clientId` 均取自 access_token，调用方无法伪造；签发的 `uid` 与 `clientId` 取自 refresh_token 记录，同样无法伪造。列表与吊销均支持当前用户跨应用的 PAT，`clientId` 仅用于准入校验；签发归属仍为 refresh_token 所属应用。
 
 ### 6.1 签发 `POST /oauth2/pat`
 
@@ -223,7 +223,7 @@ PAT **不做摘要**。`tlc_pat.token` 保存令牌明文本身，Redis 预留�
 | `refresh_token` | 是 | 有效的 OAuth refresh_token 明文；无效/已过期返回 `90009` |
 | `name` | 是 | 同 5.1，≤ 50 字符 |
 | `expires_in` | 是 | 同 5.1，上限 10 年零 1 个月 |
-| `scope` | 否 | 只能是「refresh_token 已授予范围 ∩ 系统可自助范围」的子集，超出返回 `90003`；不传取交集全集 |
+| `scope` | 否 | 与 user 侧一致，可选择系统全部自助权限，不受 refresh_token 自身 scope 限制；不传取全部自助权限，`all` 或不支持的 scope 返回 `90003` |
 | `payload` | 否 | 同 5.1 的 `PatPayload`，所有字段可空，`game_uid` 规则一致 |
 
 **不接受 `client_id`**：目标应用由凭证自身决定，服务端把 refresh_token 记录里的 `clientId` 写入 `tlc_pat.client_id`。这样签出的 PAT 能被 `/oauth2/pat/list` 列出、被 `/oauth2/pat/revoke` 吊销，用户侧 `/user/pat/list` 同样可见。响应结构与 5.1 的 `PatIssueVO` 完全一致，仅 `clientId` 是应用 ID 而非 `this_land_cloud`。
@@ -246,9 +246,17 @@ PAT **不做摘要**。`tlc_pat.token` 保存令牌明文本身，Redis 预留�
 
 返回当前登录用户的全部 PAT，结构与 5.2 完全一致（同样含完整 `token` 明文、含已过期记录，按签发时间倒序）。仅按 access_token 解析出的 `uid` 过滤，包含用户自助签发和其它应用签发的 PAT，不返回其它用户的记录。
 
-调用应用仍须启用、已审批且 `direct_auth_enabled=1`；access_token 中的 `clientId` 仅用于准入校验，不参与列表过滤。不接受调用方通过请求参数指定用户或应用。跨应用可见仅适用于列表；`POST /oauth2/pat/revoke` 仍按 `uid + clientId + token` 限定吊销范围。
+调用应用仍须启用、已审批且 `direct_auth_enabled=1`；access_token 中的 `clientId` 仅用于准入校验，不参与列表过滤。不接受调用方通过请求参数指定用户或应用。单条撤销和全部撤销同样支持跨应用，始终限定为当前用户的 PAT。
 
-### 6.3 吊销 `POST /oauth2/pat/revoke`
+### 6.3 撤销 `POST /oauth2/pat/revoke`
+
+与 user 侧一样，可以使用列表项的 id 撤销：
+
+```json
+{ "id": 21 }
+```
+
+也保留按明文撤销的用法：
 
 ```json
 { "token": "<PAT明文>" }
@@ -256,9 +264,14 @@ PAT **不做摘要**。`tlc_pat.token` 保存令牌明文本身，Redis 预留�
 
 | 字段 | 必填 | 约束 |
 | --- | --- | --- |
-| `token` | 是 | 非空、≤ 128 字符 |
+| `id` | 与 token 二选一 | PAT 记录主键，与 user 侧一致 |
+| `token` | 与 id 二选一 | 非空白、≤ 128 字符 |
 
-应用侧吊销接口按明文提交；服务端按 `uid + client_id + token` 三条件精确删除（token 在控制器入口 `trim()`，服务层只做精确匹配），**幂等**，删不到也返回成功。列表虽可跨应用查看，但调用本接口只能吊销当前用户在本应用名下的 PAT。
+服务端按 `uid + id` 或 `uid + token` 精确删除（token 在控制器入口 `trim()`，服务层只做精确匹配），**幂等**，不存在、已撤销或不属于当前用户时仍返回成功。两个字段都不传、同时传入或 token 为空白返回 HTTP 400、`code=10002`。已开通直连认证的应用可撤销当前用户跨应用的 PAT，包含用户自助签发和其它应用签发的令牌；不能撤销其它用户的 PAT。`clientId` 仅用于准入校验，不作为删除条件。
+
+### 6.4 全部撤销 `POST /oauth2/pat/revoke-all`
+
+无需请求体，使用 `Authorization: Bearer <access_token>`。与 `POST /user/pat/revoke-all` 一致，仅按认证凭证中的 uid 删除当前用户全部 PAT（跨应用，包含已过期记录），幂等。调用应用须启用、已审批且 `direct_auth_enabled=1`；用户与客户端身份均不接受请求参数覆盖。
 
 ## 7. 消费面：用 PAT 读干员数据
 
@@ -306,7 +319,7 @@ PAT **不做摘要**。`tlc_pat.token` 保存令牌明文本身，Redis 预留�
 
 - PAT 的 `scope` 是**签发时快照**，用户后续调整应用授权不会回溯到已签发的令牌；需要变更权限请撤销后重新签发。
 - 撤销 = 物理删行，没有软删、墓碑或禁用状态；生效即时。
-- `POST /oauth2/pat` 是 `/oauth2/**` 认证域里唯一的协议级例外：不带 access_token，凭请求体 refresh_token 签发；`WebConfig` 只排除根路径，`/list`、`/revoke` 仍受 access_token 保护。
+- `POST /oauth2/pat` 是 `/oauth2/**` 认证域里唯一的协议级例外：不带 access_token，凭请求体 refresh_token 签发；`WebConfig` 只排除根路径，`/list`、`/revoke`、`/revoke-all` 受 access_token 保护。四个管理接口都校验直连应用准入，签发权限与 user 侧一致。
 - 阶段一不启用 Redis 校验缓存，每次消费请求按明文查一次库；阶段二若启用 `tlc:pat:*` 缓存，Redis 也需按敏感数据源管理。
 - 已有库升级**不能重跑** `db/schema-user.sql`（含 `DROP TABLE IF EXISTS`），需走增量 DDL；本次删除 `tlc_pat.source` 列同样需单独对已有库执行增量变更。
 - 旧 6 端点已于 2026-11-19 直接下线（删除，非 410），对应关系见 2.4；**前端若仍调旧地址会 404**，须先切到 `/user/pat/**`、`/oauth2/pat/**`。

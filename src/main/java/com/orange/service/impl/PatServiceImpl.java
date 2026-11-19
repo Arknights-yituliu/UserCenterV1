@@ -99,7 +99,8 @@ public class PatServiceImpl implements PatService {
      *
      * <p>refresh_token 只作凭证，不消费、不轮转；uid/client_id 全部取自凭证记录，杜绝跨应用冒签。
      * 准入与 {@code /oauth2/pat/list}、{@code /oauth2/pat/revoke} 对齐（{@code direct_auth_enabled=1}），
-     * 权限上限为「凭证范围 ∩ 可自助范围」。日志只记元数据，绝不落令牌明文。</p>
+     * 权限上限与用户侧一致，为系统可自助范围；refresh_token 用于确认用户与直连应用身份。
+     * 日志只记元数据，绝不落令牌明文。</p>
      *
      * @param request 签发参数（含 refresh_token）
      * @return 含明文令牌的签发结果
@@ -112,11 +113,10 @@ public class PatServiceImpl implements PatService {
         }
         OAuthTokenService.RefreshTokenPrincipal principal =
                 oauthTokenService.resolveRefreshToken(request.getRefreshToken());
-        oauthTokenService.requireDirectAuthEnabledClient(principal.getClientId());
+        requireDirectAuthUser(principal.getUid(), principal.getClientId());
         String name = validateName(request.getName());
         long expiresIn = validateExpiresIn(request.getExpiresIn());
-        String scope = oauthTokenService.resolveSelfIssuedScopeWithin(
-                principal.getScope(), request.getScope());
+        String scope = oauthTokenService.resolveSelfIssuedScope(request.getScope());
         PatIssueVO vo = insertToken(principal.getUid(), principal.getClientId(),
                 name, expiresIn, scope, request.getPayload());
         LogUtil.debug(PatServiceImpl.class,
@@ -180,15 +180,26 @@ public class PatServiceImpl implements PatService {
      */
     @Override
     public List<PatVO> listByClient(Long uid, String clientId) {
-        if (uid == null || !StringUtils.hasText(clientId)) {
-            return Collections.emptyList();
-        }
-        oauthTokenService.requireDirectAuthEnabledClient(clientId);
+        requireDirectAuthUser(uid, clientId);
         return list(uid);
     }
 
+    /** 直连应用按 id 撤销当前用户的一条 PAT，复用用户侧的归属校验与幂等语义。 */
+    @Override
+    public void revokeByClientId(Long uid, String clientId, Long id) {
+        requireDirectAuthUser(uid, clientId);
+        revoke(uid, id);
+    }
+
+    /** 直连应用撤销当前用户的全部 PAT（跨应用）。 */
+    @Override
+    public void revokeAllByClient(Long uid, String clientId) {
+        requireDirectAuthUser(uid, clientId);
+        revokeAllByUid(uid);
+    }
+
     /**
-     * 应用视角按明文吊销本应用为该用户签发的一条 PAT
+     * 直连应用按明文吊销当前用户的一条 PAT（跨应用）
      *
      * <p>入参 token 由入口层（控制器 / {@code RequestUtil}）完成归一化，本方法只做
      * 精确匹配，不再自行 trim，避免同一份凭证在不同层被重复归一化。</p>
@@ -199,17 +210,13 @@ public class PatServiceImpl implements PatService {
      */
     @Override
     public void revokeByClient(Long uid, String clientId, String token) {
-        if (uid == null || !StringUtils.hasText(clientId)) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "缺少用户或客户端标识");
-        }
         if (!StringUtils.hasText(token)) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "token 不能为空");
         }
-        oauthTokenService.requireDirectAuthEnabledClient(clientId);
+        requireDirectAuthUser(uid, clientId);
         int deleted = tlcPatMapper.delete(Wrappers.<TlcPat>lambdaQuery()
                 .eq(TlcPat::getToken, token)
-                .eq(TlcPat::getUid, uid)
-                .eq(TlcPat::getClientId, clientId));
+                .eq(TlcPat::getUid, uid));
         LogUtil.debug(PatServiceImpl.class, "[PAT] 应用侧吊销: uid={}, clientId={}, deleted={}",
                 uid, clientId, deleted);
     }
@@ -407,6 +414,15 @@ public class PatServiceImpl implements PatService {
             throw new BusinessException(ResultCode.NOT_LOGIN);
         }
         return uid;
+    }
+
+    /** OAuth2 PAT 管理面统一准入：用户身份有效，调用应用已启用、已审批且开通直连认证。 */
+    private void requireDirectAuthUser(Long uid, String clientId) {
+        requireUid(uid);
+        if (!StringUtils.hasText(clientId)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "缺少客户端标识");
+        }
+        oauthTokenService.requireDirectAuthEnabledClient(clientId);
     }
 
     /**

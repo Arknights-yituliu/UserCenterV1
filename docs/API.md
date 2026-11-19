@@ -201,9 +201,10 @@
 
 | API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
 |---|---|---|---|---|
-| `/oauth2/pat` | POST | 是（refresh_token） | **无 access_token**；请求体 `refresh_token` 协议级校验 + 直连认证开关（direct_auth_enabled=1） | 凭 refresh_token 签发一枚 PAT，参数与响应和 `/user/pat` 一致（`name`、`expires_in` 必填，`scope`、`payload` 可选）。`client_id` 取凭证所属应用、不接受调用方指定，因此签出的令牌可被 `/oauth2/pat/list` 列出与 `/oauth2/pat/revoke` 吊销。`scope` 上限为「凭证范围 ∩ 可自助范围」，只减不增；refresh_token 不消费、不轮转。凭证无效 `90009`，未开通直连 `90014`，越权 scope `90003`。 |
+| `/oauth2/pat` | POST | 是（refresh_token） | **无 access_token**；请求体 `refresh_token` 协议级校验 + 直连认证开关（direct_auth_enabled=1） | 直连应用为当前用户签发 PAT，参数校验与可选权限和 `/user/pat` 一致（`name`、`expires_in` 必填，`scope`、`payload` 可选）。`client_id` 取凭证所属应用、不接受调用方指定。`scope` 可选系统全部自助范围，不受 refresh_token 自身 scope 限制；不可签发 `all`。refresh_token 不消费、不轮转。凭证无效 `90009`，未开通直连 `90014`，非法 scope `90003`。 |
 | `/oauth2/pat/list` | GET | 是 | OAuth access_token + 直连认证开关（direct_auth_enabled=1） | 查询当前用户的全部 PAT（含完整令牌明文及已过期记录），按 uid 隔离，包含用户自助及其它应用签发的令牌；clientId 仅用于准入校验，未开通直连认证返回 `90014`。 |
-| `/oauth2/pat/revoke` | POST | 是 | OAuth access_token + 直连认证开关（direct_auth_enabled=1） | 按 PAT 明文吊销本应用签发的一条令牌，归属按 uid + clientId + token 三条件精确匹配，幂等；列表跨应用可见不扩大吊销范围。 |
+| `/oauth2/pat/revoke` | POST | 是 | OAuth access_token + 直连认证开关（direct_auth_enabled=1） | 按 `id` 撤销当前用户的一条 PAT（与 user 侧一致），也支持按 `token` 明文撤销；两者必须且只能提供一个。按 uid + id/token 精确匹配，跨应用、幂等，不能撤销其它用户的令牌。 |
+| `/oauth2/pat/revoke-all` | POST | 是 | OAuth access_token + 直连认证开关（direct_auth_enabled=1） | 与 user 侧一致，撤销当前用户跨应用的全部 PAT，仅按 access_token 的 uid 删除，幂等。 |
 
 ## 五、旧系统直连登录对接端点
 

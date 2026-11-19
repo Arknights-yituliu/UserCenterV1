@@ -22,9 +22,9 @@ import java.util.List;
 /**
  * 个人访问令牌的应用视角接口（需 access_token）
  *
- * <p>{@code /list} 与 {@code /revoke} 的认证由 {@code OAuthAuthInterceptor} 完成，
+ * <p>{@code /list}、{@code /revoke} 与 {@code /revoke-all} 的认证由 {@code OAuthAuthInterceptor} 完成，
  * uid 与 client_id 均取自 access_token 记录；列表返回当前用户跨应用的全部 PAT，
- * 吊销仍限定当前用户在调用应用名下的记录。
+ * 吊销同样支持当前用户跨应用的 PAT。
  * 服务层还会校验本应用已开通直连认证能力（{@code direct_auth_enabled=1}），
  * 避免普通第三方应用凭 access_token 作废用户令牌。</p>
  *
@@ -58,7 +58,7 @@ public class OAuthPatController {
      * 凭 refresh_token 签发一枚 PAT（明文原样入库，列表可回看）
      *
      * <p>本端点不经过 access_token 拦截器；凭证由请求体携带，不消费、不轮转。
-     * 参数与响应结构与 {@code POST /user/pat} 一致，client_id 取凭证所属应用。</p>
+     * 参数校验、可选权限与响应结构与 {@code POST /user/pat} 一致，client_id 取凭证所属应用。</p>
      *
      * @param request 签发参数（含 refresh_token）
      * @return 含明文令牌的签发结果
@@ -84,17 +84,29 @@ public class OAuthPatController {
     }
 
     /**
-     * 按明文吊销本应用为该用户签发的一条 PAT
+     * 按 id 或明文吊销当前用户的一条 PAT（跨应用）
      *
-     * @param request 吊销请求（PAT 明文）
+     * @param request 吊销请求（id 或 PAT 明文，二选一）
      * @return 空结果
      */
-    @Operation(summary = "吊销本应用签发的一条个人访问令牌（仅限已开通直连认证的客户端）")
+    @Operation(summary = "吊销当前用户的一条个人访问令牌（跨应用，仅限已开通直连认证的客户端）")
     @PostMapping("/revoke")
     public Result<Void> revoke(@Valid @RequestBody PatClientRevokeRequest request) {
+        if (request.getId() != null) {
+            patService.revokeByClientId(UserContext.requireUid(), UserContext.getClientId(), request.getId());
+            return Result.success();
+        }
         // 入口统一归一化：请求体里的明文可能带粘贴残留的空白，服务层只做精确匹配
         String token = request.getToken() == null ? null : request.getToken().trim();
         patService.revokeByClient(UserContext.requireUid(), UserContext.getClientId(), token);
+        return Result.success();
+    }
+
+    /** 撤销当前用户的全部 PAT，与用户侧全撤销功能一致。 */
+    @Operation(summary = "作废当前用户的全部个人访问令牌（跨应用，仅限已开通直连认证的客户端）")
+    @PostMapping("/revoke-all")
+    public Result<Void> revokeAll() {
+        patService.revokeAllByClient(UserContext.requireUid(), UserContext.getClientId());
         return Result.success();
     }
 }
