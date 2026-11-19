@@ -230,5 +230,6 @@
 | `/pat/ak-accounts/operators` | GET | 是 | PAT + `arknights-data.read` scope（`gama-data.read` 或 `all` 可覆盖） | 读取 PAT 对应用户的游戏账号干员全量数据，**目标账号不接受请求参数**：带 `tlc_pat_` 前缀的新令牌取 `payload.game_uid` 并强制核对绑定关系；无前缀的迁移旧令牌没有 payload，按「用户默认来源 → 最近变更」取数。接口不声明任何查询参数，多传的参数由框架忽略、不参与取数。响应 `Cache-Control: private, no-cache`，结构与 `/oauth2/ak-accounts/operators` 完全一致（共用同一取数服务）。 |
 | `/pat/ak-accounts/operators/save` | POST | 是 | PAT + `arknights-data.write` scope（`gama-data.write` 或 `all` 可覆盖） | 上传角色信息与干员数据，请求及响应与 OAuth 上传接口一致。目标账号取自 `playerInfo.akUid`，不受 PAT payload 绑定账号限制，无需预先绑定；用户身份取自 PAT，首次上传自动建立绑定。复用同一保存服务，支持可选物品、皮肤与 playerData，沿用校验、事务和按账号限流。 |
 | `/pat/ef-accounts/player-data` | GET | 是 | PAT + `endfield-data.read` scope（`gama-data.read` 或 `all` 可覆盖） | 读取终末地玩家数据，新令牌按 `payload.game_uid`（roleId）+ `payload.server_id`（省略按空串）精确校验当前用户角色绑定；旧令牌读取当前用户已绑定角色中最近保存的数据。无查询参数，不能覆盖目标角色、服务器或用户。响应与 `/oauth2/ef-accounts/player-data` 一致，含 `Cache-Control: private, no-cache`。 |
+| `/pat/ef-accounts/player-data/save` | POST | 是 | PAT + `endfield-data.write` scope（`gama-data.write` 或 `all` 可覆盖） | 上传终末地玩家数据，请求及响应与 OAuth 上传接口一致。目标角色与服务器取自请求体 `roleId + serverId`，不受 PAT payload 限制，无需预先绑定；用户身份取自 PAT，首次上传自动绑定。新旧 PAT 均支持，复用同一保存服务、事务与按角色限流。 |
 
 > 已迁入 `tlc_pat` 的旧令牌继续走本组接口。一次性 PAT 迁移端点已下线，应用不再提供旧令牌搬迁入口。

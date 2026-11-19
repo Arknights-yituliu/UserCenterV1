@@ -46,7 +46,7 @@ curl https://<host>/pat/ak-accounts/operators -H 'Authorization: Bearer <PAT明�
 
 ### 2.2 两代令牌
 
-消费面同时接受两种形态，服务端按**是否有前缀**分流，两者都是明文入库、明文比对：
+消费面同时接受两种形态，两者都是明文入库、明文比对。读取接口按**是否有前缀**选择目标账号，规则如下；上传接口的新旧令牌均按请求体指定目标，不受 payload 限制（见 7.5、7.6）：
 
 | 代际 | 形态 | 来源 | 目标账号如何决定 |
 | --- | --- | --- | --- |
@@ -140,9 +140,9 @@ PAT **不做摘要**。`tlc_pat.token` 保存令牌明文本身，Redis 预留�
 | `server_id` | string / null | 终末地服务器 ID，也接受驼峰别名 `serverId`；读取时 trim，省略或空白按 `""` 精确定位，不自动选择其它服务器；明日方舟接口忽略此字段 |
 | `source` | string / null | 令牌来源标识，可空；由签发方自行填写（如 `web`、`mini_app`、`script`），服务端**不校验取值、不参与鉴权与取数**，仅随签发、列表与消费端解析透传，便于在列表中辨认令牌用途 |
 
-四个字段都**允许全空或部分为空**：不传 payload、传 `{}`、或只填其中任意几个都合法。`game_name` / `source` / `server_id` 单独存在时 `payload` 不算空，会正常落库与回显，但新令牌消费时仍会因缺 `game_uid` 返回 `10002`。后续新增字段不需要迁移存量数据，缺字段的历史行自动为 `null`。
+四个字段都**允许全空或部分为空**：不传 payload、传 `{}`、或只填其中任意几个都合法。`game_name` / `source` / `server_id` 单独存在时 `payload` 不算空，会正常落库与回显，但新令牌调用读取接口时仍会因缺 `game_uid` 返回 `10002`；上传接口不要求 payload。后续新增字段不需要迁移存量数据，缺字段的历史行自动为 `null`。
 
-`payload.game_uid` 的取值规则（消费端强制）：字段声明为 `String`，JSON 里写成整数会被 Jackson 转成十进制字符串；取值时 trim，空白、缺失一律返回 `10002`。布尔/浮点标量也会被 Jackson 强转成字符串（不再由取值层拒绝，最终由绑定校验挡下），对象/数组则在请求体绑定阶段报 `10001`。**新令牌必须提供 `game_uid`**，否则读取干员或终末地玩家数据时返回 `10002`。签发后没有修改接口，改账号或服务器只能撤销后重新签发。
+`payload.game_uid` 的取值规则（读取接口强制）：字段声明为 `String`，JSON 里写成整数会被 Jackson 转成十进制字符串；取值时 trim，空白、缺失一律返回 `10002`。布尔/浮点标量也会被 Jackson 强转成字符串（不再由取值层拒绝，最终由绑定校验挡下），对象/数组则在请求体绑定阶段报 `10001`。**新令牌读取时必须提供 `game_uid`**，否则读取干员或终末地玩家数据时返回 `10002`。签发后没有修改接口，改读取账号或服务器只能撤销后重新签发；上传目标始终由上传请求体指定。
 
 请求示例：
 
@@ -330,7 +330,7 @@ curl https://<host>/pat/ef-accounts/player-data \
   -H 'Authorization: Bearer <PAT明文>'
 ```
 
-`game_name` 与 `source` 仍为展示信息，游戏读取权限由 scope 决定。本接口仅读取已保存的玩家数据；角色列表、数据上传与寻访记录接口见 `docs/oauth/OAuth终末地数据接口文档.md`。
+`game_name` 与 `source` 仍为展示信息，游戏读取权限由 scope 决定。本接口仅读取已保存的玩家数据；PAT 数据上传见 7.6，角色列表与寻访记录接口见 `docs/oauth/OAuth终末地数据接口文档.md`。
 
 ### 7.5 `POST /pat/ak-accounts/operators/save`（上传明日方舟干员数据）
 
@@ -373,6 +373,53 @@ Authorization: Bearer <PAT明文>
 ```
 
 缺失、无效或已过期的 PAT 返回 `80001`，权限不足返回 `80008`。Bean Validation 字段校验失败返回 HTTP 400、`10002`；保存服务发现重复 ID 等参数错误返回 `10002`。同一账号 2 秒内重复上传返回 `30006`，限流服务不可用返回 `40003`，保存冲突重试耗尽返回 `40004`，与 OAuth 版共用处理逻辑。
+
+### 7.6 `POST /pat/ef-accounts/player-data/save`（上传终末地玩家数据）
+
+```http
+POST /pat/ef-accounts/player-data/save
+Content-Type: application/json
+Authorization: Bearer <PAT明文>
+```
+
+- 鉴权：PAT 明文 + `endfield-data.write`；上级 `gama-data.write` 与元范围 `all` 可覆盖。只有读取权限或 `arknights-data.write` 不可上传。
+- 请求体、响应与保存逻辑和 `POST /oauth2/ef-accounts/player-data/save` 一致，共用 `EfPlayerDataSaveRequest`、`EfPlayerDataSaveResultVO` 与 `EfPlayerDataService#savePlayerData`。完整字段见 [OAuth 终末地数据接口文档第 2.3 节](../oauth/OAuth终末地数据接口文档.md#23-保存玩家数据)。
+- **写入不限 PAT 绑定角色或服务器**：目标取自请求体 `roleId` + `serverId`，不核对 payload，新 PAT 无 payload 也可上传；已迁入 `tlc_pat` 的旧 64 位 hex 令牌同样支持，均须有效且具备写权限。
+- 用户身份始终取自 PAT，不接受请求参数或请求体覆盖。无需预先绑定目标角色，首次上传自动为当前用户建立绑定。
+- `roleId` 必填，为不超过 32 位可见 ASCII 字符；`serverId` 可选，trim 后省略或空白按 `""` 保存，最多 16 位可见 ASCII 字符。
+- `playerData` 必须是 JSON 对象，序列化后不超过 2MB；同一角色与服务器的数据整份覆盖，不做字段级合并。`serverType` / `serverName` 可选，最多 64 字符，省略或 null 沿用已有展示信息，空串表示清空。
+- 事务与限流沿用同一服务：同一 `roleId + serverId` 2 秒内最多一次上传，所有用户及上传入口共享名额。
+
+请求示例（角色和服务器可以与 PAT payload 不同）：
+
+```json
+{
+  "roleId": "123456789",
+  "serverId": "1",
+  "serverType": "official",
+  "serverName": "官服",
+  "playerData": {
+    "base": { "roleId": "123456789", "level": 60 },
+    "chars": []
+  }
+}
+```
+
+成功响应：
+
+```json
+{
+  "code": 200,
+  "msg": "操作成功",
+  "data": {
+    "roleId": "123456789",
+    "serverId": "1",
+    "updateTime": "2026-11-19T20:00:00"
+  }
+}
+```
+
+凭证缺失、无效或已过期返回 `80001`，权限不足返回 `80008`。Bean Validation 字段校验失败返回 HTTP 400、`10002`；服务层发现非法角色/服务器、非对象或过大的玩家数据返回 `10002`。上传过频返回 `30006`，限流设施不可用返回 `40003`。
 
 ## 8. 已迁移旧令牌的消费
 

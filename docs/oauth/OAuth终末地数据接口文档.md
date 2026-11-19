@@ -216,6 +216,8 @@ Authorization: Bearer <access_token>
 
 需要 `endfield-data.write`。目标角色由请求体中的 `roleId` + `serverId` 定位，**当前令牌用户首次上传某个角色时直接建立绑定关系**。
 
+也可通过 `POST /pat/ef-accounts/player-data/save` 上传，将凭证替换为有效且具备 `endfield-data.write` 的新旧 PAT。请求体、响应及保存逻辑相同，目标角色与服务器不受 PAT payload 限制，无需预先绑定。详见 [PAT 接口文档第 7.6 节](../pat/PAT接口文档.md#76-post-patef-accountsplayer-datasave上传终末地玩家数据)。
+
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `roleId` | string | 是 | 终末地游戏内角色 UID（`card/detail` 的 `roleId`），不超过 32 位可见 ASCII 字符 |
