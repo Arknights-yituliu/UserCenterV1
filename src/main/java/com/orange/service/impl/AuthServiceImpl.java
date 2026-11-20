@@ -784,7 +784,7 @@ public class AuthServiceImpl implements AuthService {
     }
 
     /**
-     * 邮箱验证码登录：校验验证码，未注册邮箱自动注册
+     * 邮箱验证码登录：校验验证码，仅允许已注册邮箱登录
      *
      * @param email 邮箱
      * @param code  验证码
@@ -798,14 +798,7 @@ public class AuthServiceImpl implements AuthService {
 
         UserInfo user = userMapper.selectOne(Wrappers.<UserInfo>lambdaQuery().eq(UserInfo::getEmail, email));
         if (user == null) {
-            // 未注册则自动注册
-            user = new UserInfo();
-            user.setUid(IdGenerator.getInstance().nextId());
-            user.setEmail(email);
-            user.setNickname(email);
-            user.setStatus(1);
-            user.setRegisterTime(LocalDateTime.now());
-            userMapper.insert(user);
+            throw new BusinessException(ResultCode.USER_NOT_FOUND);
         }
         return user;
     }

@@ -167,6 +167,26 @@ class AuthServiceImplTest {
     }
 
     @Test
+    void unregisteredEmailCodeLoginIsRejectedWithoutCreatingUserOrSession() {
+        LoginRequest request = new LoginRequest();
+        request.setAccountType("email");
+        request.setEmail(ACCOUNT);
+        request.setVerificationCode("123456");
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.login(request, IP, "test", "client-1"));
+
+        assertEquals(ResultCode.USER_NOT_FOUND.getCode(), exception.getCode());
+        org.mockito.InOrder checks = org.mockito.Mockito.inOrder(emailCodeService, userInfoMapper);
+        checks.verify(emailCodeService).verifyCode(ACCOUNT, "123456");
+        checks.verify(userInfoMapper).selectOne(any());
+        verify(userInfoMapper, never()).insert(any(UserInfo.class));
+        verify(userInfoMapper, never()).updateById(any(UserInfo.class));
+        verify(valueOperations, never()).set(anyString(), anyString(), eq(7776000L), eq(TimeUnit.SECONDS));
+        verify(valueOperations).increment(RedisKeyUtil.loginFail(ACCOUNT));
+    }
+
+    @Test
     void successfulEmailCodeLoginClearsSharedAccountFailures() {
         when(redisTemplate.opsForSet()).thenReturn(setOperations);
         UserInfo user = new UserInfo();

@@ -291,6 +291,24 @@ class OAuthLegacyLoginSecurityTest {
     }
 
     @Test
+    void unregisteredEmailCodeDirectLoginDoesNotCreateUserOrConsumeChannel() {
+        String account = "missing@example.com";
+        when(valueOperations.get(RedisKeyUtil.directChannel("channel")))
+                .thenReturn("{\"clientId\":\"client-1\"}");
+        when(oauthClientMapper.selectById("client-1")).thenReturn(encryptedClient(true));
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.directLogin("channel", "email", account, null, "123456", "127.0.0.1"));
+
+        assertEquals(ResultCode.USER_NOT_FOUND.getCode(), exception.getCode());
+        verify(emailCodeService).verifyCode(account, "123456");
+        verify(userInfoMapper, never()).insert(any(UserInfo.class));
+        verify(redisTemplate, never()).delete(RedisKeyUtil.directChannel("channel"));
+        verify(valueOperations, never()).set(anyString(), anyString(), anyLong(), any(TimeUnit.class));
+        verify(valueOperations).increment(RedisKeyUtil.loginFail(account));
+    }
+
+    @Test
     void successfulDirectLoginIssuesOneMinuteTicket() {
         String account = "user@example.com";
         when(valueOperations.increment(RedisKeyUtil.rate("direct-login-ip", "127.0.0.1"))).thenReturn(1L);
