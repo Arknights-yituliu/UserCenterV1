@@ -13,7 +13,8 @@ import java.util.List;
  * 终末地角色绑定关系 Mapper（ef_account_binding）
  *
  * <p>业务唯一性由 {@code uk_ef_owner (role_id, server_id, owner_uid)} 保证，
- * 首次上传时建立绑定，之后每次上传只刷新最近导入时间。</p>
+ * 首次上传时建立绑定，之后每次上传只刷新最近导入时间。
+ * 所有写入均要求 user_info 中仍存在绑定用户，防止延迟请求或后台任务重建已注销账户的绑定。</p>
  *
  * @author UserCenter
  */
@@ -36,10 +37,10 @@ public interface EfAccountBindingMapper extends BaseMapper<EfAccountBinding> {
      */
     @Insert("INSERT INTO ef_account_binding "
             + "(role_id, server_id, server_type, server_name, owner_uid, player_data_imported) "
-            + "VALUES (#{roleId}, #{serverId}, "
+            + "SELECT #{roleId}, #{serverId}, "
             + "COALESCE(#{serverType,jdbcType=VARCHAR}, ''), "
             + "COALESCE(#{serverName,jdbcType=VARCHAR}, ''), "
-            + "#{ownerUid}, 1) "
+            + "#{ownerUid}, 1 FROM user_info WHERE uid = #{ownerUid} "
             + "ON DUPLICATE KEY UPDATE "
             + "server_type = COALESCE(#{serverType,jdbcType=VARCHAR}, server_type), "
             + "server_name = COALESCE(#{serverName,jdbcType=VARCHAR}, server_name), "
@@ -64,7 +65,8 @@ public interface EfAccountBindingMapper extends BaseMapper<EfAccountBinding> {
      * @return 影响行数
      */
     @Insert("INSERT INTO ef_account_binding (role_id, server_id, owner_uid, hg_uid, nick_name, pool_record_imported) "
-            + "VALUES (#{roleId}, '', #{ownerUid}, #{hgUid}, #{nickName}, 1) "
+            + "SELECT #{roleId}, '', #{ownerUid}, #{hgUid}, #{nickName}, 1 "
+            + "FROM user_info WHERE uid = #{ownerUid} "
             + "ON DUPLICATE KEY UPDATE hg_uid = #{hgUid}, nick_name = #{nickName}, "
             + "pool_record_imported = 1, update_time = NOW(3)")
     int upsertPoolRecordBinding(@Param("roleId") String roleId,

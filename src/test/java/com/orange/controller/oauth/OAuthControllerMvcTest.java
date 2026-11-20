@@ -7,6 +7,7 @@ import com.orange.common.exception.GlobalExceptionHandler;
 import com.orange.entity.vo.oauth.OAuthTokenVO;
 import com.orange.service.OAuthClientOriginCache;
 import com.orange.service.OAuthTokenService;
+import com.orange.service.AccountDeletionService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -152,7 +153,7 @@ class OAuthControllerMvcTest {
 
         @Bean
         OAuthController oauthController(OAuthTokenService oauthTokenService) {
-            return new OAuthController(oauthTokenService);
+            return new OAuthController(oauthTokenService, mock(AccountDeletionService.class));
         }
 
         @Bean

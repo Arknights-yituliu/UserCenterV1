@@ -47,6 +47,8 @@ public interface AkAccountBindingMapper extends BaseMapper<AkAccountBinding> {
      * 显式传空串表示清空。这样旧客户端不上报这些字段也不会抹掉已有账号信息。
      * 它们按绑定行冗余存放，同一 ak_uid 被多个 uid 绑定时各自保留一份。</p>
      *
+     * <p>通过 user_info 存在性条件写入，账户注销后到达的延迟请求不再重建绑定。</p>
+     *
      * @param akUid           游戏账号 UID
      * @param ownerUid        用户中心 UID
      * @param channelName     渠道名称，null 表示本次未上报
@@ -56,10 +58,11 @@ public interface AkAccountBindingMapper extends BaseMapper<AkAccountBinding> {
      */
     @Insert("INSERT INTO ak_account_binding "
             + "(ak_uid, owner_uid, channel_name, channel_master_id, nick_name) "
-            + "VALUES (#{akUid}, #{ownerUid}, "
+            + "SELECT #{akUid}, #{ownerUid}, "
             + "COALESCE(#{channelName,jdbcType=VARCHAR}, ''), "
             + "COALESCE(#{channelMasterId,jdbcType=VARCHAR}, ''), "
-            + "COALESCE(#{nickName,jdbcType=VARCHAR}, '')) "
+            + "COALESCE(#{nickName,jdbcType=VARCHAR}, '') "
+            + "FROM user_info WHERE uid = #{ownerUid} "
             + "ON DUPLICATE KEY UPDATE "
             + "channel_name = COALESCE(#{channelName,jdbcType=VARCHAR}, channel_name), "
             + "channel_master_id = COALESCE(#{channelMasterId,jdbcType=VARCHAR}, channel_master_id), "

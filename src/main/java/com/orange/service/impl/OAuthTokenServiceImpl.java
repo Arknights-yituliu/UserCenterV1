@@ -650,6 +650,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         String scope = (String) record.get("scope");
         long accessTtl = resolveAccessTokenTtl(client);
         String newAccessToken = OAuthUtil.generateToken();
+        requireExistingUser(uid);
 
         // 6. 固定凭证模式：refresh_token 不删除不换发，失败说明它已被吊销或失效，返回 90009
         if (!isRefreshRotationEnabled(client)) {
@@ -788,6 +789,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         String scope = (String) record.get("scope");
         long accessTtl = resolveAccessTokenTtl(client);
         String accessToken = OAuthUtil.generateToken();
+        requireExistingUser(uid);
         writeJson(RedisKeyUtil.oauthAccess(accessToken), createAccessRecord(client, uid, scope), accessTtl);
         stringRedisTemplate.opsForSet().add(
                 RedisKeyUtil.uidOauth(uid), OAUTH_ACCESS_MEMBER_PREFIX + accessToken);
@@ -884,7 +886,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     /**
      * 解析一枚仍有效的 refresh_token（与直签 access_token 共用同一份 Redis 记录与校验口径）
      *
-     * <p>只做解析，不校验客户端启用状态与直连认证准入，也不消费/轮转凭证——这些由各调用方
+     * <p>解析后检查账户仍存在，不校验客户端启用状态与直连认证准入，也不消费/轮转凭证——这些由各调用方
      * 按自己的准入规则追加。PAT 签发链路复用本方法，避免复制一套凭证解析逻辑造成口径漂移。</p>
      *
      * @param refreshToken 刷新令牌明文
@@ -905,6 +907,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         if (uid == null || !StringUtils.hasText(clientId)) {
             throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID);
         }
+        requireExistingUser(uid);
         return new RefreshTokenPrincipal(uid, clientId,
                 stringValue(record.get("scope")), stringValue(record.get("familyId")));
     }
@@ -956,6 +959,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      */
     @Override
     public OAuthTokenVO issueDirectToken(String clientId, Long uid) {
+        requireExistingUser(uid);
         // 1. 重新加载客户端：兑换瞬间客户端可能已被停用或封禁
         OAuthClient client = requireEnabledClient(clientId);
         // 直连流程没有 scope 协商环节，传 null 即取客户端登记的全部范围，
@@ -1002,6 +1006,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      */
     @Override
     public OAuthTokenVO issueMigratedToken(String clientId, Long uid) {
+        requireExistingUser(uid);
         // 1. 重新加载客户端：兑换瞬间客户端可能已被停用或封禁
         OAuthClient client = requireEnabledClient(clientId);
         String scope = normalizeScope(client, null);
@@ -1670,6 +1675,7 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
      * @return 令牌响应
      */
     private OAuthTokenVO issueTokens(OAuthClient client, Long uid, String scope) {
+        requireExistingUser(uid);
         long accessTtl = resolveAccessTokenTtl(client);
 
         // 1. access_token：写令牌记录（uid/clientId/scope，TTL 由客户端或全局默认决定）
@@ -1925,12 +1931,14 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
         return vo;
     }
 
-    /**
-     * 加载客户端并校验启用状态
-     *
-     * @param clientId 客户端 ID
-     * @return 客户端实体
-     */
+    /** 已注销账户不能借助尚未过期的授权码、票据或并发残留凭证重新签发令牌。 */
+    private void requireExistingUser(Long uid) {
+        if (uid == null || userInfoMapper.selectById(uid) == null) {
+            throw new BusinessException(ResultCode.OAUTH_TOKEN_INVALID);
+        }
+    }
+
+    /** 加载客户端并校验启用状态。 */
     private OAuthClient requireEnabledClient(String clientId) {
         if (!StringUtils.hasText(clientId)) {
             throw new BusinessException(ResultCode.OAUTH_CLIENT_INVALID);

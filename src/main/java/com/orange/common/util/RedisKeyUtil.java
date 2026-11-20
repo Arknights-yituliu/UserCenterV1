@@ -113,6 +113,11 @@ public final class RedisKeyUtil {
         return PREFIX_CODE + email;
     }
 
+    /** 注销专用验证码，不与按邮箱保存的登录、注册等验证码共用。 */
+    public static String accountDeletionCode(Long uid) {
+        return PREFIX_CODE + "account-delete:" + uid;
+    }
+
     /**
      * 登录失败计数 key
      *

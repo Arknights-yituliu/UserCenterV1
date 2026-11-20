@@ -58,4 +58,16 @@ class RevokeServiceImplTest {
         verify(oauthGrantMapper).markRevokedByUid(UID);
         verify(redisTemplate).delete(indexKey);
     }
+
+    @Test
+    void kickAllSessionsDeletesOnlyIndexedSessionsWithoutTouchingOauth() {
+        when(redisTemplate.opsForSet()).thenReturn(setOperations);
+        when(setOperations.members(RedisKeyUtil.uidSession(UID))).thenReturn(Set.of("session-1", "session-2"));
+        service.kickAllSessions(UID);
+        verify(redisTemplate).delete(RedisKeyUtil.token("session-1"));
+        verify(redisTemplate).delete(RedisKeyUtil.token("session-2"));
+        verify(redisTemplate).delete(RedisKeyUtil.uidSession(UID));
+        org.mockito.Mockito.verifyNoInteractions(oauthGrantMapper);
+        org.mockito.Mockito.verifyNoMoreInteractions(redisTemplate);
+    }
 }

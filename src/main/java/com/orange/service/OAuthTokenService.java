@@ -140,7 +140,7 @@ public interface OAuthTokenService {
     /**
      * 解析一枚仍有效的 OAuth refresh_token，返回其主体（uid / clientId / scope / familyId）。
      *
-     * <p>refresh_token 本身仍是 Redis 中的热数据，本方法只负责按明文读取并解析：
+     * <p>refresh_token 本身仍是 Redis 中的热数据，本方法按明文读取并解析，并检查账户仍存在：
      * 不消费、不轮转凭证，也不检查轮转墓碑（沿用现有直签行为，凭证删 key 即失效）。
      * 本方法只负责解析，客户端启用状态与直连认证准入由调用方按需追加校验。</p>
      *

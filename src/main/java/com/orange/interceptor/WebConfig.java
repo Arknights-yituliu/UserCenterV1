@@ -18,7 +18,9 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  * OAuth 资源接口只认 access_token，
  * client_id 均由各自登录上下文提供。
  * /oauth2 下其余端点为 OAuth 协议端点（authorize/consent/token/ticket/revoke），
- * 自带协议级认证，不在此注册；POST /oauth2/pat 同理凭请求体 refresh_token 认证，
+ * 自带协议级认证，不在此注册；/oauth2/account/send-delete-code、/oauth2/account/delete
+ * 凭请求体 refresh_token 发码及配合邮箱验证码注销账户，
+ * POST /oauth2/pat 同理凭请求体 refresh_token 认证，
  * 因此单用 excludePathPatterns 排除根路径，子路径 /list、/revoke、/revoke-all 仍走 access_token。</p>
  *
  * @author UserCenter

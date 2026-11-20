@@ -11,7 +11,7 @@
 > - **签名认证**：Ed25519 验签 + 时间窗 + nonce 防重放（仅 `/oauth2/internal/migrate-token`；PAT 迁移端点无鉴权，靠内网隔离）。
 > - **访问密钥**：请求参数 `key` 携带明文密钥，服务端只保存其 SHA-256 摘要并做常量时间比对，与后台控制台的校验方式一致；缺失或不匹配返回 `80008 无权限操作`。
 >
-> **URL 一级前缀即认证域**：`/user/**` 会话、`/oauth2/**` access_token、`/pat/**` PAT、`/open/**` 完全公开、`/internal/**` 不对外。PAT 的管理面（签发/列表/撤销）在 `/user/pat/**` 与 `/oauth2/pat/**`，用的是会话或 access_token；**唯一例外**是 `POST /oauth2/pat`，它凭请求体的 refresh_token 做协议级认证，已从 access_token 拦截器排除。只有消费面 `/pat/**` 才把 PAT 当请求凭证。详见 `docs/pat/PAT接口文档.md`。
+> **URL 一级前缀即认证域**：`/user/**` 会话、`/oauth2/**` 资源接口使用 access_token、`/pat/**` PAT、`/open/**` 完全公开、`/internal/**` 不对外。PAT 的管理面（签发/列表/撤销）在 `/user/pat/**` 与 `/oauth2/pat/**`，用的是会话或 access_token；`POST /oauth2/pat`、`POST /oauth2/account/send-delete-code` 和 `POST /oauth2/account/delete` 使用请求体的 refresh_token 做协议级认证，不要求 access_token，注销提交额外要求邮箱验证码。只有消费面 `/pat/**` 才把 PAT 当请求凭证。详见 `docs/pat/PAT接口文档.md` 与 [账户注销接口文档](user/账户注销接口文档.md)。
 
 ## 一、公开接口（无需鉴权）
 
@@ -42,6 +42,8 @@
 | API 路径 | 方法 | 是否鉴权 | 鉴权方式 | 描述 |
 |---|---|---|---|---|
 | `/user/profile` | GET | 是 | 用户会话 | 获取当前登录用户的资料（uid、用户名、昵称、头像、邮箱等）。 |
+| `/user/account/send-delete-code` | POST | 是 | 用户会话 | 给当前绑定邮箱发送注销专用验证码，不接受指定收件地址。 |
+| `/user/account/delete` | POST | 是 | 用户会话 + 邮箱验证码 | 请求体 code 为 6 位数字；校验后保存注销审计，删除用户主记录、游戏绑定并清理登录会话；其他业务记录和游戏数据保留。详见 [账户注销接口文档](user/账户注销接口文档.md)。 |
 | `/user/profile/update` | POST | 是 | 用户会话 | 修改个人资料（昵称/头像）。 |
 | `/user/password` | POST | 是 | 用户会话 | 修改密码，需验证旧密码，成功后按策略处理会话。 |
 | `/user/email/bind` | POST | 是 | 用户会话 | 为无邮箱账号绑定新邮箱，需验证新邮箱所有权（验证码）。 |
@@ -144,6 +146,8 @@
 | `/oauth2/consent` | POST | 是 | 用户会话 | 授权确认/拒绝：同意则签发授权码并返回回跳地址，拒绝则回跳 error=access_denied，确认单一次性消费。 |
 | `/oauth2/token` | POST | 是 | client_id+client_secret / 授权码 / refresh_token / PKCE | OAuth 令牌交换与刷新：支持 authorization_code 和 refresh_token 两种 grant_type，机密客户端需校验 secret。 |
 | `/oauth2/revoke` | POST | 是 | client_id+client_secret | 吊销令牌（RFC 7009）：自动识别 access_token/refresh_token 并立即失效，幂等，不泄露令牌是否有效。 |
+| `/oauth2/account/send-delete-code` | POST | 是 | 请求体 refresh_token | 给凭证所属用户的绑定邮箱发送注销专用验证码，不需要 access_token。 |
+| `/oauth2/account/delete` | POST | 是 | 请求体 refresh_token + 邮箱验证码 | code 为 6 位数字；校验后保存注销审计，删除用户主记录、游戏绑定并清理登录会话，其余业务数据保留。详见 [账户注销接口文档](user/账户注销接口文档.md)。 |
 
 ## 四、OAuth access_token 鉴权接口（`Authorization: Bearer {access_token}`）
 

@@ -26,4 +26,10 @@ public interface EmailCodeService {
      * @param code  验证码
      */
     void verifyCode(String email, String code);
+
+    /** 发送注销专用验证码，绑定用户、当前邮箱和来源客户端，与普通验证码隔离。 */
+    void sendAccountDeletionCode(Long uid, String email, String clientId, String ip);
+
+    /** 原子校验并消费注销验证码，错误次数达到上限后作废。 */
+    void verifyAccountDeletionCode(Long uid, String email, String clientId, String code);
 }

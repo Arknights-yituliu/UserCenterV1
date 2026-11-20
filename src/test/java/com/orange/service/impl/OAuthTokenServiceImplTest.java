@@ -10,6 +10,7 @@ import com.orange.common.util.OAuthUtil;
 import com.orange.common.util.RedisKeyUtil;
 import com.orange.entity.po.OAuthClient;
 import com.orange.entity.po.OAuthGrant;
+import com.orange.entity.po.UserInfo;
 import com.orange.entity.vo.oauth.OAuthClientGrantGroupVO;
 import com.orange.entity.vo.oauth.OAuthGrantItemVO;
 import com.orange.entity.vo.oauth.LoginTicketVO;
@@ -98,6 +99,7 @@ class OAuthTokenServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        lenient().when(userInfoMapper.selectById(anyLong())).thenReturn(new UserInfo());
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         lenient().when(redisTemplate.opsForSet()).thenReturn(setOperations);
         service = new OAuthTokenServiceImpl(
@@ -611,6 +613,30 @@ class OAuthTokenServiceImplTest {
         verify(setOperations).remove(indexKey, "refresh:refresh-a");
         verify(setOperations).remove(indexKey, "refresh:dead");
         verify(setOperations, never()).remove(indexKey, "access:access-b");
+    }
+
+    @Test
+    void deletedUserCannotRefreshRemainingToken() throws Exception {
+        when(userInfoMapper.selectById(9L)).thenReturn(null);
+        when(oauthClientMapper.selectById("client-1"))
+                .thenReturn(client("none", "refresh_token", null, 0));
+        when(oauthTokenStore.readRefreshToken("stale")).thenReturn(refreshTokenJson("client-1"));
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> service.refreshToken("client-1", null, "stale"));
+        assertEquals(ResultCode.OAUTH_TOKEN_INVALID.getCode(), error.getCode());
+        verify(oauthTokenStore, never()).issueAccessFromRefresh(any());
+        verify(oauthTokenStore, never()).rotateRefresh(any());
+    }
+
+    @Test
+    void deletedUserCannotResolveRefreshOrExchangeOldAuthorizationCode() throws Exception {
+        when(userInfoMapper.selectById(9L)).thenReturn(null);
+        when(oauthTokenStore.readRefreshToken("stale")).thenReturn(refreshTokenJson("client-1"));
+        assertThrows(BusinessException.class, () -> service.resolveRefreshToken("stale"));
+        prepareAuthorizationCode(client("none", "authorization_code", null, 1), "old-code", VERIFIER);
+        assertThrows(BusinessException.class,
+                () -> service.exchangeToken("client-1", null, "old-code", REDIRECT_URI, VERIFIER));
+        verify(valueOperations, never()).set(anyString(), anyString(), anyLong(), any());
     }
 
     private void prepareAuthorizationCode(OAuthClient client, String code, String verifier) throws Exception {

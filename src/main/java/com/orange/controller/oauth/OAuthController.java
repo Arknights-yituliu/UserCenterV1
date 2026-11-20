@@ -7,12 +7,15 @@ import com.orange.common.exception.BusinessException;
 import com.orange.common.util.LogUtil;
 import com.orange.common.util.RequestUtil;
 import com.orange.common.util.Result;
+import com.orange.entity.dto.oauth.DeleteAccountRequest;
+import com.orange.entity.dto.oauth.SendAccountDeletionCodeRequest;
 import com.orange.entity.vo.oauth.ConsentInfoVO;
 import com.orange.entity.vo.oauth.LoginTicketVO;
 import com.orange.entity.vo.oauth.OAuthConsentRequest;
 import com.orange.entity.vo.oauth.OAuthTokenVO;
 import com.orange.entity.vo.oauth.UserInfoVO;
 import com.orange.service.OAuthTokenService;
+import com.orange.service.AccountDeletionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
@@ -49,13 +52,33 @@ public class OAuthController {
 
     private final OAuthTokenService oauthTokenService;
 
+    private final AccountDeletionService accountDeletionService;
+
     /**
      * 构造器注入依赖
      *
      * @param oauthTokenService OAuth 令牌服务
+     * @param accountDeletionService 账户注销服务
      */
-    public OAuthController(OAuthTokenService oauthTokenService) {
+    public OAuthController(OAuthTokenService oauthTokenService, AccountDeletionService accountDeletionService) {
         this.oauthTokenService = oauthTokenService;
+        this.accountDeletionService = accountDeletionService;
+    }
+
+    @Operation(summary = "发送账户注销验证码（refresh_token 认证，发往当前绑定邮箱）")
+    @PostMapping("/account/send-delete-code")
+    public Result<Void> sendAccountDeletionCode(@Valid @RequestBody SendAccountDeletionCodeRequest request,
+                                               HttpServletRequest httpRequest) {
+        accountDeletionService.sendDeletionCodeByRefreshToken(request.getRefreshToken(), RequestUtil.getIp(httpRequest));
+        return Result.success();
+    }
+
+    /** 凭 refresh_token 及绑定邮箱验证码注销所属账户，不使用 access_token 认证。 */
+    @Operation(summary = "永久注销当前账户（refresh_token 及邮箱验证码认证，保留游戏数据）")
+    @PostMapping("/account/delete")
+    public Result<Void> deleteAccount(@Valid @RequestBody DeleteAccountRequest request) {
+        accountDeletionService.deleteByRefreshToken(request.getRefreshToken(), request.getCode());
+        return Result.success();
     }
 
     /**

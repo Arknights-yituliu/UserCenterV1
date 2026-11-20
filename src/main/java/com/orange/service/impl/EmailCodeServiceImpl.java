@@ -12,9 +12,14 @@ import com.orange.service.EmailCodeService;
 import com.orange.service.MailService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
+import org.springframework.core.io.ClassPathResource;
 
 import java.security.SecureRandom;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -33,6 +38,16 @@ public class EmailCodeServiceImpl implements EmailCodeService {
 
     /** 注册用途标识：仅此用途需要在发信前校验邮箱未被占用 */
     private static final String USAGE_REGISTER = "register";
+
+    private static final long DELETION_CODE_FAIL_LIMIT = 5;
+
+    /** 单 key 同时保存错误次数和验证码绑定值，校验、计数、消费都在 Redis 内原子完成。 */
+    private static final DefaultRedisScript<Long> VERIFY_DELETION_CODE = new DefaultRedisScript<>();
+
+    static {
+        VERIFY_DELETION_CODE.setLocation(new ClassPathResource("scripts/account-deletion-code-verify.lua"));
+        VERIFY_DELETION_CODE.setResultType(Long.class);
+    }
 
     private final StringRedisTemplate stringRedisTemplate;
     private final MailService mailService;
@@ -81,8 +96,28 @@ public class EmailCodeServiceImpl implements EmailCodeService {
      */
     @Override
     public void sendCode(String email, String usage, String ip) {
-        long emailIntervalSeconds = userAccentProperties.getEmailSendIntervalSeconds();
         long codeTtlSeconds = userAccentProperties.getCodeTtlSeconds();
+        enforceIpSendLimits(ip);
+        // 注册用途前置查重：邮箱已注册则快速失败，无需等到提交注册才报错
+        if (USAGE_REGISTER.equals(usage) && isEmailRegistered(email)) {
+            throw new BusinessException(ResultCode.EMAIL_ALREADY_EXISTS);
+        }
+        enforceEmailSendInterval(email);
+
+        String code = generateCode();
+        stringRedisTemplate.opsForValue().set(RedisKeyUtil.code(email), code, codeTtlSeconds, TimeUnit.SECONDS);
+        Long templateId = switch (usage) {
+            case USAGE_REGISTER -> registerTemplateId;
+            case "login" -> loginTemplateId;
+            default -> defaultTemplateId;
+        };
+        String subject = "【User Center】邮箱验证码";
+        String content = "您的验证码为 " + code + "，"
+                + (codeTtlSeconds / 60) + " 分钟内有效，请勿泄露给他人。";
+        mailService.sendText(email, subject, content, templateId);
+    }
+
+    private void enforceIpSendLimits(String ip) {
         // IP 采用分钟与小时两个窗口，兼顾共享出口用户和发送总量。
         if (!RedisRateLimiter.tryAcquire(stringRedisTemplate,
                 RedisKeyUtil.rate("send-code", ip), userAccentProperties.getCodeSendIpLimit(),
@@ -96,10 +131,10 @@ public class EmailCodeServiceImpl implements EmailCodeService {
             throw new BusinessException(ResultCode.CODE_SEND_TOO_FREQUENT,
                     "同 IP 验证码请求已达到小时上限，请稍后再试");
         }
-        // 注册用途前置查重：邮箱已注册则快速失败，无需等到提交注册才报错
-        if (USAGE_REGISTER.equals(usage) && isEmailRegistered(email)) {
-            throw new BusinessException(ResultCode.EMAIL_ALREADY_EXISTS);
-        }
+    }
+
+    private void enforceEmailSendInterval(String email) {
+        long emailIntervalSeconds = userAccentProperties.getEmailSendIntervalSeconds();
         // 同邮箱限流：间隔内只能发送一次
         if (!RedisRateLimiter.tryAcquire(stringRedisTemplate,
                 RedisKeyUtil.rate("send-code-email", email), 1, emailIntervalSeconds)) {
@@ -107,21 +142,48 @@ public class EmailCodeServiceImpl implements EmailCodeService {
                     "发送过于频繁，请 " + (emailIntervalSeconds / 60) + " 分钟后再试");
         }
 
+    }
+
+    @Override
+    public void sendAccountDeletionCode(Long uid, String email, String clientId, String ip) {
+        enforceIpSendLimits(ip);
+        enforceEmailSendInterval(email);
         String code = generateCode();
-        // 验证码存 Redis，5 分钟过期
-        stringRedisTemplate.opsForValue().set(RedisKeyUtil.code(email), code, codeTtlSeconds, TimeUnit.SECONDS);
+        long ttl = userAccentProperties.getCodeTtlSeconds();
+        stringRedisTemplate.opsForValue().set(RedisKeyUtil.accountDeletionCode(uid),
+                "0:" + deletionCodeValue(email, clientId, code), ttl, TimeUnit.SECONDS);
+        String content = "您正在注销一图流账户，注销验证码为 " + code + "，"
+                + (ttl / 60) + " 分钟内有效。使用后将删除账户及游戏绑定。若非本人操作，请勿提供此验证码。";
+        mailService.sendText(email, "【TCL】账户注销验证码", content, defaultTemplateId);
+    }
 
-        // 按业务场景选择邮件模板：注册 57132、登录 57133、重置/换绑等其他沿用默认
-        Long templateId = switch (usage) {
-            case USAGE_REGISTER -> registerTemplateId;
-            case "login" -> loginTemplateId;
-            default -> defaultTemplateId;
-        };
+    @Override
+    public void verifyAccountDeletionCode(Long uid, String email, String clientId, String code) {
+        if (code == null || !code.matches("[0-9]{6}")) {
+            throw new BusinessException(ResultCode.CODE_ERROR);
+        }
+        Long result = stringRedisTemplate.execute(VERIFY_DELETION_CODE,
+                List.of(RedisKeyUtil.accountDeletionCode(uid)),
+                deletionCodeValue(email, clientId, code), String.valueOf(DELETION_CODE_FAIL_LIMIT));
+        if (result == null) {
+            throw new BusinessException(ResultCode.RATE_LIMITER_UNAVAILABLE);
+        }
+        if (result == 0) {
+            throw new BusinessException(ResultCode.CODE_EXPIRED);
+        }
+        if (result == -2) {
+            throw new BusinessException(ResultCode.CODE_ERROR, "验证码错误次数已达上限，请重新发送");
+        }
+        if (result != 1) {
+            throw new BusinessException(ResultCode.CODE_ERROR);
+        }
+    }
 
-        String subject = "【User Center】邮箱验证码";
-        String content = "您的验证码为 " + code + "，"
-                + (codeTtlSeconds / 60) + " 分钟内有效，请勿泄露给他人。";
-        mailService.sendText(email, subject, content, templateId);
+    private String deletionCodeValue(String email, String clientId, String code) {
+        Base64.Encoder encoder = Base64.getUrlEncoder().withoutPadding();
+        return encoder.encodeToString(email.getBytes(StandardCharsets.UTF_8)) + ":"
+                + encoder.encodeToString((clientId == null ? "" : clientId).getBytes(StandardCharsets.UTF_8))
+                + ":" + code;
     }
 
     /**

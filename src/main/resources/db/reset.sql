@@ -63,4 +63,5 @@ DROP TABLE IF EXISTS `user_config`;
 DROP TABLE IF EXISTS `smtp_config`;
 DROP TABLE IF EXISTS `audit_log`;
 DROP TABLE IF EXISTS `login_log`;
+DROP TABLE IF EXISTS `user_deletion_audit`;
 DROP TABLE IF EXISTS `user_info`;

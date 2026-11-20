@@ -33,6 +33,29 @@ CREATE TABLE IF NOT EXISTS `user_info` (
   DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '全局用户主表';
 
 -- -------------------------------------------------------------
+-- 1.1 账户注销审计
+-- -------------------------------------------------------------
+-- 注销审计独立保存用户资料快照，不复制密码哈希和任何令牌。
+-- email/user_name 不设唯一约束，允许注销后重新注册相同账号。
+CREATE TABLE IF NOT EXISTS `user_deletion_audit` (
+    `uid`             BIGINT       NOT NULL COMMENT '被注销用户的原UID，一名用户只注销一次',
+    `email`           VARCHAR(128) DEFAULT NULL COMMENT '注销前邮箱快照',
+    `user_name`       VARCHAR(64)  DEFAULT NULL COMMENT '注销前用户名快照',
+    `avatar`          VARCHAR(512) DEFAULT NULL COMMENT '注销前头像快照',
+    `nickname`        VARCHAR(64)  DEFAULT NULL COMMENT '注销前昵称快照',
+    `status`          INT          NOT NULL COMMENT '注销前账户状态',
+    `ip`              VARCHAR(64)  DEFAULT NULL COMMENT '原账户注册IP，不是注销请求IP',
+    `register_time`   DATETIME     NOT NULL COMMENT '原账户注册时间',
+    `last_login_time` DATETIME     DEFAULT NULL COMMENT '原账户最后登录时间',
+    `deleted_at`      DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '注销时间',
+    `auth_type`       VARCHAR(32)  NOT NULL COMMENT '注销认证方式：session/oauth_refresh',
+    `client_id`       VARCHAR(64)  DEFAULT NULL COMMENT '注销凭证所属客户端ID，旧会话可能为空',
+    PRIMARY KEY (`uid`),
+    KEY `idx_deletion_audit_time_uid` (`deleted_at`, `uid`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '账户注销审计，保留用户资料快照';
+
+-- -------------------------------------------------------------
 -- 2. 登录日志表
 -- -------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `login_log` (

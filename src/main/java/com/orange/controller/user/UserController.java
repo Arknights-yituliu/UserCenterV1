@@ -7,6 +7,7 @@ import com.orange.common.util.Result;
 import com.orange.entity.dto.user.BindEmailRequest;
 import com.orange.entity.dto.user.ChangeEmailRequest;
 import com.orange.entity.dto.user.ClientAuthorizationRevokeRequest;
+import com.orange.entity.dto.user.DeleteAccountRequest;
 import com.orange.entity.dto.user.UpdatePasswordRequest;
 import com.orange.entity.dto.user.UpdateProfileRequest;
 import com.orange.entity.dto.user.UserScopeRequest;
@@ -14,6 +15,7 @@ import com.orange.entity.vo.SessionVO;
 import com.orange.entity.vo.UserInfoVO;
 import com.orange.entity.vo.oauth.OAuthClientGrantGroupVO;
 import com.orange.entity.vo.oauth.OAuthUserScopeVO;
+import com.orange.service.AccountDeletionService;
 import com.orange.service.OAuthTokenService;
 import com.orange.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -44,15 +46,35 @@ public class UserController {
 
     private final OAuthTokenService oauthTokenService;
 
+    private final AccountDeletionService accountDeletionService;
+
     /**
      * 构造器注入服务
      *
      * @param userService       用户服务
      * @param oauthTokenService OAuth 令牌服务（查询我的第三方应用授权）
+     * @param accountDeletionService 账户注销服务
      */
-    public UserController(UserService userService, OAuthTokenService oauthTokenService) {
+    public UserController(UserService userService, OAuthTokenService oauthTokenService,
+                          AccountDeletionService accountDeletionService) {
         this.userService = userService;
         this.oauthTokenService = oauthTokenService;
+        this.accountDeletionService = accountDeletionService;
+    }
+
+    @Operation(summary = "发送账户注销验证码（发往当前绑定邮箱）")
+    @PostMapping("/account/send-delete-code")
+    public Result<Void> sendAccountDeletionCode(HttpServletRequest httpRequest) {
+        accountDeletionService.sendDeletionCode(UserContext.requireUid(), RequestUtil.getIp(httpRequest));
+        return Result.success();
+    }
+
+    /** 注销当前会话所属账户，先校验绑定邮箱验证码，保存审计并保留游戏数据。 */
+    @Operation(summary = "永久注销当前账户（会话及邮箱验证码认证，保留游戏数据）")
+    @PostMapping("/account/delete")
+    public Result<Void> deleteAccount(@Valid @RequestBody DeleteAccountRequest request) {
+        accountDeletionService.deleteAccount(UserContext.requireUid(), request.getCode());
+        return Result.success();
     }
 
     /**
